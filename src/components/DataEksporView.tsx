@@ -147,7 +147,7 @@ export function DataEksporView({
             onClick={() => {
               downloadTextFile(
                 `update-${config.roleId}-${selectedDay}.csv`,
-                generateDailyFleetCsv(store, days, config, selectedDay, today),
+                generateDailyFleetCsv(store, days, config, selectedDay, today, isAdmin),
                 'text/csv;charset=utf-8'
               );
               setFeedback({

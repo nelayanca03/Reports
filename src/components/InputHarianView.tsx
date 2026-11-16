@@ -7,13 +7,16 @@ import {
   RotateCcw,
   SlidersHorizontal,
 } from 'lucide-react';
-import { OutletStoreState, RoleConfig, VisitItem } from '../types/outlet';
+import { OutletStoreState, RoleConfig } from '../types/outlet';
 import {
   calcTask,
   fmtDate,
   fmtDateFull,
+  fmtDateTimeWithSeconds,
+  fmtMonth,
   getPeopleMap,
   getPersonList,
+  getTaskInputType,
   isSunday,
   nearestWorkingDay,
   todayIso,
@@ -32,7 +35,6 @@ interface InputHarianViewProps {
   onChangeDay: (day: string) => void;
   onUpdateEntry: (outlet: string, day: string, taskKey: string, field: 'd' | 'n', value: string) => void;
   onClearEntry: (outlet: string, day: string, taskKey: string) => void;
-  onUpdateVisit: (person: string, day: string, patch: Partial<VisitItem>) => void;
   onOpenAdminConfig: () => void;
 }
 
@@ -49,7 +51,6 @@ export function InputHarianView({
   onChangeDay,
   onUpdateEntry,
   onClearEntry,
-  onUpdateVisit,
   onOpenAdminConfig,
 }: InputHarianViewProps) {
   const today = todayIso();
@@ -101,52 +102,35 @@ export function InputHarianView({
   const pendingCount = calculatedTasks.filter((item) => item.calc.pend).length;
   const updateCount = calculatedTasks.length - pendingCount;
 
-  const visitKey = `${activePerson}|${selectedDay}`;
-  const visit: VisitItem = store.visit[visitKey] || { ok: false, f: '', t: '', n: '' };
-
   const todayIsSunday = isSunday(today);
   const isTodayWorkingDay = days.includes(today) && !todayIsSunday;
   const isHariH = selectedDay === today && isTodayWorkingDay;
-  const canEditDay = (isAdmin || isHariH) && !isSunday(selectedDay);
+  const canEditDay = isHariH && !isSunday(selectedDay);
 
   return (
     <div className="space-y-5">
-      {todayIsSunday && isAdmin && (
-        <div
-          role="status"
-          className="flex flex-wrap items-center gap-2.5 rounded-xl border border-slate-200 bg-slate-100/80 px-4 py-3 text-sm text-slate-700 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300"
-        >
-          <AlertCircle className="h-4 w-4 shrink-0 text-slate-500 dark:text-slate-400" />
-          <span className="text-xs sm:text-sm">
-            <strong className="font-semibold text-slate-900 dark:text-slate-100">
-              Hari Minggu ({fmtDateFull(today)})
-            </strong>{' '}
-            · Tidak ada input harian pada hari Minggu dan hari Minggu tidak masuk ke kalkulasi keterlambatan, rata-rata, maupun dashboard.
-          </span>
-        </div>
-      )}
       {!canEditDay && (
         <div
           role="status"
-          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/40 dark:text-amber-200"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-300 bg-slate-100 px-4 py-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300"
         >
           <div className="flex items-start gap-2.5">
-            <Lock className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-400" />
+            <Lock className="mt-0.5 h-4 w-4 shrink-0 text-slate-500 dark:text-slate-400" />
             <div>
-              <span className="font-semibold">
+              <span className="font-semibold text-slate-900 dark:text-slate-100">
                 {todayIsSunday
                   ? `Hari Minggu — Libur Input (${fmtDate(today)})`
-                  : `Mode Hanya Baca (${fmtDate(selectedDay)})`}
+                  : `Input Ditutup (${fmtDate(selectedDay)})`}
               </span>
-              <span className="mx-1.5 text-amber-400 dark:text-amber-700" aria-hidden="true">
+              <span className="mx-1.5 text-slate-400 dark:text-slate-600" aria-hidden="true">
                 ·
               </span>
               <span className="text-xs sm:text-sm">
                 {todayIsSunday
                   ? 'Tidak ada input harian pada hari Minggu dan hari Minggu tidak masuk ke kalkulasi keterlambatan, rata-rata, maupun dashboard.'
                   : isTodayWorkingDay
-                    ? `Pengguna hanya dapat mengisi input pada Hari H (${fmtDateFull(today)}). Tanggal H-1 atau tanggal lainnya tidak dapat diubah.`
-                    : `Hari ini (${fmtDateFull(today)}) bukan hari kerja dalam periode aktif. Input harian hanya dibuka pada hari kerja Hari H.`}
+                    ? `Hanya Hari H (${fmtDateFull(today)}) yang dapat diinput. Tanggal H-1 maupun H+1 bersifat hanya baca.`
+                    : `Hari ini (${fmtDateFull(today)}) bukan hari kerja dalam periode aktif. Input harian hanya dibuka pada Hari H.`}
               </span>
             </div>
           </div>
@@ -154,7 +138,7 @@ export function InputHarianView({
             <button
               type="button"
               onClick={() => onChangeDay(today)}
-              className="min-h-[36px] shrink-0 whitespace-nowrap rounded-lg border border-amber-300 bg-white px-3 py-1.5 text-xs font-semibold text-amber-900 transition-colors hover:bg-amber-100 dark:border-amber-800 dark:bg-slate-900 dark:text-amber-200 dark:hover:bg-slate-800"
+              className="min-h-[36px] shrink-0 whitespace-nowrap rounded-lg border border-blue-700 bg-blue-700 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-blue-800 dark:border-blue-600 dark:bg-blue-600 dark:hover:bg-blue-500"
             >
               Buka Hari H ({fmtDate(today)})
             </button>
@@ -227,13 +211,28 @@ export function InputHarianView({
                 id="select-day"
                 value={selectedDay}
                 onChange={(e) => onChangeDay(e.target.value)}
-                className="min-h-[42px] min-w-0 flex-1 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-sm text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                className={`min-h-[42px] min-w-0 flex-1 rounded-lg border px-3 py-2 font-mono text-sm tabular-nums focus:border-blue-600 focus:outline-none ${
+                  canEditDay
+                    ? 'border-slate-200 bg-slate-50 text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100'
+                    : 'border-slate-200 bg-slate-100 text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-400'
+                }`}
               >
-                {days.map((d) => (
-                  <option key={d} value={d}>
-                    {fmtDate(d)} ({d}){d === today ? ' — Hari H' : ''}
-                  </option>
-                ))}
+                {days.map((d) => {
+                  const isToday = d === today;
+                  return (
+                    <option
+                      key={d}
+                      value={d}
+                      className={
+                        isToday
+                          ? 'bg-white font-semibold text-blue-700 dark:bg-slate-800 dark:text-blue-400'
+                          : 'bg-slate-100 text-slate-400 dark:bg-slate-900 dark:text-slate-500'
+                      }
+                    >
+                      {fmtDate(d)} ({d}){isToday ? ' — Hari H' : ' (Terkunci)'}
+                    </option>
+                  );
+                })}
               </select>
               <button
                 type="button"
@@ -298,7 +297,11 @@ export function InputHarianView({
       </section>
 
       {/* Main Dynamic Tasks Table */}
-      <section className="rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+      <section
+        className={`rounded-xl border border-slate-200 dark:border-slate-800 ${
+          canEditDay ? 'bg-white dark:bg-slate-900' : 'bg-slate-50/90 dark:bg-slate-900/70'
+        }`}
+      >
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-4 dark:border-slate-800">
           <div>
             <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
@@ -334,42 +337,81 @@ export function InputHarianView({
                 <th className="px-5 py-3">Item</th>
                 <th className="px-4 py-3">Tgl Update</th>
                 <th className="px-4 py-3">Sumber</th>
-                <th className="px-4 py-3">Rumus</th>
-                <th className="px-4 py-3 text-right">+/-</th>
+                {isAdmin && <th className="px-4 py-3">Rumus</th>}
+                {isAdmin && <th className="px-4 py-3 text-right">+/-</th>}
                 <th className="px-4 py-3">Status</th>
                 <th className="px-5 py-3">Keterangan</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
               {calculatedTasks.map(({ def, calc }) => {
-                const quickTargetDate = def.formulaType === 'memo_month' ? today : selectedDay;
+                const inputType = getTaskInputType(def);
+                const isMonthly = inputType === 'month';
+                const quickTargetDate = isMonthly
+                  ? `${today.slice(0, 7)}-01`
+                  : def.formulaType === 'memo_month'
+                    ? today
+                    : selectedDay;
+                const currentComparable = isMonthly ? (calc.d ? `${calc.d.slice(0, 7)}-01` : '') : calc.d;
+                const formattedTs = fmtDateTimeWithSeconds(calc.ts);
                 return (
                   <tr
                     key={def.key}
-                    className="transition-colors hover:bg-slate-50/70 dark:hover:bg-slate-800/30"
+                    className={
+                      canEditDay
+                        ? 'transition-colors hover:bg-slate-50/70 dark:hover:bg-slate-800/30'
+                        : 'bg-slate-100/70 text-slate-500 dark:bg-slate-800/35 dark:text-slate-400'
+                    }
                   >
                     <td className="px-5 py-3.5 align-middle">
-                      <div className="font-medium text-slate-900 dark:text-slate-100">
+                      <div
+                        className={`font-medium ${
+                          canEditDay
+                            ? 'text-slate-900 dark:text-slate-100'
+                            : 'text-slate-500 dark:text-slate-400'
+                        }`}
+                      >
                         {def.label}
                       </div>
-                      <div className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-                        {def.formulaNote}
-                      </div>
+                      {isAdmin && (
+                        <div className="mt-0.5 text-xs text-slate-400 dark:text-slate-500">
+                          {isMonthly ? 'Input per bulan' : 'Input per tanggal'} · {def.formulaNote}
+                        </div>
+                      )}
                     </td>
 
                     <td className="px-4 py-3.5 align-middle">
                       <div className="flex items-center gap-1.5">
-                        <input
-                          type="date"
-                          disabled={!canEditDay}
-                          aria-label={`Tanggal update ${def.label}`}
-                          value={calc.d}
-                          onChange={(e) =>
-                            onUpdateEntry(activeOutlet, selectedDay, def.key, 'd', e.target.value)
-                          }
-                          className="min-h-[38px] rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 font-mono text-xs text-slate-900 tabular-nums disabled:cursor-not-allowed disabled:opacity-60 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-                        />
-                        {canEditDay && calc.d !== quickTargetDate && (
+                        {isMonthly ? (
+                          <input
+                            type="month"
+                            disabled={!canEditDay}
+                            aria-label={`Bulan update ${def.label}`}
+                            value={calc.d ? calc.d.slice(0, 7) : ''}
+                            onChange={(e) =>
+                              onUpdateEntry(
+                                activeOutlet,
+                                selectedDay,
+                                def.key,
+                                'd',
+                                e.target.value ? `${e.target.value}-01` : ''
+                              )
+                            }
+                            className="min-h-[38px] rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 font-mono text-xs text-slate-900 tabular-nums disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-200/80 disabled:text-slate-400 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:disabled:border-slate-700/70 dark:disabled:bg-slate-800/50 dark:disabled:text-slate-500"
+                          />
+                        ) : (
+                          <input
+                            type="date"
+                            disabled={!canEditDay}
+                            aria-label={`Tanggal update ${def.label}`}
+                            value={calc.d}
+                            onChange={(e) =>
+                              onUpdateEntry(activeOutlet, selectedDay, def.key, 'd', e.target.value)
+                            }
+                            className="min-h-[38px] rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 font-mono text-xs text-slate-900 tabular-nums disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-200/80 disabled:text-slate-400 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:disabled:border-slate-700/70 dark:disabled:bg-slate-800/50 dark:disabled:text-slate-500"
+                          />
+                        )}
+                        {canEditDay && currentComparable !== quickTargetDate && (
                           <button
                             type="button"
                             onClick={() =>
@@ -381,17 +423,17 @@ export function InputHarianView({
                                 quickTargetDate
                               )
                             }
-                            title={`Atur ke ${fmtDate(quickTargetDate)}`}
+                            title={`Atur ke ${isMonthly ? fmtMonth(quickTargetDate) : fmtDate(quickTargetDate)}`}
                             className="min-h-[38px] whitespace-nowrap rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                           >
-                            Set {fmtDate(quickTargetDate)}
+                            Set {isMonthly ? fmtMonth(quickTargetDate) : fmtDate(quickTargetDate)}
                           </button>
                         )}
                         {canEditDay && calc.own && (
                           <button
                             type="button"
                             onClick={() => onClearEntry(activeOutlet, selectedDay, def.key)}
-                            title="Kembalikan ke tanggal hari sebelumnya"
+                            title="Kosongkan / kembalikan ke hari sebelumnya"
                             aria-label={`Reset entri ${def.label}`}
                             className="flex h-[38px] w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
                           >
@@ -402,35 +444,77 @@ export function InputHarianView({
                     </td>
 
                     <td className="px-4 py-3.5 align-middle text-xs text-slate-500 dark:text-slate-400">
-                      {calc.source === 'own'
-                        ? 'Diisi hari ini'
-                        : calc.source === 'inherited' && calc.sourceDay
-                          ? `Ikut ${fmtDate(calc.sourceDay)}`
-                          : 'Default awal'}
+                      {calc.source === 'own' && calc.d ? (
+                        formattedTs ? (
+                          <div>
+                            <div className="font-medium text-slate-700 dark:text-slate-300">
+                              Diinput
+                            </div>
+                            <div className="mt-0.5 font-mono text-[11px] text-slate-500 tabular-nums dark:text-slate-400">
+                              {formattedTs}
+                            </div>
+                          </div>
+                        ) : (
+                          'Diinput hari ini'
+                        )
+                      ) : calc.source === 'inherited' && calc.sourceDay ? (
+                        <div>
+                          <div>Ikut {fmtDate(calc.sourceDay)}</div>
+                          {formattedTs && (
+                            <div className="mt-0.5 font-mono text-[11px] text-slate-400 tabular-nums dark:text-slate-500">
+                              {formattedTs}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-slate-400 dark:text-slate-500">Belum diinput</span>
+                      )}
                     </td>
 
-                    <td className="px-4 py-3.5 align-middle font-mono text-xs text-slate-700 tabular-nums dark:text-slate-300">
-                      {fmtDate(calc.rumus)}
-                    </td>
+                    {isAdmin && (
+                      <td className="px-4 py-3.5 align-middle font-mono text-xs text-slate-600 tabular-nums dark:text-slate-400">
+                        {isMonthly
+                          ? fmtMonth(calc.rumus)
+                          : calc.rumus
+                            ? fmtDate(calc.rumus)
+                            : '—'}
+                      </td>
+                    )}
 
-                    <td
-                      className={`px-4 py-3.5 text-right align-middle font-mono text-sm font-semibold tabular-nums ${
-                        calc.pm < 0
-                          ? 'text-red-600 dark:text-red-400'
-                          : 'text-emerald-700 dark:text-emerald-400'
-                      }`}
-                    >
-                      {calc.pm > 0 ? `+${calc.pm}` : calc.pm}
-                    </td>
+                    {isAdmin && (
+                      <td
+                        className={`px-4 py-3.5 text-right align-middle font-mono text-sm font-semibold tabular-nums ${
+                          !canEditDay || !calc.d
+                            ? 'text-slate-400 dark:text-slate-500'
+                            : calc.pm < 0
+                              ? 'text-red-600 dark:text-red-400'
+                              : 'text-emerald-700 dark:text-emerald-400'
+                        }`}
+                      >
+                        {!calc.d ? '—' : calc.pm > 0 ? `+${calc.pm}` : calc.pm}
+                      </td>
+                    )}
 
                     <td className="px-4 py-3.5 align-middle">
                       {calc.pend ? (
-                        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-red-600 dark:text-red-400">
+                        <span
+                          className={`inline-flex items-center gap-1.5 text-xs font-semibold ${
+                            canEditDay
+                              ? 'text-red-600 dark:text-red-400'
+                              : 'text-red-500/80 dark:text-red-400/70'
+                          }`}
+                        >
                           <AlertCircle className="h-3.5 w-3.5 shrink-0" />
                           <span>PENDING</span>
                         </span>
                       ) : (
-                        <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-emerald-700 dark:text-emerald-400">
+                        <span
+                          className={`inline-flex items-center gap-1.5 text-xs font-semibold ${
+                            canEditDay
+                              ? 'text-emerald-700 dark:text-emerald-400'
+                              : 'text-emerald-700/75 dark:text-emerald-400/70'
+                          }`}
+                        >
                           <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
                           <span>UPDATE</span>
                         </span>
@@ -443,11 +527,11 @@ export function InputHarianView({
                         disabled={!canEditDay}
                         aria-label={`Keterangan ${def.label}`}
                         value={calc.n}
-                        placeholder={canEditDay ? 'Keterangan' : '—'}
+                        placeholder={canEditDay ? 'Keterangan' : 'Terkunci'}
                         onChange={(e) =>
                           onUpdateEntry(activeOutlet, selectedDay, def.key, 'n', e.target.value)
                         }
-                        className="min-h-[38px] w-full min-w-[160px] rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-900 placeholder:text-slate-400 disabled:cursor-not-allowed disabled:opacity-60 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500"
+                        className="min-h-[38px] w-full min-w-[160px] rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs text-slate-900 placeholder:text-slate-400 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-200/80 disabled:text-slate-400 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500 dark:disabled:border-slate-700/70 dark:disabled:bg-slate-800/50 dark:disabled:text-slate-500"
                       />
                     </td>
                   </tr>
@@ -458,103 +542,9 @@ export function InputHarianView({
         </div>
 
         <div className="border-t border-slate-100 px-5 py-3 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
-          Jika hari kerja ini belum diisi, tanggal update otomatis mengikuti entri hari kerja sebelumnya. Nilai +/- negatif menandakan status PENDING.
-        </div>
-      </section>
-
-      {/* Kunjungan ke Outlet */}
-      <section className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
-        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-          <div>
-            <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
-              Kunjungan ke Outlet · {activePerson}
-            </h2>
-            <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-              Catatan kehadiran lapangan pada {fmtDateFull(selectedDay)}
-            </p>
-          </div>
-          <span
-            className={`text-xs font-semibold ${
-              visit.ok
-                ? 'text-emerald-700 dark:text-emerald-400'
-                : 'text-slate-500 dark:text-slate-400'
-            }`}
-          >
-            {visit.ok ? 'Tercatat Dikunjungi' : 'Belum Dicatat'}
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 items-end gap-4 sm:grid-cols-2 lg:grid-cols-12">
-          <div className="lg:col-span-3">
-            <label
-              className={`flex min-h-[42px] items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-2 text-sm font-medium text-slate-800 transition-colors dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 ${
-                canEditDay
-                  ? 'cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-700/70'
-                  : 'cursor-not-allowed opacity-60'
-              }`}
-            >
-              <input
-                type="checkbox"
-                disabled={!canEditDay}
-                checked={visit.ok}
-                onChange={(e) => onUpdateVisit(activePerson, selectedDay, { ok: e.target.checked })}
-                className="h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-600"
-              />
-              <span>Sudah dikunjungi</span>
-            </label>
-          </div>
-
-          <div className="lg:col-span-2">
-            <label
-              htmlFor="visit-from"
-              className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
-            >
-              Dari jam
-            </label>
-            <input
-              id="visit-from"
-              type="time"
-              disabled={!canEditDay}
-              value={visit.f}
-              onChange={(e) => onUpdateVisit(activePerson, selectedDay, { f: e.target.value })}
-              className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-sm text-slate-900 tabular-nums disabled:cursor-not-allowed disabled:opacity-60 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-            />
-          </div>
-
-          <div className="lg:col-span-2">
-            <label
-              htmlFor="visit-to"
-              className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
-            >
-              Ke jam
-            </label>
-            <input
-              id="visit-to"
-              type="time"
-              disabled={!canEditDay}
-              value={visit.t}
-              onChange={(e) => onUpdateVisit(activePerson, selectedDay, { t: e.target.value })}
-              className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-sm text-slate-900 tabular-nums disabled:cursor-not-allowed disabled:opacity-60 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-            />
-          </div>
-
-          <div className="sm:col-span-2 lg:col-span-5">
-            <label
-              htmlFor="visit-note"
-              className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
-            >
-              Keterangan kunjungan
-            </label>
-            <input
-              id="visit-note"
-              type="text"
-              disabled={!canEditDay}
-              value={visit.n}
-              placeholder={canEditDay ? 'Catatan hasil kunjungan outlet...' : '—'}
-              onChange={(e) => onUpdateVisit(activePerson, selectedDay, { n: e.target.value })}
-              className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 disabled:cursor-not-allowed disabled:opacity-60 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500"
-            />
-          </div>
+          {isAdmin
+            ? 'Jika hari kerja ini belum diisi, tanggal update otomatis mengikuti entri hari kerja sebelumnya. Nilai +/- negatif menandakan status PENDING.'
+            : 'Jika hari kerja ini belum diisi, tanggal update otomatis mengikuti entri hari kerja sebelumnya.'}
         </div>
       </section>
     </div>

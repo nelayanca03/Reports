@@ -422,6 +422,23 @@ export function useAuthAndRoleData() {
     try {
       await signInWithPopup(auth, googleProvider);
     } catch (err) {
+      const code =
+        err && typeof err === 'object' && 'code' in err ? String((err as { code?: unknown }).code) : '';
+      if (code === 'auth/unauthorized-domain') {
+        const host = typeof window !== 'undefined' ? window.location.hostname : '';
+        setAuthError(
+          `Domain "${host}" belum diizinkan di Firebase Authentication. Tambahkan domain tersebut di Firebase Console → Authentication → Settings → Authorized domains.`
+        );
+        return;
+      }
+      if (code === 'auth/popup-blocked') {
+        setAuthError('Popup login diblokir oleh browser. Izinkan popup untuk situs ini lalu coba lagi.');
+        return;
+      }
+      if (code === 'auth/popup-closed-by-user') {
+        setAuthError('Jendela login Google ditutup sebelum selesai.');
+        return;
+      }
       setAuthError(err instanceof Error ? err.message : 'Gagal masuk dengan Google.');
     }
   }, []);
@@ -452,8 +469,7 @@ export function useAuthAndRoleData() {
     async (outlet: string, day: string, taskKey: string, field: 'd' | 'n', value: string) => {
       const uid = auth.currentUser?.uid;
       if (!uid) return;
-      if (isSunday(day)) return;
-      if (currentAccount?.role !== 'admin' && day !== todayIso()) return;
+      if (isSunday(day) || day !== todayIso()) return;
       const path = `roleWorkspaces/${effectiveRoleId}`;
       try {
         const wsRef = await ensureWorkspaceDoc(effectiveRoleId, uid);
@@ -469,6 +485,7 @@ export function useAuthAndRoleData() {
         const nextEntry = {
           d: existing?.d || fallbackDate,
           n: existing?.n || '',
+          ts: new Date().toISOString(),
           [field]: value,
         };
         await updateDoc(
@@ -499,8 +516,7 @@ export function useAuthAndRoleData() {
     async (outlet: string, day: string, taskKey: string) => {
       const uid = auth.currentUser?.uid;
       if (!uid) return;
-      if (isSunday(day)) return;
-      if (currentAccount?.role !== 'admin' && day !== todayIso()) return;
+      if (isSunday(day) || day !== todayIso()) return;
       const path = `roleWorkspaces/${effectiveRoleId}`;
       try {
         const wsRef = doc(db, 'roleWorkspaces', effectiveRoleId);
@@ -524,8 +540,7 @@ export function useAuthAndRoleData() {
     async (person: string, day: string, patch: Partial<VisitItem>) => {
       const uid = auth.currentUser?.uid;
       if (!uid) return;
-      if (isSunday(day)) return;
-      if (currentAccount?.role !== 'admin' && day !== todayIso()) return;
+      if (isSunday(day) || day !== todayIso()) return;
       const path = `roleWorkspaces/${effectiveRoleId}`;
       try {
         const wsRef = await ensureWorkspaceDoc(effectiveRoleId, uid);

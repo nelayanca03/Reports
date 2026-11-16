@@ -134,7 +134,7 @@
         },
         "ent": {
           "type": "object",
-          "description": "Nested map of outlet -> (day|task) -> { d, n }"
+          "description": "Nested map of outlet -> (day|task) -> { d, n, ts }"
         },
         "visit": {
           "type": "object",

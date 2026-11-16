@@ -138,7 +138,9 @@ export function Sidebar({
 
         {/* Operational Navigation */}
         <nav className="space-y-1" aria-label="Navigasi operasional">
-          {OPERATIONAL_NAV.filter((item) => item.id !== 'rekap' || isAdmin).map((item) => {
+          {OPERATIONAL_NAV.filter(
+            (item) => (item.id !== 'rekap' && item.id !== 'data') || isAdmin
+          ).map((item) => {
             const Icon = item.icon;
             const isActive = activeView === item.id;
             return (

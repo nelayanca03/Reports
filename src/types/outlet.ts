@@ -1,14 +1,17 @@
 export type AccountRole = 'admin' | 'stock_accounting' | 'gl' | 'accounting';
 export type OperationalRoleId = 'stock_accounting' | 'gl' | 'accounting';
 export type FormulaType = 'daily_plus_1' | 'memo_month' | 'ref_task';
+export type TaskInputType = 'date' | 'month';
 
 export interface TaskDefinition {
   key: string;
   label: string;
   shortLabel: string;
   defaultDate: string;
+  inputType?: TaskInputType;
   formulaType: FormulaType;
   refTaskKey?: string;
+  toleranceOffset?: number;
   formulaNote: string;
 }
 
@@ -38,6 +41,7 @@ export interface AccountProfile {
 export interface EntryItem {
   d: string;
   n: string;
+  ts?: string;
 }
 
 export interface VisitItem {
@@ -58,6 +62,7 @@ export type EntrySource = 'own' | 'inherited' | 'default';
 export interface ResolvedEntry {
   d: string;
   n: string;
+  ts?: string;
   own: boolean;
   source: EntrySource;
   sourceDay?: string;

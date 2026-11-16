@@ -69,11 +69,17 @@ export default function App() {
     if (personList.length > 0) {
       let nextPerson = selectedPerson;
       if (!nextPerson || !personList.includes(nextPerson)) {
-        if (currentAccount?.picName && personList.includes(currentAccount.picName)) {
-          nextPerson = currentAccount.picName;
-        } else {
-          nextPerson = personList[0];
-        }
+        const matchedByPic = currentAccount?.picName
+          ? personList.find(
+              (p) => p.toUpperCase() === currentAccount.picName.trim().toUpperCase()
+            )
+          : undefined;
+        const matchedByName = currentAccount?.name
+          ? personList.find(
+              (p) => p.toUpperCase() === currentAccount.name.trim().toUpperCase()
+            )
+          : undefined;
+        nextPerson = matchedByPic || matchedByName || personList[0];
         setSelectedPerson(nextPerson);
       }
 
@@ -85,7 +91,7 @@ export default function App() {
       setSelectedPerson('');
       setSelectedOutlet('');
     }
-  }, [activeConfig.outlets, currentAccount?.picName, selectedPerson, selectedOutlet]);
+  }, [activeConfig.outlets, currentAccount?.name, currentAccount?.picName, selectedPerson, selectedOutlet]);
 
   useEffect(() => {
     if (
@@ -103,7 +109,11 @@ export default function App() {
   }, [days, selectedDay]);
 
   useEffect(() => {
-    if (currentAccount && currentAccount.role !== 'admin' && activeView === 'rekap') {
+    if (
+      currentAccount &&
+      currentAccount.role !== 'admin' &&
+      (activeView === 'rekap' || activeView === 'data')
+    ) {
       setActiveView('input');
     }
   }, [currentAccount, activeView]);
@@ -141,9 +151,9 @@ export default function App() {
   };
 
   const handleQuickExportCsv = () => {
+    if (!isAdmin) return;
     const today = todayIso();
     if (activeView === 'rekap') {
-      if (!isAdmin) return;
       downloadTextFile(
         `ranking-${activeConfig.roleId}-${selectedTask}-${recapDate}.csv`,
         generateRecapCsv(store, days, activeConfig, selectedTask, recapDate, today),
@@ -161,7 +171,7 @@ export default function App() {
     }
     downloadTextFile(
       `update-${activeConfig.roleId}-${selectedDay}.csv`,
-      generateDailyFleetCsv(store, days, activeConfig, selectedDay, today),
+      generateDailyFleetCsv(store, days, activeConfig, selectedDay, today, isAdmin),
       'text/csv;charset=utf-8'
     );
   };
@@ -192,6 +202,7 @@ export default function App() {
         <TopBar
           activeView={activeView}
           roleLabel={activeConfig.label}
+          isAdmin={isAdmin}
           theme={theme}
           onToggleTheme={toggleTheme}
           onOpenMobileMenu={() => setMobileMenuOpen(true)}
@@ -213,7 +224,6 @@ export default function App() {
               onChangeDay={setSelectedDay}
               onUpdateEntry={updateEntry}
               onClearEntry={clearEntryForDay}
-              onUpdateVisit={updateVisit}
               onOpenAdminConfig={() => setActiveView('admin_tasks')}
             />
           )}
@@ -236,13 +246,13 @@ export default function App() {
               config={activeConfig}
               store={store}
               days={days}
-              isAdmin={isAdmin}
+              selectedPerson={selectedPerson}
               onUpdateVisit={updateVisit}
               onJumpToInput={handleJumpToInput}
             />
           )}
 
-          {activeView === 'data' && (
+          {activeView === 'data' && isAdmin && (
             <DataEksporView
               config={activeConfig}
               store={store}
@@ -260,6 +270,7 @@ export default function App() {
             <AdminTasksOutletsView
               roleConfigs={roleConfigs}
               initialRoleId={activeRoleId}
+              accounts={managedAccounts}
               onSaveRoleConfig={saveRoleConfig}
             />
           )}
@@ -267,6 +278,7 @@ export default function App() {
           {activeView === 'admin_accounts' && isAdmin && (
             <AdminAccountsView
               accounts={managedAccounts}
+              roleConfigs={roleConfigs}
               isPrimaryAdmin={isPrimaryAdmin}
               onSaveAccount={saveAccount}
               onDeleteAccount={deleteAccount}

@@ -5,7 +5,9 @@ import {
   calcRecap,
   calcTask,
   fmtDate,
+  fmtMonth,
   getPersonList,
+  getTaskInputType,
   nearestWorkingDay,
   todayIso,
 } from '../utils/outletLogic';
@@ -51,9 +53,10 @@ export function RekapRankingView({
     );
   }
 
-  const activeTaskKey = config.tasks.some((t) => t.key === selectedTask)
-    ? selectedTask
-    : config.tasks[0].key;
+  const activeTaskDef =
+    config.tasks.find((t) => t.key === selectedTask) || config.tasks[0];
+  const activeTaskKey = activeTaskDef.key;
+  const isActiveTaskMonthly = getTaskInputType(activeTaskDef) === 'month';
 
   const normalizedQuery = searchQuery.trim().toLowerCase();
 
@@ -276,7 +279,7 @@ export function RekapRankingView({
                           {row.person}
                         </td>
                         <td className="px-4 py-3 font-mono text-xs text-slate-600 tabular-nums dark:text-slate-300">
-                          {fmtDate(row.latestDate)}
+                          {isActiveTaskMonthly ? fmtMonth(row.latestDate) : fmtDate(row.latestDate)}
                         </td>
                         <td className="px-4 py-3">
                           {row.latestPend ? (
@@ -377,6 +380,7 @@ export function RekapRankingView({
                         t.key,
                         today
                       );
+                      const isMonthly = getTaskInputType(t) === 'month';
                       return (
                         <td key={t.key} className="px-3 py-3 text-right font-mono tabular-nums">
                           <div
@@ -386,10 +390,10 @@ export function RekapRankingView({
                                 : 'text-emerald-700 dark:text-emerald-400'
                             }`}
                           >
-                            {c.pm > 0 ? `+${c.pm}` : c.pm}
+                            {!c.d ? '—' : c.pm > 0 ? `+${c.pm}` : c.pm}
                           </div>
                           <div className="text-[11px] text-slate-400 dark:text-slate-500">
-                            {fmtDate(c.d)}
+                            {isMonthly ? fmtMonth(c.d) : fmtDate(c.d)}
                           </div>
                         </td>
                       );

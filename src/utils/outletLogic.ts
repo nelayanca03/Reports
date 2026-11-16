@@ -2,6 +2,7 @@ import {
   AccountRole,
   CalculatedTask,
   EntryItem,
+  FormulaType,
   OperationalRoleId,
   OutletAssignment,
   OutletRecap,
@@ -9,6 +10,7 @@ import {
   ResolvedEntry,
   RoleConfig,
   TaskDefinition,
+  TaskInputType,
   VisitPersonStats,
 } from '../types/outlet';
 
@@ -34,52 +36,101 @@ export const STOCK_ACCOUNTING_TASKS: TaskDefinition[] = [
     key: 'memo',
     label: 'Memo Penyelesaian Discrepancy',
     shortLabel: 'Memo',
-    defaultDate: '2026-09-01',
+    defaultDate: '',
+    inputType: 'month',
     formulaType: 'memo_month',
+    toleranceOffset: 1,
     formulaNote: 'Selisih bulan terhadap hari ini + 1',
   },
   {
     key: 'ham',
     label: 'HAM SPC',
     shortLabel: 'HAM SPC',
-    defaultDate: '2026-10-30',
+    defaultDate: '',
+    inputType: 'date',
     formulaType: 'daily_plus_1',
+    toleranceOffset: 1,
     formulaNote: 'Selisih hari terhadap tanggal kerja + 1',
   },
   {
     key: 'bm',
     label: 'Barang Masuk',
     shortLabel: 'Brg Masuk',
-    defaultDate: '2026-10-29',
+    defaultDate: '',
+    inputType: 'date',
     formulaType: 'ref_task',
     refTaskKey: 'ham',
-    formulaNote: 'Selisih hari terhadap tgl update HAM SPC',
+    toleranceOffset: 0,
+    formulaNote: 'Selisih hari terhadap tgl update HAM SPC (+0)',
   },
   {
     key: 'jual',
     label: 'Penjualan',
     shortLabel: 'Penjualan',
-    defaultDate: '2026-10-31',
+    defaultDate: '',
+    inputType: 'date',
     formulaType: 'daily_plus_1',
+    toleranceOffset: 1,
     formulaNote: 'Selisih hari terhadap tanggal kerja + 1',
   },
   {
     key: 'konv',
     label: 'Konversi',
     shortLabel: 'Konversi',
-    defaultDate: '2026-10-31',
+    defaultDate: '',
+    inputType: 'date',
     formulaType: 'daily_plus_1',
+    toleranceOffset: 1,
     formulaNote: 'Selisih hari terhadap tanggal kerja + 1',
   },
   {
     key: 'bt',
     label: 'BT',
     shortLabel: 'BT',
-    defaultDate: '2026-10-31',
+    defaultDate: '',
+    inputType: 'date',
     formulaType: 'daily_plus_1',
+    toleranceOffset: 1,
     formulaNote: 'Selisih hari terhadap tanggal kerja + 1',
   },
 ];
+
+export function getTaskInputType(
+  taskDef?: Pick<TaskDefinition, 'inputType' | 'formulaType'>
+): TaskInputType {
+  if (taskDef?.inputType === 'month' || taskDef?.inputType === 'date') {
+    return taskDef.inputType;
+  }
+  return taskDef?.formulaType === 'memo_month' ? 'month' : 'date';
+}
+
+export function getTaskTolerance(taskDef?: Pick<TaskDefinition, 'formulaType' | 'toleranceOffset'>): number {
+  if (
+    taskDef &&
+    typeof taskDef.toleranceOffset === 'number' &&
+    !Number.isNaN(taskDef.toleranceOffset)
+  ) {
+    return taskDef.toleranceOffset;
+  }
+  return taskDef?.formulaType === 'ref_task' ? 0 : 1;
+}
+
+export function buildFormulaNote(
+  formulaType: FormulaType,
+  toleranceOffset: number,
+  refLabel?: string
+): string {
+  const signed = toleranceOffset >= 0 ? `+ ${toleranceOffset}` : `- ${Math.abs(toleranceOffset)}`;
+  if (formulaType === 'memo_month') {
+    return `Selisih bulan terhadap hari ini ${signed}`;
+  }
+  if (formulaType === 'ref_task' && refLabel) {
+    return toleranceOffset === 0
+      ? `Selisih hari terhadap tgl update ${refLabel}`
+      : `Selisih hari terhadap tgl update ${refLabel} (${toleranceOffset >= 0 ? `+${toleranceOffset}` : toleranceOffset})`;
+  }
+  return `Selisih hari terhadap tanggal kerja ${signed}`;
+}
 
 export const STOCK_ACCOUNTING_OUTLETS: OutletAssignment[] = [
   { person: 'PETER', code: 'NKPM' },
@@ -177,11 +228,24 @@ export function todayIso(): string {
 
 export function fmtDate(isoStr: string): string {
   if (!isoStr) return '—';
-  const d = parseUtcDate(isoStr);
+  const normalized = isoStr.length === 7 ? `${isoStr}-01` : isoStr;
+  const d = parseUtcDate(normalized);
   if (Number.isNaN(d.getTime())) return isoStr;
   return d.toLocaleDateString('id-ID', {
     day: '2-digit',
     month: 'short',
+    timeZone: 'UTC',
+  });
+}
+
+export function fmtMonth(isoStr: string): string {
+  if (!isoStr) return '—';
+  const normalized = isoStr.length === 7 ? `${isoStr}-01` : isoStr;
+  const d = parseUtcDate(normalized);
+  if (Number.isNaN(d.getTime())) return isoStr;
+  return d.toLocaleDateString('id-ID', {
+    month: 'short',
+    year: 'numeric',
     timeZone: 'UTC',
   });
 }
@@ -197,6 +261,21 @@ export function fmtDateFull(isoStr: string): string {
     year: 'numeric',
     timeZone: 'UTC',
   });
+}
+
+export function fmtDateTimeWithSeconds(isoTimestamp?: string): string {
+  if (!isoTimestamp) return '';
+  const d = new Date(isoTimestamp);
+  if (Number.isNaN(d.getTime())) return '';
+  const datePart = d.toLocaleDateString('id-ID', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  });
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mm = String(d.getMinutes()).padStart(2, '0');
+  const ss = String(d.getSeconds()).padStart(2, '0');
+  return `${datePart}, ${hh}:${mm}:${ss}`;
 }
 
 export function buildWorkingDays(start: string = DEFAULT_START, count: number = DEFAULT_NDAYS): string[] {
@@ -226,12 +305,13 @@ export function nearestWorkingDay(days: string[], targetIso: string): string {
 export function getEntry(
   state: OutletStoreState,
   days: string[],
-  tasks: TaskDefinition[],
+  _tasks: TaskDefinition[],
   outlet: string,
   day: string,
   taskKey: string
 ): ResolvedEntry {
   const outletMap = state.ent[outlet] || {};
+  const ownEntry: EntryItem | undefined = outletMap[`${day}|${taskKey}`];
   const idx = days.indexOf(day);
   for (let k = idx; k >= 0; k--) {
     const candidateDay = days[k];
@@ -240,18 +320,19 @@ export function getEntry(
       const isOwn = k === idx;
       return {
         d: e.d,
-        n: isOwn ? e.n || '' : '',
+        n: isOwn ? e.n || '' : ownEntry?.n || '',
+        ts: e.ts,
         own: isOwn,
         source: isOwn ? 'own' : 'inherited',
         sourceDay: candidateDay,
       };
     }
   }
-  const taskDef = tasks.find((t) => t.key === taskKey);
   return {
-    d: taskDef?.defaultDate || DEFAULT_START,
-    n: '',
-    own: false,
+    d: '',
+    n: ownEntry?.n || '',
+    ts: ownEntry?.ts,
+    own: Boolean(ownEntry && (ownEntry.d || ownEntry.n)),
     source: 'default',
   };
 }
@@ -268,21 +349,43 @@ export function calcTask(
   const resolved = getEntry(state, days, tasks, outlet, day, taskKey);
   const taskDef = tasks.find((t) => t.key === taskKey);
   const formulaType = taskDef?.formulaType || 'daily_plus_1';
+  const tol = getTaskTolerance(taskDef);
 
   let rumus: string;
   let pm: number;
 
   if (formulaType === 'memo_month') {
     rumus = today;
-    const a = parseUtcDate(resolved.d);
-    const b = parseUtcDate(today);
-    pm = (a.getUTCFullYear() - b.getUTCFullYear()) * 12 + a.getUTCMonth() - b.getUTCMonth() + 1;
+    if (!resolved.d) {
+      pm = -1;
+    } else {
+      const normalizedD = resolved.d.length === 7 ? `${resolved.d}-01` : resolved.d;
+      const a = parseUtcDate(normalizedD);
+      const b = parseUtcDate(today);
+      pm = (a.getUTCFullYear() - b.getUTCFullYear()) * 12 + a.getUTCMonth() - b.getUTCMonth() + tol;
+    }
   } else if (formulaType === 'ref_task' && taskDef?.refTaskKey) {
-    rumus = getEntry(state, days, tasks, outlet, day, taskDef.refTaskKey).d;
-    pm = diffDays(resolved.d, rumus);
+    const refResolved = getEntry(state, days, tasks, outlet, day, taskDef.refTaskKey);
+    rumus = refResolved.d || '';
+    if (!resolved.d) {
+      pm = -1;
+    } else {
+      const normalizedD = resolved.d.length === 7 ? `${resolved.d}-01` : resolved.d;
+      if (!refResolved.d) {
+        pm = diffDays(normalizedD, day) + tol;
+      } else {
+        const normalizedRef = rumus.length === 7 ? `${rumus}-01` : rumus;
+        pm = diffDays(normalizedD, normalizedRef) + tol;
+      }
+    }
   } else {
     rumus = day;
-    pm = diffDays(resolved.d, rumus) + 1;
+    if (!resolved.d) {
+      pm = -1;
+    } else {
+      const normalizedD = resolved.d.length === 7 ? `${resolved.d}-01` : resolved.d;
+      pm = diffDays(normalizedD, rumus) + tol;
+    }
   }
 
   return {
@@ -291,7 +394,7 @@ export function calcTask(
     label: taskDef?.label || taskKey,
     rumus,
     pm,
-    pend: pm < 0,
+    pend: !resolved.d || pm < 0,
   };
 }
 
@@ -379,7 +482,8 @@ export function generateDailyFleetCsv(
   days: string[],
   config: RoleConfig,
   day: string,
-  today: string = todayIso()
+  today: string = todayIso(),
+  includeFormula: boolean = true
 ): string {
   const header = [
     'Role',
@@ -389,8 +493,7 @@ export function generateDailyFleetCsv(
     'Item',
     'Tgl Update',
     'Sumber',
-    'Rumus',
-    '+/-',
+    ...(includeFormula ? ['Rumus', '+/-'] : []),
     'Status',
     'Keterangan',
   ];
@@ -399,12 +502,19 @@ export function generateDailyFleetCsv(
   for (const { code: outlet, person } of config.outlets) {
     for (const t of config.tasks) {
       const c = calcTask(state, days, config.tasks, outlet, day, t.key, today);
+      const tsFormatted = c.ts ? fmtDateTimeWithSeconds(c.ts) : '';
       const sourceLabel =
         c.source === 'own'
-          ? 'Diisi hari ini'
+          ? tsFormatted
+            ? `Diinput ${tsFormatted}`
+            : 'Diisi hari ini'
           : c.source === 'inherited'
-            ? `Ikut ${c.sourceDay}`
-            : 'Default';
+            ? tsFormatted
+              ? `Ikut ${c.sourceDay} (${tsFormatted})`
+              : `Ikut ${c.sourceDay}`
+            : 'Belum diinput';
+      const isMonthly = getTaskInputType(t) === 'month';
+      const displayDate = c.d ? (isMonthly ? c.d.slice(0, 7) : c.d) : '';
       rows.push(
         [
           config.label,
@@ -412,10 +522,9 @@ export function generateDailyFleetCsv(
           person,
           outlet,
           t.label,
-          c.d,
+          displayDate,
           sourceLabel,
-          c.rumus,
-          c.pm,
+          ...(includeFormula ? [c.rumus, c.pm] : []),
           c.pend ? 'PENDING' : 'UPDATE',
           c.n,
         ]
@@ -455,8 +564,10 @@ export function generateRecapCsv(
     )
     .sort((a, b) => a.avg - b.avg);
 
+  const isMonthly = getTaskInputType(taskDef) === 'month';
   const rows: string[] = [header.map(escapeCsv).join(',')];
   recaps.forEach((r, idx) => {
+    const displayLatest = r.latestDate ? (isMonthly ? r.latestDate.slice(0, 7) : r.latestDate) : '';
     rows.push(
       [
         idx + 1,
@@ -465,7 +576,7 @@ export function generateRecapCsv(
         upto,
         r.outlet,
         r.person,
-        r.latestDate,
+        displayLatest,
         r.latestPm,
         r.avg.toFixed(1),
         r.pend,

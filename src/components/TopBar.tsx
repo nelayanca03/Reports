@@ -4,6 +4,7 @@ import { AppView } from '../types/outlet';
 interface TopBarProps {
   activeView: AppView;
   roleLabel: string;
+  isAdmin: boolean;
   theme: 'light' | 'dark';
   onToggleTheme: () => void;
   onOpenMobileMenu: () => void;
@@ -22,6 +23,7 @@ const VIEW_TITLES: Record<AppView, string> = {
 export function TopBar({
   activeView,
   roleLabel,
+  isAdmin,
   theme,
   onToggleTheme,
   onOpenMobileMenu,
@@ -65,7 +67,7 @@ export function TopBar({
           {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
         </button>
 
-        {!isAdminView && (
+        {isAdmin && !isAdminView && (
           <button
             type="button"
             onClick={onQuickExportCsv}

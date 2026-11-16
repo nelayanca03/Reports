@@ -1,12 +1,13 @@
 import { CheckCircle2, Edit3, Plus, Trash2, XCircle } from 'lucide-react';
 import { FormEvent, useState } from 'react';
 import { BOOTSTRAPPED_ADMIN_EMAIL } from '../firebase';
-import { AccountProfile, AccountRole } from '../types/outlet';
-import { ROLE_LABELS } from '../utils/outletLogic';
+import { AccountProfile, AccountRole, OperationalRoleId, RoleConfig } from '../types/outlet';
+import { ROLE_LABELS, getPersonList } from '../utils/outletLogic';
 import { ConfirmModal } from './ConfirmModal';
 
 interface AdminAccountsViewProps {
   accounts: AccountProfile[];
+  roleConfigs: Record<OperationalRoleId, RoleConfig>;
   isPrimaryAdmin: boolean;
   onSaveAccount: (input: {
     email: string;
@@ -20,6 +21,7 @@ interface AdminAccountsViewProps {
 
 export function AdminAccountsView({
   accounts,
+  roleConfigs,
   isPrimaryAdmin,
   onSaveAccount,
   onDeleteAccount,
@@ -225,16 +227,29 @@ export function AdminAccountsView({
               htmlFor="acc-pic"
               className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
             >
-              PIC Default (Opsional)
+              PIC Default (Sesuai Tugas & Outlet)
             </label>
             <input
               id="acc-pic"
               type="text"
+              list="account-pic-suggestions"
               value={picName}
               onChange={(e) => setPicName(e.target.value)}
               placeholder="PETER / MELVIN"
               className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
             />
+            <datalist id="account-pic-suggestions">
+              {(role === 'admin'
+                ? Array.from(
+                    new Set(
+                      Object.values(roleConfigs).flatMap((cfg) => getPersonList(cfg.outlets))
+                    )
+                  )
+                : getPersonList(roleConfigs[role]?.outlets || [])
+              ).map((p) => (
+                <option key={p} value={p} />
+              ))}
+            </datalist>
           </div>
 
           <div className="flex items-end lg:col-span-2">

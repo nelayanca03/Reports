@@ -1,24 +1,30 @@
 import { Copy, Plus, Save, Trash2 } from 'lucide-react';
 import { FormEvent, useState } from 'react';
 import {
+  AccountProfile,
   FormulaType,
   OperationalRoleId,
   OutletAssignment,
   RoleConfig,
   TaskDefinition,
+  TaskInputType,
 } from '../types/outlet';
 import {
   OPERATIONAL_ROLES,
   STOCK_ACCOUNTING_OUTLETS,
   STOCK_ACCOUNTING_TASKS,
+  buildFormulaNote,
   getPeopleMap,
   getPersonList,
+  getTaskInputType,
+  getTaskTolerance,
 } from '../utils/outletLogic';
 import { ConfirmModal } from './ConfirmModal';
 
 interface AdminTasksOutletsViewProps {
   roleConfigs: Record<OperationalRoleId, RoleConfig>;
   initialRoleId: OperationalRoleId;
+  accounts: AccountProfile[];
   onSaveRoleConfig: (roleId: OperationalRoleId, nextConfig: RoleConfig) => Promise<void>;
 }
 
@@ -40,6 +46,7 @@ function slugifyKey(text: string): string {
 export function AdminTasksOutletsView({
   roleConfigs,
   initialRoleId,
+  accounts,
   onSaveRoleConfig,
 }: AdminTasksOutletsViewProps) {
   const [targetRole, setTargetRole] = useState<OperationalRoleId>(initialRoleId);
@@ -51,9 +58,11 @@ export function AdminTasksOutletsView({
   // Task form state
   const [taskLabel, setTaskLabel] = useState('');
   const [taskShort, setTaskShort] = useState('');
-  const [taskDefaultDate, setTaskDefaultDate] = useState(config.start);
+  const [taskInputType, setTaskInputType] = useState<TaskInputType>('date');
   const [taskFormula, setTaskFormula] = useState<FormulaType>('daily_plus_1');
   const [taskRefKey, setTaskRefKey] = useState('');
+  const [taskTolerance, setTaskTolerance] = useState<string>('1');
+  const [toleranceDrafts, setToleranceDrafts] = useState<Record<string, string>>({});
 
   // Outlet form state
   const [outletPerson, setOutletPerson] = useState('');
@@ -75,12 +84,21 @@ export function AdminTasksOutletsView({
     const nextCfg = roleConfigs[rId];
     setEditStart(nextCfg.start);
     setEditNdays(String(nextCfg.ndays));
-    setTaskDefaultDate(nextCfg.start);
+    setToleranceDrafts({});
     setFeedback(null);
   };
 
   const peopleList = getPersonList(config.outlets);
   const peopleMap = getPeopleMap(config.outlets);
+  const roleAccounts = accounts.filter((a) => a.active && a.role === targetRole);
+  const suggestedPicNames = Array.from(
+    new Set([
+      ...peopleList,
+      ...roleAccounts
+        .map((a) => (a.picName || a.name).trim().toUpperCase())
+        .filter(Boolean),
+    ])
+  );
 
   const handleSavePeriod = async (e: FormEvent) => {
     e.preventDefault();
@@ -109,20 +127,22 @@ export function AdminTasksOutletsView({
       finalKey = `${baseKey}_${counter++}`;
     }
 
-    const formulaNote =
-      taskFormula === 'memo_month'
-        ? 'Selisih bulan terhadap hari ini + 1'
-        : taskFormula === 'ref_task' && taskRefKey
-          ? `Selisih hari terhadap tgl update ${config.tasks.find((t) => t.key === taskRefKey)?.shortLabel || taskRefKey}`
-          : 'Selisih hari terhadap tanggal kerja + 1';
+    const parsedTolerance = Math.max(-15, Math.min(31, Math.round(Number(taskTolerance) || 0)));
+    const refLabel =
+      taskFormula === 'ref_task' && taskRefKey
+        ? config.tasks.find((t) => t.key === taskRefKey)?.shortLabel || taskRefKey
+        : undefined;
+    const formulaNote = buildFormulaNote(taskFormula, parsedTolerance, refLabel);
 
     const newTask: TaskDefinition = {
       key: finalKey,
       label: cleanLabel.slice(0, 100),
       shortLabel: (taskShort.trim() || cleanLabel).slice(0, 24),
-      defaultDate: taskDefaultDate || config.start,
+      defaultDate: '',
+      inputType: taskInputType,
       formulaType: taskFormula,
       ...(taskFormula === 'ref_task' && taskRefKey ? { refTaskKey: taskRefKey } : {}),
+      toleranceOffset: parsedTolerance,
       formulaNote,
     };
 
@@ -135,6 +155,59 @@ export function AdminTasksOutletsView({
       setTaskLabel('');
       setTaskShort('');
       setFeedback(`Tugas "${newTask.label}" ditambahkan ke ${config.label}.`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleChangeTaskInputType = async (task: TaskDefinition, nextType: TaskInputType) => {
+    const updatedTasks = config.tasks.map((t) =>
+      t.key === task.key ? { ...t, inputType: nextType } : t
+    );
+    setBusy(true);
+    try {
+      await onSaveRoleConfig(targetRole, {
+        ...config,
+        tasks: updatedTasks,
+      });
+      setFeedback(
+        `Jenis input tugas "${task.label}" diubah menjadi ${nextType === 'month' ? 'Per Bulan' : 'Per Tanggal'}.`
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleSaveTaskTolerance = async (task: TaskDefinition, rawValue: string) => {
+    const parsed = Math.max(-15, Math.min(31, Math.round(Number(rawValue) || 0)));
+    const refLabel =
+      task.formulaType === 'ref_task' && task.refTaskKey
+        ? config.tasks.find((t) => t.key === task.refTaskKey)?.shortLabel || task.refTaskKey
+        : undefined;
+    const updatedTasks = config.tasks.map((t) =>
+      t.key === task.key
+        ? {
+            ...t,
+            toleranceOffset: parsed,
+            formulaNote: buildFormulaNote(t.formulaType, parsed, refLabel),
+          }
+        : t
+    );
+
+    setBusy(true);
+    try {
+      await onSaveRoleConfig(targetRole, {
+        ...config,
+        tasks: updatedTasks,
+      });
+      setToleranceDrafts((prev) => {
+        const next = { ...prev };
+        delete next[task.key];
+        return next;
+      });
+      setFeedback(
+        `Batas toleransi tugas "${task.label}" diperbarui menjadi ${parsed >= 0 ? `+${parsed}` : parsed} ${task.formulaType === 'memo_month' ? 'bulan' : 'hari'}.`
+      );
     } finally {
       setBusy(false);
     }
@@ -377,21 +450,33 @@ export function AdminTasksOutletsView({
 
           <div className="lg:col-span-2">
             <label
-              htmlFor="new-task-date"
+              htmlFor="new-task-input-type"
               className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
             >
-              Tgl Default
+              Jenis Input
             </label>
-            <input
-              id="new-task-date"
-              type="date"
-              value={taskDefaultDate}
-              onChange={(e) => setTaskDefaultDate(e.target.value)}
-              className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-            />
+            <select
+              id="new-task-input-type"
+              value={taskInputType}
+              onChange={(e) => {
+                const nextInput = e.target.value as TaskInputType;
+                setTaskInputType(nextInput);
+                if (nextInput === 'month') {
+                  setTaskFormula('memo_month');
+                  setTaskTolerance('1');
+                } else if (taskFormula === 'memo_month') {
+                  setTaskFormula('daily_plus_1');
+                  setTaskTolerance('1');
+                }
+              }}
+              className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+            >
+              <option value="date">Per Tanggal</option>
+              <option value="month">Per Bulan</option>
+            </select>
           </div>
 
-          <div className="lg:col-span-3">
+          <div className="lg:col-span-2">
             <label
               htmlFor="new-task-formula"
               className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
@@ -401,15 +486,41 @@ export function AdminTasksOutletsView({
             <select
               id="new-task-formula"
               value={taskFormula}
-              onChange={(e) => setTaskFormula(e.target.value as FormulaType)}
+              onChange={(e) => {
+                const nextFormula = e.target.value as FormulaType;
+                setTaskFormula(nextFormula);
+                setTaskTolerance(nextFormula === 'ref_task' ? '0' : '1');
+                if (nextFormula === 'memo_month') {
+                  setTaskInputType('month');
+                }
+              }}
               className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
             >
-              <option value="daily_plus_1">Harian (+1 dari tgl kerja)</option>
-              <option value="memo_month">Bulanan (Selisih bulan + 1)</option>
+              <option value="daily_plus_1">Harian (vs tgl kerja)</option>
+              <option value="memo_month">Bulanan (vs bulan ini)</option>
               {config.tasks.length > 0 && (
                 <option value="ref_task">Mengikuti tugas lain</option>
               )}
             </select>
+          </div>
+
+          <div className="lg:col-span-1">
+            <label
+              htmlFor="new-task-tol"
+              className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
+              title="Contoh: 1 = toleransi H-1 masih dianggap Update; 0 = harus tepat hari H; 2 = toleransi 2 hari"
+            >
+              Toleransi
+            </label>
+            <input
+              id="new-task-tol"
+              type="number"
+              min={-15}
+              max={31}
+              value={taskTolerance}
+              onChange={(e) => setTaskTolerance(e.target.value)}
+              className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-2 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+            />
           </div>
 
           {taskFormula === 'ref_task' && config.tasks.length > 0 && (
@@ -454,48 +565,102 @@ export function AdminTasksOutletsView({
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] border-collapse text-left text-sm">
+            <table className="w-full min-w-[760px] border-collapse text-left text-sm">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50/70 text-xs font-medium text-slate-500 dark:border-slate-800 dark:bg-slate-800/40 dark:text-slate-400">
                   <th className="px-5 py-3">Nama Tugas</th>
                   <th className="px-4 py-3">Singkatan</th>
-                  <th className="px-4 py-3">Tgl Default</th>
+                  <th className="px-4 py-3">Jenis Input</th>
                   <th className="px-4 py-3">Rumus</th>
+                  <th className="px-4 py-3">Toleransi Keterlambatan</th>
                   <th className="px-5 py-3 text-right">Hapus</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {config.tasks.map((t) => (
-                  <tr key={t.key} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/30">
-                    <td className="px-5 py-3 font-medium text-slate-900 dark:text-slate-100">
-                      {t.label}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-slate-600 dark:text-slate-300">
-                      {t.shortLabel}
-                    </td>
-                    <td className="px-4 py-3 font-mono text-xs text-slate-600 tabular-nums dark:text-slate-300">
-                      {t.defaultDate}
-                    </td>
-                    <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
-                      {FORMULA_LABELS[t.formulaType]}
-                      {t.refTaskKey ? ` (${t.refTaskKey})` : ''}
-                    </td>
-                    <td className="px-5 py-3 text-right">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setPendingDelete({ type: 'task', key: t.key, label: t.label })
-                        }
-                        aria-label={`Hapus tugas ${t.label}`}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/50 dark:hover:text-red-400"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                {config.tasks.map((t) => {
+                  const savedTol = getTaskTolerance(t);
+                  const draftVal = toleranceDrafts[t.key] ?? String(savedTol);
+                  const isDirty = draftVal !== String(savedTol);
+                  const unitLabel = t.formulaType === 'memo_month' ? 'bln' : 'hari';
+                  const currentInputType = getTaskInputType(t);
+                  return (
+                    <tr key={t.key} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/30">
+                      <td className="px-5 py-3 font-medium text-slate-900 dark:text-slate-100">
+                        {t.label}
+                      </td>
+                      <td className="px-4 py-3 text-xs text-slate-600 dark:text-slate-300">
+                        {t.shortLabel}
+                      </td>
+                      <td className="px-4 py-3">
+                        <select
+                          aria-label={`Jenis input ${t.label}`}
+                          disabled={busy}
+                          value={currentInputType}
+                          onChange={(e) =>
+                            handleChangeTaskInputType(t, e.target.value as TaskInputType)
+                          }
+                          className="min-h-[34px] rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-800 focus:border-blue-600 focus:outline-none disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                        >
+                          <option value="date">Per Tanggal</option>
+                          <option value="month">Per Bulan</option>
+                        </select>
+                      </td>
+                      <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
+                        {FORMULA_LABELS[t.formulaType]}
+                        {t.refTaskKey ? ` (${t.refTaskKey})` : ''}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-1.5">
+                          <input
+                            type="number"
+                            min={-15}
+                            max={31}
+                            disabled={busy}
+                            aria-label={`Toleransi ${t.label}`}
+                            value={draftVal}
+                            onChange={(e) =>
+                              setToleranceDrafts((prev) => ({
+                                ...prev,
+                                [t.key]: e.target.value,
+                              }))
+                            }
+                            className="min-h-[34px] w-16 rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                          />
+                          <span className="text-xs text-slate-500 dark:text-slate-400">
+                            {unitLabel}
+                          </span>
+                          {isDirty && (
+                            <button
+                              type="button"
+                              disabled={busy}
+                              onClick={() => handleSaveTaskTolerance(t, draftVal)}
+                              className="min-h-[32px] rounded-md bg-blue-700 px-2.5 py-1 text-xs font-medium text-white transition-colors hover:bg-blue-800 disabled:opacity-50 dark:bg-blue-600 dark:hover:bg-blue-500"
+                            >
+                              Simpan
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-5 py-3 text-right">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setPendingDelete({ type: 'task', key: t.key, label: t.label })
+                          }
+                          aria-label={`Hapus tugas ${t.label}`}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/50 dark:hover:text-red-400"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
+            <div className="border-t border-slate-100 px-5 py-2.5 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
+              Toleransi +1 berarti input H-1 masih berstatus UPDATE (0 dianggap tepat batas); ubah ke 0 jika harus tepat hari H, atau +2 / lebih untuk memperlonggar batas keterlambatan.
+            </div>
           </div>
         )}
       </section>
@@ -530,10 +695,18 @@ export function AdminTasksOutletsView({
               className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
             />
             <datalist id="existing-pic-list">
-              {peopleList.map((p) => (
+              {suggestedPicNames.map((p) => (
                 <option key={p} value={p} />
               ))}
             </datalist>
+            {roleAccounts.length > 0 && (
+              <p className="mt-1 text-[11px] text-slate-400 dark:text-slate-500">
+                Saran akun {config.label}:{' '}
+                {roleAccounts
+                  .map((a) => `${(a.picName || a.name).toUpperCase()}`)
+                  .join(', ')}
+              </p>
+            )}
           </div>
 
           <div>
