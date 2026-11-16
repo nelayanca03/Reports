@@ -125,6 +125,35 @@ service cloud.firestore {
         && data.updatedBy == request.auth.uid;
     }
 
+    function isValidInputLog(data) {
+      return data.keys().hasAll([
+          'uid', 'userEmail', 'userName', 'userRole', 'roleId', 'roleLabel',
+          'actionType', 'pic', 'outlet', 'day', 'details', 'itemCount',
+          'clientTs', 'createdAt'
+        ])
+        && data.keys().hasOnly([
+          'uid', 'userEmail', 'userName', 'userRole', 'roleId', 'roleLabel',
+          'actionType', 'pic', 'outlet', 'day', 'details', 'itemCount',
+          'clientTs', 'createdAt'
+        ])
+        && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128
+        && data.uid == request.auth.uid
+        && data.userEmail is string && data.userEmail.size() >= 5 && data.userEmail.size() <= 120
+        && data.userEmail == request.auth.token.email.lower()
+        && data.userName is string && data.userName.size() >= 1 && data.userName.size() <= 80
+        && data.userRole is string && isAccountRole(data.userRole)
+        && data.roleId is string && isOperationalRole(data.roleId)
+        && data.roleLabel is string && data.roleLabel.size() >= 2 && data.roleLabel.size() <= 60
+        && data.actionType is string && data.actionType in ['input_harian', 'kunjungan']
+        && data.pic is string && data.pic.size() <= 60
+        && data.outlet is string && data.outlet.size() <= 120
+        && data.day is string && data.day.size() == 10 && data.day.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && data.details is string && data.details.size() <= 600
+        && data.itemCount is int && data.itemCount >= 1 && data.itemCount <= 50
+        && data.clientTs is string && data.clientTs.size() >= 10 && data.clientTs.size() <= 40
+        && data.createdAt is timestamp;
+    }
+
     match /accounts/{accountId} {
       allow get: if isVerifiedUser() && isValidId(accountId) && (
         existing().email == request.auth.token.email.lower() || isAdmin()
@@ -215,6 +244,17 @@ service cloud.firestore {
         && incoming().updatedAt == request.time
         && incoming().diff(existing()).affectedKeys().hasOnly(['ent', 'visit', 'updatedAt', 'updatedBy']);
       allow delete: if isVerifiedUser() && isValidId(roleId) && isOperationalRole(roleId) && isAdmin();
+    }
+
+    match /inputLogs/{logId} {
+      allow get: if isVerifiedUser() && isValidId(logId) && isAdmin();
+      allow list: if isVerifiedUser() && isAdmin();
+      allow create: if isVerifiedUser()
+        && isValidId(logId)
+        && isValidInputLog(incoming())
+        && hasRoleAccess(incoming().roleId)
+        && incoming().createdAt == request.time;
+      allow update, delete: if false;
     }
   }
 }

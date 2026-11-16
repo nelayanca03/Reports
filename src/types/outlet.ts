@@ -2,6 +2,7 @@ export type AccountRole = 'admin' | 'stock_accounting' | 'gl' | 'accounting';
 export type OperationalRoleId = 'stock_accounting' | 'gl' | 'accounting';
 export type FormulaType = 'daily_plus_1' | 'memo_month' | 'ref_task';
 export type TaskInputType = 'date' | 'month';
+export type InputLogActionType = 'input_harian' | 'kunjungan';
 
 export interface TaskDefinition {
   key: string;
@@ -44,11 +45,38 @@ export interface EntryItem {
   ts?: string;
 }
 
-export interface VisitItem {
-  ok: boolean;
+export interface VisitEntry {
+  id: string;
+  outlet: string;
   f: string;
   t: string;
   n: string;
+}
+
+export interface VisitItem {
+  ok: boolean;
+  outlet?: string;
+  f: string;
+  t: string;
+  n: string;
+  entries?: VisitEntry[];
+}
+
+export interface InputLogEntry {
+  id: string;
+  uid: string;
+  userEmail: string;
+  userName: string;
+  userRole: AccountRole;
+  roleId: OperationalRoleId;
+  roleLabel: string;
+  actionType: InputLogActionType;
+  pic: string;
+  outlet: string;
+  day: string;
+  details: string;
+  itemCount: number;
+  clientTs: string;
 }
 
 export interface OutletStoreState {
@@ -90,6 +118,7 @@ export interface OutletRecap {
 export interface VisitPersonStats {
   person: string;
   visitedCount: number;
+  totalVisits: number;
   elapsedDays: number;
   rate: number;
 }
@@ -100,4 +129,5 @@ export type AppView =
   | 'kunj'
   | 'data'
   | 'admin_tasks'
-  | 'admin_accounts';
+  | 'admin_accounts'
+  | 'admin_logs';

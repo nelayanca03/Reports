@@ -1,12 +1,14 @@
-import { ArrowUpRight, Check, Lock, Minus } from 'lucide-react';
+import { ArrowUpRight, Check, Lock, Minus, Plus, Save, Trash2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { OutletStoreState, RoleConfig, VisitItem } from '../types/outlet';
+import { OutletStoreState, RoleConfig, VisitEntry, VisitItem } from '../types/outlet';
 import {
   calcVisitLeaderboard,
   fmtDate,
   fmtDateFull,
+  fmtDateLong,
   getPeopleMap,
   getPersonList,
+  getVisitEntries,
   isSunday,
   nearestWorkingDay,
   todayIso,
@@ -17,8 +19,12 @@ interface KunjunganViewProps {
   store: OutletStoreState;
   days: string[];
   selectedPerson: string;
-  onUpdateVisit: (person: string, day: string, patch: Partial<VisitItem>) => void;
+  onSaveVisitDay: (person: string, day: string, nextVisit: VisitItem) => Promise<void>;
   onJumpToInput: (person: string, outlet: string, day: string) => void;
+}
+
+function makeVisitRowId(): string {
+  return `v_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`;
 }
 
 export function KunjunganView({
@@ -26,17 +32,24 @@ export function KunjunganView({
   store,
   days,
   selectedPerson,
-  onUpdateVisit,
+  onSaveVisitDay,
   onJumpToInput,
 }: KunjunganViewProps) {
   const today = todayIso();
   const personList = getPersonList(config.outlets);
   const peopleMap = getPeopleMap(config.outlets);
+  const allOutlets = Array.from(new Set(config.outlets.map((o) => o.code)));
 
   const [visitPerson, setVisitPerson] = useState<string>(() =>
     selectedPerson && personList.includes(selectedPerson) ? selectedPerson : personList[0] || ''
   );
   const [visitDay, setVisitDay] = useState<string>(() => nearestWorkingDay(days, today));
+
+  const [draftOk, setDraftOk] = useState<boolean>(false);
+  const [draftEntries, setDraftEntries] = useState<VisitEntry[]>([]);
+  const [isDirty, setIsDirty] = useState<boolean>(false);
+  const [saving, setSaving] = useState<boolean>(false);
+  const [savedNotice, setSavedNotice] = useState<string | null>(null);
 
   useEffect(() => {
     if (personList.length > 0 && !personList.includes(visitPerson)) {
@@ -52,6 +65,30 @@ export function KunjunganView({
     }
   }, [days, today, visitDay]);
 
+  const activePerson = personList.includes(visitPerson) ? visitPerson : personList[0] || '';
+  const activeDay = days.includes(visitDay) ? visitDay : nearestWorkingDay(days, today);
+  const activePersonOutlets = peopleMap[activePerson] || [];
+  const otherOutlets = allOutlets.filter((o) => !activePersonOutlets.includes(o));
+  const defaultOutletForPerson = activePersonOutlets[0] || allOutlets[0] || '';
+
+  const savedVisit: VisitItem = store.visit[`${activePerson}|${activeDay}`] || {
+    ok: false,
+    outlet: '',
+    f: '',
+    t: '',
+    n: '',
+    entries: [],
+  };
+
+  // Sync draft when switching PIC, day, or when Firestore snapshot updates while not dirty
+  useEffect(() => {
+    const entries = getVisitEntries(savedVisit);
+    setDraftOk(savedVisit.ok);
+    setDraftEntries(savedVisit.ok ? entries : []);
+    setIsDirty(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activePerson, activeDay, store.visit[`${activePerson}|${activeDay}`]]);
+
   if (personList.length === 0) {
     return (
       <section className="rounded-xl border border-slate-200 bg-white p-8 text-center dark:border-slate-800 dark:bg-slate-900">
@@ -65,22 +102,108 @@ export function KunjunganView({
     );
   }
 
-  const activePerson = personList.includes(visitPerson) ? visitPerson : personList[0];
-  const activeDay = days.includes(visitDay) ? visitDay : nearestWorkingDay(days, today);
-
   const { elapsedDays, rows } = calcVisitLeaderboard(store, days, personList, today);
-
-  const activeVisit: VisitItem = store.visit[`${activePerson}|${activeDay}`] || {
-    ok: false,
-    f: '',
-    t: '',
-    n: '',
-  };
 
   const todayIsSunday = isSunday(today);
   const isTodayWorkingDay = days.includes(today) && !todayIsSunday;
   const canEditSelectedCell =
     !isSunday(activeDay) && activeDay === today && isTodayWorkingDay;
+
+  const incompleteRows = draftOk
+    ? draftEntries.filter((e) => !e.outlet.trim() || !e.f.trim() || !e.t.trim())
+    : [];
+  const hasIncompleteRows = incompleteRows.length > 0 || (draftOk && draftEntries.length === 0);
+  const canSave = canEditSelectedCell && isDirty && !hasIncompleteRows && !saving;
+
+  const handleToggleVisited = (checked: boolean) => {
+    setSavedNotice(null);
+    setDraftOk(checked);
+    if (checked && draftEntries.length === 0) {
+      setDraftEntries([
+        {
+          id: makeVisitRowId(),
+          outlet: defaultOutletForPerson,
+          f: '',
+          t: '',
+          n: '',
+        },
+      ]);
+    } else if (!checked) {
+      setDraftEntries([]);
+    }
+    setIsDirty(checked || savedVisit.ok);
+  };
+
+  const handleUpdateRow = (id: string, patch: Partial<VisitEntry>) => {
+    setSavedNotice(null);
+    setDraftOk(true);
+    setDraftEntries((prev) =>
+      prev.map((row) =>
+        row.id === id
+          ? {
+              ...row,
+              ...patch,
+              n: (patch.n !== undefined ? patch.n : row.n).slice(0, 100),
+            }
+          : row
+      )
+    );
+    setIsDirty(true);
+  };
+
+  const handleAddRow = () => {
+    setSavedNotice(null);
+    setDraftOk(true);
+    setDraftEntries((prev) => [
+      ...prev,
+      {
+        id: makeVisitRowId(),
+        outlet: '',
+        f: '',
+        t: '',
+        n: '',
+      },
+    ]);
+    setIsDirty(true);
+  };
+
+  const handleRemoveRow = (id: string) => {
+    setSavedNotice(null);
+    const filtered = draftEntries.filter((r) => r.id !== id);
+    setDraftEntries(filtered);
+    if (filtered.length === 0) {
+      setDraftOk(false);
+      setIsDirty(savedVisit.ok);
+    } else {
+      setIsDirty(true);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!canSave) return;
+    setSaving(true);
+    try {
+      const first = draftEntries[0];
+      await onSaveVisitDay(activePerson, activeDay, {
+        ok: draftOk && draftEntries.length > 0,
+        outlet: first?.outlet || '',
+        f: first?.f || '',
+        t: first?.t || '',
+        n: first?.n || '',
+        entries: draftOk ? draftEntries : [],
+      });
+      setIsDirty(false);
+      setSavedNotice(
+        draftOk
+          ? `Kunjungan ${activePerson} (${fmtDateLong(activeDay)}) tersimpan.`
+          : `Kunjungan ${activePerson} (${fmtDateLong(activeDay)}) dihapus.`
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const savedEntryCount = savedVisit.ok ? Math.max(1, getVisitEntries(savedVisit).length) : 0;
 
   return (
     <div className="space-y-5">
@@ -96,25 +219,27 @@ export function KunjunganView({
               Input Kunjungan ke Outlet
             </h2>
             <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-              Outlet binaan {activePerson}: {(peopleMap[activePerson] || []).join(', ')}
+              Outlet binaan {activePerson}: {activePersonOutlets.join(', ')}
             </p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <span
               className={`text-xs font-semibold ${
-                activeVisit.ok
+                savedVisit.ok
                   ? 'text-emerald-700 dark:text-emerald-400'
                   : 'text-slate-500 dark:text-slate-400'
               }`}
             >
-              {activeVisit.ok ? 'Tercatat Dikunjungi' : 'Belum Dicatat'}
+              {savedVisit.ok
+                ? `Tercatat (${savedEntryCount}x kunjungan)`
+                : 'Belum Dicatat'}
             </span>
             <button
               type="button"
               onClick={() =>
                 onJumpToInput(
                   activePerson,
-                  (peopleMap[activePerson] || [])[0] || '',
+                  activePersonOutlets[0] || '',
                   activeDay
                 )
               }
@@ -137,7 +262,10 @@ export function KunjunganView({
             <select
               id="visit-person-select"
               value={activePerson}
-              onChange={(e) => setVisitPerson(e.target.value)}
+              onChange={(e) => {
+                setSavedNotice(null);
+                setVisitPerson(e.target.value);
+              }}
               className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
             >
               {personList.map((p) => (
@@ -159,11 +287,14 @@ export function KunjunganView({
               <select
                 id="visit-day-select"
                 value={activeDay}
-                onChange={(e) => setVisitDay(e.target.value)}
+                onChange={(e) => {
+                  setSavedNotice(null);
+                  setVisitDay(e.target.value);
+                }}
                 className={`min-h-[42px] min-w-0 flex-1 rounded-lg border px-3 py-2 font-mono text-sm tabular-nums focus:border-blue-600 focus:outline-none ${
                   canEditSelectedCell
                     ? 'border-slate-200 bg-slate-50 text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100'
-                    : 'border-slate-200 bg-slate-100 text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-400'
+                    : 'border-slate-200 bg-slate-100 text-slate-400 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-500'
                 }`}
               >
                 {days.map((d) => {
@@ -178,7 +309,7 @@ export function KunjunganView({
                           : 'bg-slate-100 text-slate-400 dark:bg-slate-900 dark:text-slate-500'
                       }
                     >
-                      {fmtDate(d)} ({d}){isToday ? ' — Hari H' : ' (Terkunci)'}
+                      {fmtDateLong(d)}
                     </option>
                   );
                 })}
@@ -186,7 +317,10 @@ export function KunjunganView({
               {isTodayWorkingDay && activeDay !== today && (
                 <button
                   type="button"
-                  onClick={() => setVisitDay(today)}
+                  onClick={() => {
+                    setSavedNotice(null);
+                    setVisitDay(today);
+                  }}
                   className="min-h-[42px] shrink-0 whitespace-nowrap rounded-lg bg-blue-700 px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-blue-800 dark:bg-blue-600 dark:hover:bg-blue-500"
                 >
                   Hari H
@@ -202,99 +336,210 @@ export function KunjunganView({
             <span>
               {todayIsSunday
                 ? 'Hanya Baca · Hari Minggu tidak memiliki input harian maupun kunjungan.'
-                : `Hanya Baca (${fmtDate(activeDay)}) · Kunjungan hanya dapat diisi atau diubah pada Hari H (${fmtDate(today)}). Tanggal H-1 maupun H+1 terkunci.`}
+                : `Hanya Baca (${fmtDateLong(activeDay)}) · Kunjungan hanya dapat diisi atau diubah pada Hari H (${fmtDateLong(today)}).`}
             </span>
           </div>
         )}
 
-        <div className="grid grid-cols-1 items-end gap-4 sm:grid-cols-2 lg:grid-cols-12">
-          <div className="lg:col-span-3">
-            <label
-              className={`flex min-h-[42px] items-center gap-3 rounded-lg border border-slate-200 px-3.5 py-2 text-sm font-medium transition-colors dark:border-slate-700 ${
-                canEditSelectedCell
-                  ? 'cursor-pointer bg-slate-50 text-slate-800 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700/70'
-                  : 'cursor-not-allowed bg-slate-200/80 text-slate-400 dark:bg-slate-800/50 dark:text-slate-500'
-              }`}
-            >
-              <input
-                type="checkbox"
-                disabled={!canEditSelectedCell}
-                checked={activeVisit.ok}
-                onChange={(e) =>
-                  onUpdateVisit(activePerson, activeDay, {
-                    ok: e.target.checked,
-                  })
-                }
-                className="h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
-              />
-              <span>Sudah dikunjungi</span>
-            </label>
-          </div>
-
-          <div className="lg:col-span-2">
-            <label
-              htmlFor="cell-visit-from"
-              className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
-            >
-              Dari jam
-            </label>
+        {/* Visited Toggle & Action Bar */}
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+          <label
+            className={`inline-flex min-h-[42px] items-center gap-3 rounded-lg border border-slate-200 px-3.5 py-2 text-sm font-medium transition-colors dark:border-slate-700 ${
+              canEditSelectedCell
+                ? 'cursor-pointer bg-slate-50 text-slate-800 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700/70'
+                : 'cursor-not-allowed bg-slate-200/80 text-slate-400 dark:bg-slate-800/50 dark:text-slate-500'
+            }`}
+          >
             <input
-              id="cell-visit-from"
-              type="time"
+              type="checkbox"
               disabled={!canEditSelectedCell}
-              value={activeVisit.f}
-              onChange={(e) =>
-                onUpdateVisit(activePerson, activeDay, {
-                  f: e.target.value,
-                })
-              }
-              className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-sm text-slate-900 tabular-nums disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-200/80 disabled:text-slate-400 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:disabled:border-slate-700/70 dark:disabled:bg-slate-800/50 dark:disabled:text-slate-500"
+              checked={draftOk}
+              onChange={(e) => handleToggleVisited(e.target.checked)}
+              className="h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
             />
-          </div>
+            <span>Sudah dikunjungi ({draftEntries.length} kunjungan)</span>
+          </label>
 
-          <div className="lg:col-span-2">
-            <label
-              htmlFor="cell-visit-to"
-              className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
+          <div className="flex flex-wrap items-center gap-2.5">
+            {savedNotice && !isDirty && (
+              <span className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
+                {savedNotice}
+              </span>
+            )}
+            {isDirty && canEditSelectedCell && (
+              <span className="text-xs font-medium text-blue-700 dark:text-blue-400">
+                Belum disimpan
+              </span>
+            )}
+            {canEditSelectedCell && (
+              <button
+                type="button"
+                onClick={handleAddRow}
+                className="inline-flex min-h-[40px] items-center gap-1.5 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+              >
+                <Plus className="h-3.5 w-3.5" />
+                <span>{draftEntries.length > 0 ? 'Tambah Kunjungan Lagi' : 'Tambah Kunjungan'}</span>
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={!canSave}
+              onClick={handleSave}
+              className="inline-flex min-h-[40px] items-center gap-2 whitespace-nowrap rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 dark:bg-blue-600 dark:hover:bg-blue-500 dark:disabled:bg-slate-800 dark:disabled:text-slate-500"
             >
-              Ke jam
-            </label>
-            <input
-              id="cell-visit-to"
-              type="time"
-              disabled={!canEditSelectedCell}
-              value={activeVisit.t}
-              onChange={(e) =>
-                onUpdateVisit(activePerson, activeDay, {
-                  t: e.target.value,
-                })
-              }
-              className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-sm text-slate-900 tabular-nums disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-200/80 disabled:text-slate-400 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:disabled:border-slate-700/70 dark:disabled:bg-slate-800/50 dark:disabled:text-slate-500"
-            />
-          </div>
-
-          <div className="sm:col-span-2 lg:col-span-5">
-            <label
-              htmlFor="cell-visit-note"
-              className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
-            >
-              Keterangan kunjungan
-            </label>
-            <input
-              id="cell-visit-note"
-              type="text"
-              disabled={!canEditSelectedCell}
-              value={activeVisit.n}
-              placeholder={canEditSelectedCell ? 'Catatan hasil kunjungan outlet...' : 'Terkunci'}
-              onChange={(e) =>
-                onUpdateVisit(activePerson, activeDay, {
-                  n: e.target.value,
-                })
-              }
-              className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-200/80 disabled:text-slate-400 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500 dark:disabled:border-slate-700/70 dark:disabled:bg-slate-800/50 dark:disabled:text-slate-500"
-            />
+              <Save className="h-4 w-4 shrink-0" />
+              <span>{saving ? 'Menyimpan...' : 'Save'}</span>
+            </button>
           </div>
         </div>
+
+        {canEditSelectedCell && isDirty && hasIncompleteRows && (
+          <div
+            role="alert"
+            className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3.5 py-2.5 text-xs font-medium text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300"
+          >
+            Tidak bisa Save karena masih ada baris kunjungan yang kosong. Lengkapi kolom Outlet, Dari jam, dan Ke jam atau klik tombol Hapus pada baris yang tidak ada kunjungan.
+          </div>
+        )}
+
+        {/* Dynamic Visit Entries */}
+        {draftEntries.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-slate-200 bg-slate-50/50 px-4 py-6 text-center text-xs text-slate-500 dark:border-slate-700 dark:bg-slate-800/30 dark:text-slate-400">
+            {canEditSelectedCell
+              ? 'Belum ada kunjungan dicatat. Klik "Tambah Kunjungan" untuk mengisi kunjungan outlet, atau tekan Save jika ingin menghapus catatan kunjungan hari ini.'
+              : 'Tidak ada catatan kunjungan pada tanggal ini.'}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {draftEntries.map((entry, idx) => {
+              const missingOutlet = !entry.outlet.trim();
+              const missingFrom = !entry.f.trim();
+              const missingTo = !entry.t.trim();
+              return (
+                <div
+                  key={entry.id}
+                  className="grid grid-cols-1 items-end gap-3 rounded-lg border border-slate-200/80 bg-slate-50/70 p-3.5 sm:grid-cols-2 lg:grid-cols-12 dark:border-slate-800 dark:bg-slate-800/35"
+                >
+                  <div className="lg:col-span-3">
+                    <label
+                      htmlFor={`visit-outlet-${entry.id}`}
+                      className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
+                    >
+                      Kunjungan #{idx + 1} · Outlet
+                    </label>
+                    <select
+                      id={`visit-outlet-${entry.id}`}
+                      disabled={!canEditSelectedCell}
+                      value={entry.outlet}
+                      onChange={(e) => handleUpdateRow(entry.id, { outlet: e.target.value })}
+                      className={`min-h-[40px] w-full rounded-lg border bg-white px-3 py-2 text-xs font-medium text-slate-900 disabled:cursor-not-allowed disabled:bg-slate-200/80 disabled:text-slate-400 focus:border-blue-600 focus:outline-none dark:bg-slate-900 dark:text-slate-100 dark:disabled:bg-slate-800/50 dark:disabled:text-slate-500 ${
+                        canEditSelectedCell && missingOutlet
+                          ? 'border-red-400 dark:border-red-500'
+                          : 'border-slate-200 dark:border-slate-700'
+                      }`}
+                    >
+                      <option value="">Pilih outlet...</option>
+                      {activePersonOutlets.length > 0 && (
+                        <optgroup label={`Outlet ${activePerson}`}>
+                          {activePersonOutlets.map((code) => (
+                            <option key={code} value={code}>
+                              {code}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                      {otherOutlets.length > 0 && (
+                        <optgroup label="Outlet Lainnya">
+                          {otherOutlets.map((code) => (
+                            <option key={code} value={code}>
+                              {code}
+                            </option>
+                          ))}
+                        </optgroup>
+                      )}
+                    </select>
+                  </div>
+
+                  <div className="lg:col-span-2">
+                    <label
+                      htmlFor={`visit-from-${entry.id}`}
+                      className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
+                    >
+                      Dari jam
+                    </label>
+                    <input
+                      id={`visit-from-${entry.id}`}
+                      type="time"
+                      disabled={!canEditSelectedCell}
+                      value={entry.f}
+                      onChange={(e) => handleUpdateRow(entry.id, { f: e.target.value })}
+                      className={`min-h-[40px] w-full rounded-lg border bg-white px-3 py-1.5 font-mono text-xs text-slate-900 tabular-nums disabled:cursor-not-allowed disabled:bg-slate-200/80 disabled:text-slate-400 focus:border-blue-600 focus:outline-none dark:bg-slate-900 dark:text-slate-100 dark:disabled:bg-slate-800/50 dark:disabled:text-slate-500 ${
+                        canEditSelectedCell && missingFrom
+                          ? 'border-red-400 dark:border-red-500'
+                          : 'border-slate-200 dark:border-slate-700'
+                      }`}
+                    />
+                  </div>
+
+                  <div className="lg:col-span-2">
+                    <label
+                      htmlFor={`visit-to-${entry.id}`}
+                      className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
+                    >
+                      Ke jam
+                    </label>
+                    <input
+                      id={`visit-to-${entry.id}`}
+                      type="time"
+                      disabled={!canEditSelectedCell}
+                      value={entry.t}
+                      onChange={(e) => handleUpdateRow(entry.id, { t: e.target.value })}
+                      className={`min-h-[40px] w-full rounded-lg border bg-white px-3 py-1.5 font-mono text-xs text-slate-900 tabular-nums disabled:cursor-not-allowed disabled:bg-slate-200/80 disabled:text-slate-400 focus:border-blue-600 focus:outline-none dark:bg-slate-900 dark:text-slate-100 dark:disabled:bg-slate-800/50 dark:disabled:text-slate-500 ${
+                        canEditSelectedCell && missingTo
+                          ? 'border-red-400 dark:border-red-500'
+                          : 'border-slate-200 dark:border-slate-700'
+                      }`}
+                    />
+                  </div>
+
+                  <div className={canEditSelectedCell ? 'lg:col-span-4' : 'sm:col-span-2 lg:col-span-5'}>
+                    <label
+                      htmlFor={`visit-note-${entry.id}`}
+                      className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
+                    >
+                      Keterangan kunjungan
+                    </label>
+                    <input
+                      id={`visit-note-${entry.id}`}
+                      type="text"
+                      maxLength={100}
+                      disabled={!canEditSelectedCell}
+                      value={entry.n}
+                      placeholder={canEditSelectedCell ? 'Catatan hasil kunjungan (maks. 100 huruf)' : 'Terkunci'}
+                      onChange={(e) => handleUpdateRow(entry.id, { n: e.target.value })}
+                      className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs text-slate-900 placeholder:text-slate-400 disabled:cursor-not-allowed disabled:bg-slate-200/80 disabled:text-slate-400 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500 dark:disabled:bg-slate-800/50 dark:disabled:text-slate-500"
+                    />
+                  </div>
+
+                  {canEditSelectedCell && (
+                    <div className="flex justify-end lg:col-span-1">
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveRow(entry.id)}
+                        title="Hapus baris kunjungan ini"
+                        aria-label={`Hapus kunjungan #${idx + 1}`}
+                        className="inline-flex h-[40px] w-full items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-red-600 transition-colors hover:border-red-200 hover:bg-red-50 dark:border-slate-700 dark:bg-slate-900 dark:text-red-400 dark:hover:bg-red-950/50 lg:w-10 lg:px-0"
+                      >
+                        <Trash2 className="h-4 w-4 shrink-0" />
+                        <span className="lg:hidden">Hapus</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </section>
 
       {/* Leaderboard */}
@@ -309,12 +554,13 @@ export function KunjunganView({
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[540px] border-collapse text-left text-sm">
+          <table className="w-full min-w-[600px] border-collapse text-left text-sm">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50/70 text-xs font-medium text-slate-500 dark:border-slate-800 dark:bg-slate-800/40 dark:text-slate-400">
                 <th className="w-12 px-5 py-3">#</th>
                 <th className="px-4 py-3">Nama PIC</th>
                 <th className="px-4 py-3 text-right">Hari Dikunjungi</th>
+                <th className="px-4 py-3 text-right">Total Kunjungan</th>
                 <th className="px-4 py-3 text-right">Hari Berjalan</th>
                 <th className="px-5 py-3">Rate Kunjungan</th>
               </tr>
@@ -335,6 +581,9 @@ export function KunjunganView({
                     </td>
                     <td className="px-4 py-3.5 text-right font-mono font-medium text-slate-900 tabular-nums dark:text-slate-100">
                       {r.visitedCount}
+                    </td>
+                    <td className="px-4 py-3.5 text-right font-mono font-medium text-slate-700 tabular-nums dark:text-slate-300">
+                      {r.totalVisits}x
                     </td>
                     <td className="px-4 py-3.5 text-right font-mono text-slate-600 tabular-nums dark:text-slate-300">
                       {r.elapsedDays}
@@ -410,9 +659,17 @@ export function KunjunganView({
                     const isSelected = activePerson === person && activeDay === d;
                     const isToday = d === today;
                     const visited = Boolean(v?.ok);
+                    const entries = visited ? getVisitEntries(v) : [];
+                    const count = visited ? Math.max(1, entries.length) : 0;
+                    const detailsText = entries
+                      .map(
+                        (e) =>
+                          `${e.outlet || 'Outlet'}${e.f || e.t ? ` (${e.f || '?'}–${e.t || '?'})` : ''}${e.n ? `: ${e.n}` : ''}`
+                      )
+                      .join(' | ');
                     const tooltip = visited
-                      ? `${person} · ${fmtDate(d)}${isToday ? ' (Hari H)' : ' (Hanya Baca)'}${v?.f || v?.t ? ` (${v?.f || '?'}–${v?.t || '?'})` : ''}${v?.n ? `: ${v.n}` : ''}`
-                      : `${person} · ${fmtDate(d)}${isToday ? ' (Hari H — belum dicatat)' : ' (Terkunci)'}`;
+                      ? `${person} · ${fmtDateLong(d)}${isToday ? ' (Hari H)' : ''} · ${count}x: ${detailsText}`
+                      : `${person} · ${fmtDateLong(d)}${isToday ? ' (Hari H — belum dicatat)' : ''}`;
 
                     return (
                       <td
@@ -426,6 +683,7 @@ export function KunjunganView({
                           title={tooltip}
                           aria-label={tooltip}
                           onClick={() => {
+                            setSavedNotice(null);
                             setVisitPerson(person);
                             setVisitDay(d);
                           }}
@@ -444,7 +702,13 @@ export function KunjunganView({
                           }`}
                         >
                           {visited ? (
-                            <Check className="h-4 w-4" />
+                            count > 1 ? (
+                              <span className="font-mono text-[11px] font-bold tabular-nums">
+                                {count}x
+                              </span>
+                            ) : (
+                              <Check className="h-4 w-4" />
+                            )
                           ) : (
                             <Minus className="h-3 w-3" />
                           )}

@@ -18,6 +18,7 @@ const VIEW_TITLES: Record<AppView, string> = {
   data: 'Data & Ekspor',
   admin_tasks: 'Kelola Tugas & Outlet',
   admin_accounts: 'Kelola Akun',
+  admin_logs: 'Log History Penginputan',
 };
 
 export function TopBar({
@@ -29,7 +30,10 @@ export function TopBar({
   onOpenMobileMenu,
   onQuickExportCsv,
 }: TopBarProps) {
-  const isAdminView = activeView === 'admin_tasks' || activeView === 'admin_accounts';
+  const isAdminView =
+    activeView === 'admin_tasks' ||
+    activeView === 'admin_accounts' ||
+    activeView === 'admin_logs';
 
   return (
     <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-4 border-b border-slate-200 bg-white/95 px-4 backdrop-blur-sm sm:px-6 dark:border-slate-800 dark:bg-slate-900/95">

@@ -1,11 +1,15 @@
 import { User, onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
 import {
   FieldPath,
+  collection,
   deleteDoc,
   deleteField,
   doc,
   getDoc,
+  limit,
   onSnapshot,
+  orderBy,
+  query,
   serverTimestamp,
   setDoc,
   updateDoc,
@@ -23,6 +27,8 @@ import {
 import {
   AccountProfile,
   AccountRole,
+  InputLogActionType,
+  InputLogEntry,
   OperationalRoleId,
   OutletStoreState,
   RoleConfig,
@@ -33,7 +39,12 @@ import {
   DEFAULT_START,
   LEGACY_STORAGE_KEY,
   buildWorkingDays,
+  canEditOutletDay,
+  fmtDateLong,
+  fmtMonth,
   getEntry,
+  getTaskInputType,
+  getVisitEntries,
   isSunday,
   todayIso,
 } from '../utils/outletLogic';
@@ -89,6 +100,7 @@ export function useAuthAndRoleData() {
     start: DEFAULT_START,
   });
   const [managedAccounts, setManagedAccounts] = useState<AccountProfile[]>([]);
+  const [inputLogs, setInputLogs] = useState<InputLogEntry[]>([]);
   const [theme, setTheme] = useState<'light' | 'dark'>(loadInitialTheme);
 
   // Theme sync
@@ -392,6 +404,41 @@ export function useAuthAndRoleData() {
       )
     );
 
+    const logsQuery = query(
+      collection(db, 'inputLogs'),
+      orderBy('createdAt', 'desc'),
+      limit(300)
+    );
+    unsubs.push(
+      onSnapshot(
+        logsQuery,
+        (snap) => {
+          const list: InputLogEntry[] = snap.docs.map((docSnap) => {
+            const d = docSnap.data();
+            return {
+              id: docSnap.id,
+              uid: String(d.uid || ''),
+              userEmail: String(d.userEmail || ''),
+              userName: String(d.userName || ''),
+              userRole: (d.userRole as AccountRole) || 'stock_accounting',
+              roleId: (d.roleId as OperationalRoleId) || 'stock_accounting',
+              roleLabel: String(d.roleLabel || ''),
+              actionType:
+                d.actionType === 'kunjungan' ? 'kunjungan' : 'input_harian',
+              pic: String(d.pic || ''),
+              outlet: String(d.outlet || ''),
+              day: String(d.day || ''),
+              details: String(d.details || ''),
+              itemCount: Number(d.itemCount || 1),
+              clientTs: String(d.clientTs || ''),
+            };
+          });
+          setInputLogs(list);
+        },
+        (error) => handleFirestoreError(error, OperationType.LIST, 'inputLogs')
+      )
+    );
+
     return () => {
       unsubs.forEach((u) => u());
     };
@@ -469,7 +516,7 @@ export function useAuthAndRoleData() {
     async (outlet: string, day: string, taskKey: string, field: 'd' | 'n', value: string) => {
       const uid = auth.currentUser?.uid;
       if (!uid) return;
-      if (isSunday(day) || day !== todayIso()) return;
+      if (!canEditOutletDay(storeWithConfigStart, activeConfig.tasks, days, outlet, day)) return;
       const path = `roleWorkspaces/${effectiveRoleId}`;
       try {
         const wsRef = await ensureWorkspaceDoc(effectiveRoleId, uid);
@@ -482,11 +529,12 @@ export function useAuthAndRoleData() {
           day,
           taskKey
         ).d;
+        const safeValue = field === 'n' ? value.slice(0, 100) : value;
         const nextEntry = {
           d: existing?.d || fallbackDate,
-          n: existing?.n || '',
+          n: (existing?.n || '').slice(0, 100),
           ts: new Date().toISOString(),
-          [field]: value,
+          [field]: safeValue,
         };
         await updateDoc(
           wsRef,
@@ -502,7 +550,6 @@ export function useAuthAndRoleData() {
       }
     },
     [
-      currentAccount?.role,
       effectiveRoleId,
       ensureWorkspaceDoc,
       workspaceData.ent,
@@ -512,11 +559,129 @@ export function useAuthAndRoleData() {
     ]
   );
 
+  const recordInputLog = useCallback(
+    async (params: {
+      actionType: InputLogActionType;
+      pic: string;
+      outlet: string;
+      day: string;
+      details: string;
+      itemCount: number;
+      clientTs: string;
+    }) => {
+      const uid = auth.currentUser?.uid;
+      const email = (currentAccount?.email || auth.currentUser?.email || '').trim().toLowerCase();
+      if (!uid || !email || !currentAccount) return;
+      const logId = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+      const logPath = `inputLogs/${logId}`;
+      try {
+        await setDoc(doc(db, 'inputLogs', logId), {
+          uid,
+          userEmail: email.slice(0, 120),
+          userName: (currentAccount.name || email).slice(0, 80),
+          userRole: currentAccount.role,
+          roleId: effectiveRoleId,
+          roleLabel: (activeConfig.label || effectiveRoleId).slice(0, 60),
+          actionType: params.actionType,
+          pic: params.pic.slice(0, 60),
+          outlet: params.outlet.slice(0, 120),
+          day: params.day.slice(0, 10),
+          details: params.details.slice(0, 600),
+          itemCount: Math.max(1, Math.min(50, Math.round(params.itemCount))),
+          clientTs: params.clientTs.slice(0, 40),
+          createdAt: serverTimestamp(),
+        });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.CREATE, logPath);
+      }
+    },
+    [activeConfig.label, currentAccount, effectiveRoleId]
+  );
+
+  const saveOutletDayEntries = useCallback(
+    async (
+      outlet: string,
+      day: string,
+      changes: Record<string, { d: string; n: string; cleared?: boolean }>
+    ) => {
+      const uid = auth.currentUser?.uid;
+      if (!uid) return;
+      if (!canEditOutletDay(storeWithConfigStart, activeConfig.tasks, days, outlet, day)) return;
+      const entries = Object.entries(changes);
+      if (entries.length === 0) return;
+
+      const path = `roleWorkspaces/${effectiveRoleId}`;
+      const nowIso = new Date().toISOString();
+      try {
+        const wsRef = await ensureWorkspaceDoc(effectiveRoleId, uid);
+        const updateArgs: unknown[] = [];
+
+        for (const [taskKey, item] of entries) {
+          const cleanNote = (item.n || '').slice(0, 100);
+          if (item.cleared || (!item.d && !cleanNote)) {
+            updateArgs.push(new FieldPath('ent', outlet, `${day}|${taskKey}`), deleteField());
+          } else {
+            updateArgs.push(new FieldPath('ent', outlet, `${day}|${taskKey}`), {
+              d: item.d,
+              n: cleanNote,
+              ts: nowIso,
+            });
+          }
+        }
+
+        updateArgs.push('updatedAt', serverTimestamp(), 'updatedBy', uid);
+
+        await updateDoc(
+          wsRef,
+          ...(updateArgs as [FieldPath | string, unknown, ...unknown[]])
+        );
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, path);
+      }
+
+      const assignedPic =
+        activeConfig.outlets.find((o) => o.code === outlet)?.person || '';
+      const summaryParts = entries.map(([taskKey, item]) => {
+        const taskDef = activeConfig.tasks.find((t) => t.key === taskKey);
+        const label = taskDef?.shortLabel || taskDef?.label || taskKey;
+        const cleanNote = (item.n || '').trim().slice(0, 100);
+        if (item.cleared || (!item.d && !cleanNote)) {
+          return `${label}: Dikosongkan`;
+        }
+        const datePart = item.d
+          ? getTaskInputType(taskDef) === 'month'
+            ? fmtMonth(item.d)
+            : fmtDateLong(item.d)
+          : '-';
+        return cleanNote ? `${label}: ${datePart} (${cleanNote})` : `${label}: ${datePart}`;
+      });
+
+      await recordInputLog({
+        actionType: 'input_harian',
+        pic: assignedPic,
+        outlet,
+        day,
+        details: summaryParts.join(' · '),
+        itemCount: entries.length,
+        clientTs: nowIso,
+      });
+    },
+    [
+      effectiveRoleId,
+      ensureWorkspaceDoc,
+      storeWithConfigStart,
+      activeConfig.tasks,
+      activeConfig.outlets,
+      days,
+      recordInputLog,
+    ]
+  );
+
   const clearEntryForDay = useCallback(
     async (outlet: string, day: string, taskKey: string) => {
       const uid = auth.currentUser?.uid;
       if (!uid) return;
-      if (isSunday(day) || day !== todayIso()) return;
+      if (!canEditOutletDay(storeWithConfigStart, activeConfig.tasks, days, outlet, day)) return;
       const path = `roleWorkspaces/${effectiveRoleId}`;
       try {
         const wsRef = doc(db, 'roleWorkspaces', effectiveRoleId);
@@ -533,24 +698,44 @@ export function useAuthAndRoleData() {
         handleFirestoreError(error, OperationType.UPDATE, path);
       }
     },
-    [currentAccount?.role, effectiveRoleId]
+    [effectiveRoleId, storeWithConfigStart, activeConfig.tasks, days]
   );
 
-  const updateVisit = useCallback(
-    async (person: string, day: string, patch: Partial<VisitItem>) => {
+  const saveVisitDay = useCallback(
+    async (person: string, day: string, nextVisitInput: VisitItem) => {
       const uid = auth.currentUser?.uid;
       if (!uid) return;
       if (isSunday(day) || day !== todayIso()) return;
+
+      const normalizedEntries = getVisitEntries(nextVisitInput)
+        .slice(0, 20)
+        .map((entry, idx) => ({
+          id: entry.id || `v_${idx + 1}`,
+          outlet: entry.outlet.trim().slice(0, 40),
+          f: entry.f.slice(0, 10),
+          t: entry.t.slice(0, 10),
+          n: entry.n.slice(0, 100),
+        }));
+
+      const first = normalizedEntries[0];
+      const normalizedVisit: VisitItem = {
+        ok: Boolean(nextVisitInput.ok),
+        outlet: first?.outlet || nextVisitInput.outlet || '',
+        f: first?.f || '',
+        t: first?.t || '',
+        n: first?.n || '',
+        entries: nextVisitInput.ok ? normalizedEntries : [],
+      };
+
       const path = `roleWorkspaces/${effectiveRoleId}`;
+      const nowIso = new Date().toISOString();
       try {
         const wsRef = await ensureWorkspaceDoc(effectiveRoleId, uid);
         const key = `${person}|${day}`;
-        const current: VisitItem = workspaceData.visit[key] || { ok: false, f: '', t: '', n: '' };
-        const nextVisit: VisitItem = { ...current, ...patch };
         await updateDoc(
           wsRef,
           new FieldPath('visit', key),
-          nextVisit,
+          normalizedVisit,
           'updatedAt',
           serverTimestamp(),
           'updatedBy',
@@ -559,8 +744,44 @@ export function useAuthAndRoleData() {
       } catch (error) {
         handleFirestoreError(error, OperationType.UPDATE, path);
       }
+
+      const uniqueOutlets = Array.from(
+        new Set(
+          (normalizedVisit.entries || [])
+            .map((e) => e.outlet)
+            .filter(Boolean)
+        )
+      );
+      const visitSummary = normalizedVisit.ok
+        ? (normalizedVisit.entries || [])
+            .map((e, idx) => {
+              const timeStr = e.f || e.t ? ` (${e.f || '?'}–${e.t || '?'})` : '';
+              const noteStr = e.n ? `: ${e.n}` : '';
+              return `#${idx + 1} ${e.outlet || 'Outlet'}${timeStr}${noteStr}`;
+            })
+            .join(' · ') || 'Sudah dikunjungi'
+        : 'Status kunjungan dibatalkan / tidak dikunjungi';
+
+      await recordInputLog({
+        actionType: 'kunjungan',
+        pic: person,
+        outlet: uniqueOutlets.join(', ') || '-',
+        day,
+        details: visitSummary,
+        itemCount: normalizedVisit.ok ? Math.max(1, (normalizedVisit.entries || []).length) : 1,
+        clientTs: nowIso,
+      });
     },
-    [currentAccount?.role, effectiveRoleId, ensureWorkspaceDoc, workspaceData.visit]
+    [effectiveRoleId, ensureWorkspaceDoc, recordInputLog]
+  );
+
+  const updateVisit = useCallback(
+    async (person: string, day: string, patch: Partial<VisitItem>) => {
+      const key = `${person}|${day}`;
+      const current: VisitItem = workspaceData.visit[key] || { ok: false, f: '', t: '', n: '' };
+      await saveVisitDay(person, day, { ...current, ...patch });
+    },
+    [saveVisitDay, workspaceData.visit]
   );
 
   const saveRoleConfig = useCallback(async (roleId: OperationalRoleId, nextConfig: RoleConfig) => {
@@ -720,13 +941,16 @@ export function useAuthAndRoleData() {
     days,
     store: storeWithConfigStart,
     managedAccounts,
+    inputLogs,
     theme,
     toggleTheme,
     signInWithGoogle,
     signOutUser,
     updateEntry,
+    saveOutletDayEntries,
     clearEntryForDay,
     updateVisit,
+    saveVisitDay,
     saveRoleConfig,
     saveAccount,
     deleteAccount,

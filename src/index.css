@@ -4,6 +4,52 @@
 @theme {
   --font-sans: "Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+
+  --color-white: #fcf9f2;
+
+  /* Warm Paper & Stone Neutrals (low blue light & softer contrast) */
+  --color-slate-50: #f5efe4;
+  --color-slate-100: #ece3d3;
+  --color-slate-200: #ded3bf;
+  --color-slate-300: #cabca4;
+  --color-slate-400: #988b77;
+  --color-slate-500: #746857;
+  --color-slate-600: #594e40;
+  --color-slate-700: #433b30;
+  --color-slate-800: #2e2821;
+  --color-slate-900: #231e19;
+  --color-slate-950: #181411;
+
+  /* Warm Terracotta / Amber Accent (replaces cold high-blue-light blue) */
+  --color-blue-50: #fbf2e6;
+  --color-blue-100: #f6e1c9;
+  --color-blue-200: #ebc298;
+  --color-blue-400: #dd8b47;
+  --color-blue-500: #c66e26;
+  --color-blue-600: #af5918;
+  --color-blue-700: #964812;
+  --color-blue-800: #7d3a0d;
+  --color-blue-950: #3b1b06;
+
+  /* Warm Sage Green for positive statuses */
+  --color-emerald-50: #eef4ee;
+  --color-emerald-100: #d9e8db;
+  --color-emerald-200: #b7d4bc;
+  --color-emerald-400: #69ad80;
+  --color-emerald-700: #2f684e;
+  --color-emerald-800: #25523d;
+  --color-emerald-950: #12281e;
+
+  /* Warm Brick Red for pending/destructive statuses */
+  --color-red-50: #fbf0ed;
+  --color-red-200: #efc2ba;
+  --color-red-400: #dc7466;
+  --color-red-500: #c75143;
+  --color-red-600: #b23c2f;
+  --color-red-700: #963025;
+  --color-red-800: #7b261d;
+  --color-red-900: #551c16;
+  --color-red-950: #32110d;
 }
 
 @layer base {

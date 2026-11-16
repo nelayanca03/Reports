@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { AdminAccountsView } from './components/AdminAccountsView';
+import { AdminLogsView } from './components/AdminLogsView';
 import { AdminTasksOutletsView } from './components/AdminTasksOutletsView';
 import { DataEksporView } from './components/DataEksporView';
 import { InputHarianView } from './components/InputHarianView';
@@ -20,6 +21,7 @@ import {
   getPersonList,
   nearestWorkingDay,
   todayIso,
+  yesterdayIso,
 } from './utils/outletLogic';
 
 export default function App() {
@@ -35,13 +37,13 @@ export default function App() {
     days,
     store,
     managedAccounts,
+    inputLogs,
     theme,
     toggleTheme,
     signInWithGoogle,
     signOutUser,
-    updateEntry,
-    clearEntryForDay,
-    updateVisit,
+    saveOutletDayEntries,
+    saveVisitDay,
     saveRoleConfig,
     saveAccount,
     deleteAccount,
@@ -55,7 +57,7 @@ export default function App() {
   const [selectedPerson, setSelectedPerson] = useState<string>('');
   const [selectedOutlet, setSelectedOutlet] = useState<string>('');
   const [selectedDay, setSelectedDay] = useState<string>(() =>
-    nearestWorkingDay(days, todayIso())
+    nearestWorkingDay(days, yesterdayIso())
   );
 
   const [selectedTask, setSelectedTask] = useState<string>('memo');
@@ -104,7 +106,7 @@ export default function App() {
 
   useEffect(() => {
     if (!days.includes(selectedDay)) {
-      setSelectedDay(nearestWorkingDay(days, todayIso()));
+      setSelectedDay(nearestWorkingDay(days, yesterdayIso()));
     }
   }, [days, selectedDay]);
 
@@ -112,7 +114,11 @@ export default function App() {
     if (
       currentAccount &&
       currentAccount.role !== 'admin' &&
-      (activeView === 'rekap' || activeView === 'data')
+      (activeView === 'rekap' ||
+        activeView === 'data' ||
+        activeView === 'admin_tasks' ||
+        activeView === 'admin_accounts' ||
+        activeView === 'admin_logs')
     ) {
       setActiveView('input');
     }
@@ -177,7 +183,7 @@ export default function App() {
   };
 
   return (
-    <div className="flex min-h-screen bg-slate-50 text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+    <div className="flex min-h-screen bg-slate-50 text-slate-800 dark:bg-slate-950 dark:text-slate-100">
       <Sidebar
         account={currentAccount}
         activeRoleId={activeRoleId}
@@ -191,10 +197,6 @@ export default function App() {
         onSelectView={setActiveView}
         mobileOpen={mobileMenuOpen}
         onCloseMobile={() => setMobileMenuOpen(false)}
-        config={activeConfig}
-        store={store}
-        days={days}
-        selectedDay={selectedDay}
         onSignOut={signOutUser}
       />
 
@@ -222,8 +224,7 @@ export default function App() {
               onChangePerson={handleChangePerson}
               onChangeOutlet={setSelectedOutlet}
               onChangeDay={setSelectedDay}
-              onUpdateEntry={updateEntry}
-              onClearEntry={clearEntryForDay}
+              onSaveOutletDay={saveOutletDayEntries}
               onOpenAdminConfig={() => setActiveView('admin_tasks')}
             />
           )}
@@ -247,7 +248,7 @@ export default function App() {
               store={store}
               days={days}
               selectedPerson={selectedPerson}
-              onUpdateVisit={updateVisit}
+              onSaveVisitDay={saveVisitDay}
               onJumpToInput={handleJumpToInput}
             />
           )}
@@ -282,6 +283,14 @@ export default function App() {
               isPrimaryAdmin={isPrimaryAdmin}
               onSaveAccount={saveAccount}
               onDeleteAccount={deleteAccount}
+            />
+          )}
+
+          {activeView === 'admin_logs' && isAdmin && (
+            <AdminLogsView
+              logs={inputLogs}
+              accounts={managedAccounts}
+              roleConfigs={roleConfigs}
             />
           )}
         </main>

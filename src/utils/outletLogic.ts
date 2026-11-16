@@ -3,6 +3,7 @@ import {
   CalculatedTask,
   EntryItem,
   FormulaType,
+  InputLogEntry,
   OperationalRoleId,
   OutletAssignment,
   OutletRecap,
@@ -11,6 +12,8 @@ import {
   RoleConfig,
   TaskDefinition,
   TaskInputType,
+  VisitEntry,
+  VisitItem,
   VisitPersonStats,
 } from '../types/outlet';
 
@@ -221,9 +224,37 @@ export function isSunday(isoStr: string): boolean {
   return !Number.isNaN(d.getTime()) && d.getUTCDay() === 0;
 }
 
+export function shiftIsoDays(isoStr: string, offsetDays: number): string {
+  const d = parseUtcDate(isoStr);
+  if (Number.isNaN(d.getTime())) return isoStr;
+  d.setUTCDate(d.getUTCDate() + offsetDays);
+  return toIsoUtc(d);
+}
+
 export function todayIso(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+export function yesterdayIso(): string {
+  return shiftIsoDays(todayIso(), -1);
+}
+
+export function prevMonthFirstDay(isoStr: string): string {
+  const d = parseUtcDate(isoStr.length === 7 ? `${isoStr}-01` : isoStr);
+  if (Number.isNaN(d.getTime())) return `${isoStr.slice(0, 7)}-01`;
+  d.setUTCDate(1);
+  d.setUTCMonth(d.getUTCMonth() - 1);
+  return toIsoUtc(d);
+}
+
+export function formatPicTitle(person: string): string {
+  return person
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(' ');
 }
 
 export function fmtDate(isoStr: string): string {
@@ -250,12 +281,38 @@ export function fmtMonth(isoStr: string): string {
   });
 }
 
+export function fmtDateLong(isoStr: string): string {
+  if (!isoStr) return '—';
+  const normalized = isoStr.length === 7 ? `${isoStr}-01` : isoStr;
+  const d = parseUtcDate(normalized);
+  if (Number.isNaN(d.getTime())) return isoStr;
+  return d.toLocaleDateString('id-ID', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
 export function fmtDateFull(isoStr: string): string {
   if (!isoStr) return '—';
   const d = parseUtcDate(isoStr);
   if (Number.isNaN(d.getTime())) return isoStr;
   return d.toLocaleDateString('id-ID', {
     weekday: 'short',
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
+export function fmtDateWeekdayLong(isoStr: string): string {
+  if (!isoStr) return '—';
+  const d = parseUtcDate(isoStr);
+  if (Number.isNaN(d.getTime())) return isoStr;
+  return d.toLocaleDateString('id-ID', {
+    weekday: 'long',
     day: '2-digit',
     month: 'short',
     year: 'numeric',
@@ -300,6 +357,36 @@ export function nearestWorkingDay(days: string[], targetIso: string): string {
   if (!days.length) return targetIso;
   const eligible = days.filter((d) => d <= targetIso);
   return eligible.length ? eligible[eligible.length - 1] : days[0];
+}
+
+export function isOutletDayFilled(
+  state: OutletStoreState,
+  tasks: TaskDefinition[],
+  outlet: string,
+  day: string
+): boolean {
+  if (!outlet || !day) return false;
+  const outletMap = state.ent[outlet];
+  if (!outletMap) return false;
+  return tasks.some((t) => {
+    const entry = outletMap[`${day}|${t.key}`];
+    return Boolean(entry && (entry.d || entry.n));
+  });
+}
+
+export function canEditOutletDay(
+  state: OutletStoreState,
+  tasks: TaskDefinition[],
+  days: string[],
+  outlet: string,
+  day: string,
+  today: string = todayIso()
+): boolean {
+  if (!day || !days.includes(day)) return false;
+  if (isSunday(day)) return false;
+  if (day > today) return false;
+  if (day === today) return true;
+  return !isOutletDayFilled(state, tasks, outlet, day);
 }
 
 export function getEntry(
@@ -446,6 +533,31 @@ export function calcRecap(
   };
 }
 
+export function getVisitEntries(visitItem?: VisitItem): VisitEntry[] {
+  if (!visitItem) return [];
+  if (Array.isArray(visitItem.entries) && visitItem.entries.length > 0) {
+    return visitItem.entries.map((entry, idx) => ({
+      id: entry.id || `v_${idx + 1}`,
+      outlet: entry.outlet || '',
+      f: entry.f || '',
+      t: entry.t || '',
+      n: entry.n || '',
+    }));
+  }
+  if (visitItem.ok || visitItem.outlet || visitItem.f || visitItem.t || visitItem.n) {
+    return [
+      {
+        id: 'v_1',
+        outlet: visitItem.outlet || '',
+        f: visitItem.f || '',
+        t: visitItem.t || '',
+        n: visitItem.n || '',
+      },
+    ];
+  }
+  return [];
+}
+
 export function calcVisitLeaderboard(
   state: OutletStoreState,
   days: string[],
@@ -456,15 +568,30 @@ export function calcVisitLeaderboard(
   const elapsedDays = workingDays.filter((d) => d <= today).length;
   const rows = personList
     .map((person) => {
-      const visitedCount = workingDays.filter((d) => Boolean(state.visit[`${person}|${d}`]?.ok)).length;
+      let visitedCount = 0;
+      let totalVisits = 0;
+      for (const d of workingDays) {
+        const v = state.visit[`${person}|${d}`];
+        if (v?.ok) {
+          visitedCount++;
+          const entries = getVisitEntries(v);
+          totalVisits += Math.max(1, entries.length);
+        }
+      }
       return {
         person,
         visitedCount,
+        totalVisits,
         elapsedDays,
         rate: elapsedDays ? visitedCount / elapsedDays : 0,
       };
     })
-    .sort((a, b) => b.visitedCount - a.visitedCount || b.rate - a.rate);
+    .sort(
+      (a, b) =>
+        b.visitedCount - a.visitedCount ||
+        b.totalVisits - a.totalVisits ||
+        b.rate - a.rate
+    );
 
   return { elapsedDays, rows };
 }
@@ -594,27 +721,97 @@ export function generateVisitCsv(
   days: string[],
   config: RoleConfig
 ): string {
-  const header = ['Role', 'PIC', 'Tanggal Kerja', 'Dikunjungi', 'Dari Jam', 'Ke Jam', 'Keterangan'];
+  const header = [
+    'Role',
+    'PIC',
+    'Tanggal Kerja',
+    'Dikunjungi',
+    'Jumlah Kunjungan',
+    'Outlet',
+    'Dari Jam',
+    'Ke Jam',
+    'Keterangan',
+  ];
   const rows: string[] = [header.map(escapeCsv).join(',')];
   const personList = getPersonList(config.outlets);
 
   for (const person of personList) {
     for (const day of days) {
       const v = state.visit[`${person}|${day}`];
-      rows.push(
-        [
-          config.label,
-          person,
-          day,
-          v?.ok ? 'Ya' : 'Tidak',
-          v?.f || '',
-          v?.t || '',
-          v?.n || '',
-        ]
-          .map(escapeCsv)
-          .join(',')
-      );
+      const entries = v?.ok ? getVisitEntries(v) : [];
+      if (v?.ok && entries.length > 0) {
+        entries.forEach((entry, idx) => {
+          rows.push(
+            [
+              config.label,
+              person,
+              day,
+              'Ya',
+              idx === 0 ? entries.length : '',
+              entry.outlet || '-',
+              entry.f || '',
+              entry.t || '',
+              entry.n || '',
+            ]
+              .map(escapeCsv)
+              .join(',')
+          );
+        });
+      } else {
+        rows.push(
+          [
+            config.label,
+            person,
+            day,
+            v?.ok ? 'Ya' : 'Tidak',
+            v?.ok ? 1 : 0,
+            v?.outlet || '',
+            v?.f || '',
+            v?.t || '',
+            v?.n || '',
+          ]
+            .map(escapeCsv)
+            .join(',')
+        );
+      }
     }
+  }
+  return rows.join('\n');
+}
+
+export function generateInputLogsCsv(logs: InputLogEntry[]): string {
+  const header = [
+    'Waktu Input',
+    'Nama User',
+    'Email User',
+    'Role Akun',
+    'Aktivitas',
+    'Workspace',
+    'Tanggal Kerja',
+    'PIC',
+    'Outlet',
+    'Jumlah Item',
+    'Detail Penginputan',
+  ];
+  const rows: string[] = [header.map(escapeCsv).join(',')];
+  for (const log of logs) {
+    rows.push(
+      [
+        fmtDateTimeWithSeconds(log.clientTs) || log.clientTs,
+        log.userName,
+        log.userEmail,
+        ROLE_LABELS[log.userRole] || log.userRole,
+        log.actionType === 'kunjungan' ? 'Kunjungan' : 'Input Harian',
+        log.roleLabel,
+        log.day,
+        log.pic,
+        log.outlet,
+        log.itemCount,
+        log.details,
+      ]
+        .map(escapeCsv)
+        .join(',')
+    );
   }
   return rows.join('\n');
 }

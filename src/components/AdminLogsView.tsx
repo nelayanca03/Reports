@@ -1,0 +1,404 @@
+import { Download, History, RotateCcw, Search } from 'lucide-react';
+import { useMemo, useState } from 'react';
+import {
+  AccountProfile,
+  InputLogActionType,
+  InputLogEntry,
+  OperationalRoleId,
+  RoleConfig,
+} from '../types/outlet';
+import {
+  OPERATIONAL_ROLES,
+  ROLE_LABELS,
+  downloadTextFile,
+  fmtDateLong,
+  fmtDateTimeWithSeconds,
+  generateInputLogsCsv,
+  todayIso,
+} from '../utils/outletLogic';
+
+interface AdminLogsViewProps {
+  logs: InputLogEntry[];
+  accounts: AccountProfile[];
+  roleConfigs: Record<OperationalRoleId, RoleConfig>;
+}
+
+export function AdminLogsView({ logs, accounts, roleConfigs }: AdminLogsViewProps) {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [userFilter, setUserFilter] = useState<string>('ALL');
+  const [roleFilter, setRoleFilter] = useState<string>('ALL');
+  const [actionFilter, setActionFilter] = useState<'ALL' | InputLogActionType>('ALL');
+  const [outletFilter, setOutletFilter] = useState<string>('ALL');
+  const [dateFrom, setDateFrom] = useState<string>('');
+  const [dateTo, setDateTo] = useState<string>('');
+
+  const userOptions = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const acc of accounts) {
+      map.set(acc.email.toLowerCase(), `${acc.name} (${acc.email})`);
+    }
+    for (const log of logs) {
+      const email = log.userEmail.toLowerCase();
+      if (!map.has(email)) {
+        map.set(email, `${log.userName} (${log.userEmail})`);
+      }
+    }
+    return Array.from(map.entries())
+      .map(([email, label]) => ({ email, label }))
+      .sort((a, b) => a.label.localeCompare(b.label));
+  }, [accounts, logs]);
+
+  const outletOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const cfg of Object.values(roleConfigs)) {
+      for (const o of cfg.outlets) {
+        if (o.code) set.add(o.code);
+      }
+    }
+    for (const log of logs) {
+      for (const part of log.outlet.split(',')) {
+        const clean = part.trim();
+        if (clean && clean !== '-') set.add(clean);
+      }
+    }
+    return Array.from(set).sort();
+  }, [logs, roleConfigs]);
+
+  const filteredLogs = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    return logs.filter((log) => {
+      if (userFilter !== 'ALL' && log.userEmail.toLowerCase() !== userFilter) {
+        return false;
+      }
+      if (roleFilter !== 'ALL' && log.roleId !== roleFilter) {
+        return false;
+      }
+      if (actionFilter !== 'ALL' && log.actionType !== actionFilter) {
+        return false;
+      }
+      if (outletFilter !== 'ALL') {
+        const logOutlets = log.outlet
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean);
+        if (!logOutlets.includes(outletFilter)) return false;
+      }
+      if (dateFrom && log.day < dateFrom) return false;
+      if (dateTo && log.day > dateTo) return false;
+
+      if (q) {
+        const haystack = [
+          log.userName,
+          log.userEmail,
+          log.pic,
+          log.outlet,
+          log.details,
+          log.roleLabel,
+          log.day,
+        ]
+          .join(' ')
+          .toLowerCase();
+        if (!haystack.includes(q)) return false;
+      }
+
+      return true;
+    });
+  }, [logs, searchQuery, userFilter, roleFilter, actionFilter, outletFilter, dateFrom, dateTo]);
+
+  const hasActiveFilter =
+    Boolean(searchQuery.trim()) ||
+    userFilter !== 'ALL' ||
+    roleFilter !== 'ALL' ||
+    actionFilter !== 'ALL' ||
+    outletFilter !== 'ALL' ||
+    Boolean(dateFrom) ||
+    Boolean(dateTo);
+
+  const handleResetFilters = () => {
+    setSearchQuery('');
+    setUserFilter('ALL');
+    setRoleFilter('ALL');
+    setActionFilter('ALL');
+    setOutletFilter('ALL');
+    setDateFrom('');
+    setDateTo('');
+  };
+
+  const handleExportLogs = () => {
+    downloadTextFile(
+      `log-history-penginputan-${todayIso()}.csv`,
+      generateInputLogsCsv(filteredLogs),
+      'text/csv;charset=utf-8'
+    );
+  };
+
+  return (
+    <div className="space-y-5">
+      {/* Header & Filter Panel */}
+      <section className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5 dark:border-slate-800 dark:bg-slate-900">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4 dark:border-slate-800">
+          <div>
+            <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+              Log History Penginputan Semua User
+            </h2>
+            <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+              Riwayat pengisian harian dan kunjungan outlet seluruh akun (300 aktivitas terbaru).
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            {hasActiveFilter && (
+              <button
+                type="button"
+                onClick={handleResetFilters}
+                className="inline-flex min-h-[38px] items-center gap-1.5 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+                <span>Reset Filter</span>
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={filteredLogs.length === 0}
+              onClick={handleExportLogs}
+              className="inline-flex min-h-[38px] items-center gap-1.5 whitespace-nowrap rounded-lg bg-blue-700 px-3.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-800 disabled:opacity-50 dark:bg-blue-600 dark:hover:bg-blue-500"
+            >
+              <Download className="h-3.5 w-3.5" />
+              <span>Ekspor CSV ({filteredLogs.length})</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-12">
+          <div className="lg:col-span-4">
+            <label
+              htmlFor="log-search"
+              className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
+            >
+              Cari User / Outlet / Keterangan
+            </label>
+            <div className="relative">
+              <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-slate-400" />
+              <input
+                id="log-search"
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Nama user, email, outlet, atau detail..."
+                className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-slate-50 pr-3 pl-9 text-xs text-slate-900 placeholder:text-slate-400 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500"
+              />
+            </div>
+          </div>
+
+          <div className="lg:col-span-3">
+            <label
+              htmlFor="log-user-filter"
+              className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
+            >
+              Filter User
+            </label>
+            <select
+              id="log-user-filter"
+              value={userFilter}
+              onChange={(e) => setUserFilter(e.target.value)}
+              className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+            >
+              <option value="ALL">Semua User ({userOptions.length})</option>
+              {userOptions.map((u) => (
+                <option key={u.email} value={u.email}>
+                  {u.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="lg:col-span-2">
+            <label
+              htmlFor="log-role-filter"
+              className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
+            >
+              Workspace Role
+            </label>
+            <select
+              id="log-role-filter"
+              value={roleFilter}
+              onChange={(e) => setRoleFilter(e.target.value)}
+              className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+            >
+              <option value="ALL">Semua Role</option>
+              {OPERATIONAL_ROLES.map((r) => (
+                <option key={r.id} value={r.id}>
+                  {r.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="lg:col-span-3">
+            <label
+              htmlFor="log-action-filter"
+              className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
+            >
+              Jenis Aktivitas
+            </label>
+            <select
+              id="log-action-filter"
+              value={actionFilter}
+              onChange={(e) => setActionFilter(e.target.value as 'ALL' | InputLogActionType)}
+              className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+            >
+              <option value="ALL">Semua Aktivitas</option>
+              <option value="input_harian">Input Harian</option>
+              <option value="kunjungan">Kunjungan Outlet</option>
+            </select>
+          </div>
+
+          <div className="lg:col-span-4">
+            <label
+              htmlFor="log-outlet-filter"
+              className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
+            >
+              Filter Outlet
+            </label>
+            <select
+              id="log-outlet-filter"
+              value={outletFilter}
+              onChange={(e) => setOutletFilter(e.target.value)}
+              className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+            >
+              <option value="ALL">Semua Outlet ({outletOptions.length})</option>
+              {outletOptions.map((code) => (
+                <option key={code} value={code}>
+                  {code}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div className="lg:col-span-4">
+            <label
+              htmlFor="log-date-from"
+              className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
+            >
+              Tanggal Kerja Dari
+            </label>
+            <input
+              id="log-date-from"
+              type="date"
+              value={dateFrom}
+              onChange={(e) => setDateFrom(e.target.value)}
+              className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+            />
+          </div>
+
+          <div className="lg:col-span-4">
+            <label
+              htmlFor="log-date-to"
+              className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
+            >
+              Tanggal Kerja Sampai
+            </label>
+            <input
+              id="log-date-to"
+              type="date"
+              value={dateTo}
+              onChange={(e) => setDateTo(e.target.value)}
+              className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+            />
+          </div>
+        </div>
+      </section>
+
+      {/* Logs Table */}
+      <section className="rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+          <div className="flex items-center gap-2">
+            <History className="h-4 w-4 text-slate-500 dark:text-slate-400" />
+            <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+              Riwayat Aktivitas ({filteredLogs.length}
+              {filteredLogs.length !== logs.length ? ` dari ${logs.length}` : ''})
+            </h3>
+          </div>
+          <span className="text-xs text-slate-500 dark:text-slate-400">
+            Urutan terbaru di atas
+          </span>
+        </div>
+
+        {filteredLogs.length === 0 ? (
+          <div className="px-5 py-12 text-center text-sm text-slate-500 dark:text-slate-400">
+            {logs.length === 0
+              ? 'Belum ada riwayat penginputan yang tercatat. Log baru otomatis tersimpan setiap kali user menekan tombol Save pada Input Harian atau Kunjungan.'
+              : 'Tidak ada log penginputan yang cocok dengan filter yang dipilih.'}
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[920px] border-collapse text-left text-xs">
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-50/70 font-medium text-slate-500 dark:border-slate-800 dark:bg-slate-800/40 dark:text-slate-400">
+                  <th className="px-5 py-3 whitespace-nowrap">Waktu Input</th>
+                  <th className="px-4 py-3">User</th>
+                  <th className="px-4 py-3 whitespace-nowrap">Aktivitas</th>
+                  <th className="px-4 py-3 whitespace-nowrap">Tanggal Kerja</th>
+                  <th className="px-4 py-3">PIC & Outlet</th>
+                  <th className="px-5 py-3">Detail Penginputan</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                {filteredLogs.map((log) => (
+                  <tr
+                    key={log.id}
+                    className="align-top transition-colors hover:bg-slate-50/70 dark:hover:bg-slate-800/30"
+                  >
+                    <td className="px-5 py-3.5 font-mono text-[11px] whitespace-nowrap text-slate-600 tabular-nums dark:text-slate-300">
+                      {fmtDateTimeWithSeconds(log.clientTs) || log.clientTs || '—'}
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <div className="font-semibold text-slate-900 dark:text-slate-100">
+                        {log.userName}
+                      </div>
+                      <div className="mt-0.5 font-mono text-[11px] text-slate-500 dark:text-slate-400">
+                        {log.userEmail}
+                      </div>
+                      <div className="mt-0.5 text-[11px] text-slate-400 dark:text-slate-500">
+                        {ROLE_LABELS[log.userRole] || log.userRole}
+                      </div>
+                    </td>
+                    <td className="px-4 py-3.5 whitespace-nowrap">
+                      <span
+                        className={`inline-block rounded-md px-2 py-0.5 text-[11px] font-semibold ${
+                          log.actionType === 'kunjungan'
+                            ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400'
+                            : 'bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-400'
+                        }`}
+                      >
+                        {log.actionType === 'kunjungan' ? 'Kunjungan' : 'Input Harian'}
+                      </span>
+                      <div className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
+                        {log.roleLabel} ({log.itemCount} item)
+                      </div>
+                    </td>
+                    <td className="px-4 py-3.5 font-mono whitespace-nowrap text-slate-700 tabular-nums dark:text-slate-300">
+                      {fmtDateLong(log.day)}
+                    </td>
+                    <td className="px-4 py-3.5">
+                      <div className="font-semibold text-slate-900 dark:text-slate-100">
+                        {log.outlet || '—'}
+                      </div>
+                      {log.pic && (
+                        <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                          PIC: {log.pic}
+                        </div>
+                      )}
+                    </td>
+                    <td className="max-w-md px-5 py-3.5 leading-relaxed text-slate-700 dark:text-slate-300">
+                      {log.details}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
