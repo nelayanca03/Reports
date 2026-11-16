@@ -1,0 +1,176 @@
+{
+  "entities": {
+    "Account": {
+      "title": "Account",
+      "description": "User account profile and role assignment managed by Admin",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "format": "email",
+          "minLength": 5,
+          "maxLength": 120,
+          "description": "Lowercase Google account email address"
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Display name of the user"
+        },
+        "role": {
+          "type": "string",
+          "enum": ["admin", "stock_accounting", "gl", "accounting"],
+          "description": "Assigned RBAC role"
+        },
+        "picName": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Optional default PIC identifier assigned to this account"
+        },
+        "active": {
+          "type": "boolean",
+          "description": "Whether this account is allowed to access the application"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp when account was created"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        },
+        "createdBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "UID of admin who created this account"
+        }
+      },
+      "required": ["email", "name", "role", "picName", "active", "createdAt", "updatedAt", "createdBy"]
+    },
+    "AdminAccountDirectory": {
+      "title": "AdminAccountDirectory",
+      "description": "Admin-only directory index of all registered accounts",
+      "type": "object",
+      "properties": {
+        "accounts": {
+          "type": "object",
+          "description": "Map of accountId to account summary"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        },
+        "updatedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "UID of admin who updated the directory"
+        }
+      },
+      "required": ["accounts", "updatedAt", "updatedBy"]
+    },
+    "RoleConfig": {
+      "title": "RoleConfig",
+      "description": "Tasks and outlet assignments configured by Admin for an operational role",
+      "type": "object",
+      "properties": {
+        "roleId": {
+          "type": "string",
+          "enum": ["stock_accounting", "gl", "accounting"],
+          "description": "Operational role identifier"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 2,
+          "maxLength": 60,
+          "description": "Human-readable role title"
+        },
+        "start": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "maxLength": 10,
+          "description": "Start date of working period (YYYY-MM-DD)"
+        },
+        "ndays": {
+          "type": "integer",
+          "description": "Number of working days in period"
+        },
+        "tasks": {
+          "type": "array",
+          "description": "List of tasks assigned to this role"
+        },
+        "outlets": {
+          "type": "array",
+          "description": "List of outlets and PIC mappings assigned to this role"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last config update"
+        },
+        "updatedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "UID of admin who updated this config"
+        }
+      },
+      "required": ["roleId", "label", "start", "ndays", "tasks", "outlets", "updatedAt", "updatedBy"]
+    },
+    "RoleWorkspace": {
+      "title": "RoleWorkspace",
+      "description": "Daily update entries and outlet visit logs for an operational role",
+      "type": "object",
+      "properties": {
+        "roleId": {
+          "type": "string",
+          "enum": ["stock_accounting", "gl", "accounting"],
+          "description": "Operational role identifier"
+        },
+        "ent": {
+          "type": "object",
+          "description": "Nested map of outlet -> (day|task) -> { d, n }"
+        },
+        "visit": {
+          "type": "object",
+          "description": "Map of (person|day) -> { ok, f, t, n }"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last workspace update"
+        },
+        "updatedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "UID of user who performed the last write"
+        }
+      },
+      "required": ["roleId", "ent", "visit", "updatedAt", "updatedBy"]
+    }
+  },
+  "firestore": {
+    "/accounts/{accountId}": {
+      "schema": { "$ref": "#/entities/Account" },
+      "description": "Individual user account documents indexed by sanitized email ID"
+    },
+    "/adminRegistry/{registryId}": {
+      "schema": { "$ref": "#/entities/AdminAccountDirectory" },
+      "description": "Admin-only directory document listing all managed accounts"
+    },
+    "/roleConfigs/{roleId}": {
+      "schema": { "$ref": "#/entities/RoleConfig" },
+      "description": "Task and outlet definitions per operational role (stock_accounting, gl, accounting)"
+    },
+    "/roleWorkspaces/{roleId}": {
+      "schema": { "$ref": "#/entities/RoleWorkspace" },
+      "description": "Daily task entries and outlet visit logs per operational role"
+    }
+  }
+}

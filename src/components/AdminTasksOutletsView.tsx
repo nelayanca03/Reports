@@ -1,0 +1,622 @@
+import { Copy, Plus, Save, Trash2 } from 'lucide-react';
+import { FormEvent, useState } from 'react';
+import {
+  FormulaType,
+  OperationalRoleId,
+  OutletAssignment,
+  RoleConfig,
+  TaskDefinition,
+} from '../types/outlet';
+import {
+  OPERATIONAL_ROLES,
+  STOCK_ACCOUNTING_OUTLETS,
+  STOCK_ACCOUNTING_TASKS,
+  getPeopleMap,
+  getPersonList,
+} from '../utils/outletLogic';
+import { ConfirmModal } from './ConfirmModal';
+
+interface AdminTasksOutletsViewProps {
+  roleConfigs: Record<OperationalRoleId, RoleConfig>;
+  initialRoleId: OperationalRoleId;
+  onSaveRoleConfig: (roleId: OperationalRoleId, nextConfig: RoleConfig) => Promise<void>;
+}
+
+const FORMULA_LABELS: Record<FormulaType, string> = {
+  daily_plus_1: 'Harian (+1 dari tgl kerja)',
+  memo_month: 'Bulanan (Selisih bulan + 1)',
+  ref_task: 'Mengikuti tugas lain',
+};
+
+function slugifyKey(text: string): string {
+  return text
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 32);
+}
+
+export function AdminTasksOutletsView({
+  roleConfigs,
+  initialRoleId,
+  onSaveRoleConfig,
+}: AdminTasksOutletsViewProps) {
+  const [targetRole, setTargetRole] = useState<OperationalRoleId>(initialRoleId);
+  const config = roleConfigs[targetRole];
+
+  const [feedback, setFeedback] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  // Task form state
+  const [taskLabel, setTaskLabel] = useState('');
+  const [taskShort, setTaskShort] = useState('');
+  const [taskDefaultDate, setTaskDefaultDate] = useState(config.start);
+  const [taskFormula, setTaskFormula] = useState<FormulaType>('daily_plus_1');
+  const [taskRefKey, setTaskRefKey] = useState('');
+
+  // Outlet form state
+  const [outletPerson, setOutletPerson] = useState('');
+  const [outletCode, setOutletCode] = useState('');
+
+  // Period edit state
+  const [editStart, setEditStart] = useState(config.start);
+  const [editNdays, setEditNdays] = useState(String(config.ndays));
+
+  // Confirm delete dialog
+  const [pendingDelete, setPendingDelete] = useState<
+    | { type: 'task'; key: string; label: string }
+    | { type: 'outlet'; code: string; person: string }
+    | null
+  >(null);
+
+  const handleSelectRole = (rId: OperationalRoleId) => {
+    setTargetRole(rId);
+    const nextCfg = roleConfigs[rId];
+    setEditStart(nextCfg.start);
+    setEditNdays(String(nextCfg.ndays));
+    setTaskDefaultDate(nextCfg.start);
+    setFeedback(null);
+  };
+
+  const peopleList = getPersonList(config.outlets);
+  const peopleMap = getPeopleMap(config.outlets);
+
+  const handleSavePeriod = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!editStart) return;
+    setBusy(true);
+    try {
+      await onSaveRoleConfig(targetRole, {
+        ...config,
+        start: editStart,
+        ndays: Math.max(1, Math.min(60, Number(editNdays) || 25)),
+      });
+      setFeedback(`Pengaturan periode ${config.label} disimpan.`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleAddTask = async (e: FormEvent) => {
+    e.preventDefault();
+    const cleanLabel = taskLabel.trim();
+    if (!cleanLabel) return;
+    let baseKey = slugifyKey(cleanLabel) || `tugas_${config.tasks.length + 1}`;
+    let finalKey = baseKey;
+    let counter = 2;
+    while (config.tasks.some((t) => t.key === finalKey)) {
+      finalKey = `${baseKey}_${counter++}`;
+    }
+
+    const formulaNote =
+      taskFormula === 'memo_month'
+        ? 'Selisih bulan terhadap hari ini + 1'
+        : taskFormula === 'ref_task' && taskRefKey
+          ? `Selisih hari terhadap tgl update ${config.tasks.find((t) => t.key === taskRefKey)?.shortLabel || taskRefKey}`
+          : 'Selisih hari terhadap tanggal kerja + 1';
+
+    const newTask: TaskDefinition = {
+      key: finalKey,
+      label: cleanLabel.slice(0, 100),
+      shortLabel: (taskShort.trim() || cleanLabel).slice(0, 24),
+      defaultDate: taskDefaultDate || config.start,
+      formulaType: taskFormula,
+      ...(taskFormula === 'ref_task' && taskRefKey ? { refTaskKey: taskRefKey } : {}),
+      formulaNote,
+    };
+
+    setBusy(true);
+    try {
+      await onSaveRoleConfig(targetRole, {
+        ...config,
+        tasks: [...config.tasks, newTask],
+      });
+      setTaskLabel('');
+      setTaskShort('');
+      setFeedback(`Tugas "${newTask.label}" ditambahkan ke ${config.label}.`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleAddOutlet = async (e: FormEvent) => {
+    e.preventDefault();
+    const cleanPerson = outletPerson.trim().toUpperCase().slice(0, 60);
+    const cleanCode = outletCode.trim().toUpperCase().slice(0, 40);
+    if (!cleanPerson || !cleanCode) return;
+
+    if (config.outlets.some((o) => o.code === cleanCode)) {
+      setFeedback(`Outlet ${cleanCode} sudah terdaftar pada role ${config.label}.`);
+      return;
+    }
+
+    const nextOutlets: OutletAssignment[] = [
+      ...config.outlets,
+      { person: cleanPerson, code: cleanCode },
+    ];
+
+    setBusy(true);
+    try {
+      await onSaveRoleConfig(targetRole, {
+        ...config,
+        outlets: nextOutlets,
+      });
+      setOutletCode('');
+      setFeedback(`Outlet ${cleanCode} (${cleanPerson}) ditambahkan ke ${config.label}.`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleCopyStockTemplate = async () => {
+    setBusy(true);
+    try {
+      await onSaveRoleConfig(targetRole, {
+        ...config,
+        tasks: config.tasks.length ? config.tasks : STOCK_ACCOUNTING_TASKS,
+        outlets: config.outlets.length ? config.outlets : STOCK_ACCOUNTING_OUTLETS,
+      });
+      setFeedback(`Template tugas & outlet berhasil disalin ke ${config.label}.`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!pendingDelete) return;
+    setBusy(true);
+    try {
+      if (pendingDelete.type === 'task') {
+        await onSaveRoleConfig(targetRole, {
+          ...config,
+          tasks: config.tasks.filter((t) => t.key !== pendingDelete.key),
+        });
+        setFeedback(`Tugas "${pendingDelete.label}" dihapus dari ${config.label}.`);
+      } else {
+        await onSaveRoleConfig(targetRole, {
+          ...config,
+          outlets: config.outlets.filter(
+            (o) => !(o.code === pendingDelete.code && o.person === pendingDelete.person)
+          ),
+        });
+        setFeedback(`Outlet ${pendingDelete.code} dihapus dari ${config.label}.`);
+      }
+    } finally {
+      setBusy(false);
+      setPendingDelete(null);
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      {feedback && (
+        <div
+          role="status"
+          className="flex items-center justify-between rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-300"
+        >
+          <span>{feedback}</span>
+          <button
+            type="button"
+            onClick={() => setFeedback(null)}
+            className="text-xs font-medium underline"
+          >
+            Tutup
+          </button>
+        </div>
+      )}
+
+      {/* Role Target Switcher */}
+      <section className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5 dark:border-slate-800 dark:bg-slate-900">
+        <div className="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+              Kelola Tugas & Outlet per Role
+            </h2>
+            <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+              Pilih role operasional untuk menambah atau mengatur daftar tugas, PIC, dan outlet yang dikerjakan.
+            </p>
+          </div>
+
+          <div className="flex items-center gap-1 rounded-lg bg-slate-100 p-1 dark:bg-slate-800">
+            {OPERATIONAL_ROLES.map((r) => {
+              const isSelected = targetRole === r.id;
+              return (
+                <button
+                  key={r.id}
+                  type="button"
+                  onClick={() => handleSelectRole(r.id)}
+                  className={`min-h-[38px] whitespace-nowrap rounded-md px-3.5 py-1.5 text-xs font-medium transition-colors ${
+                    isSelected
+                      ? 'bg-white text-slate-900 shadow-xs dark:bg-slate-900 dark:text-slate-100'
+                      : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
+                  }`}
+                >
+                  {r.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {targetRole !== 'stock_accounting' &&
+          config.tasks.length === 0 &&
+          config.outlets.length === 0 && (
+            <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3.5 dark:border-slate-700 dark:bg-slate-800/50">
+              <span className="text-xs text-slate-600 dark:text-slate-300">
+                Role {config.label} belum memiliki tugas dan outlet. Anda dapat menambahkannya manual di bawah atau menyalin daftar awal dari Stock Accounting lalu menyesuaikannya.
+              </span>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={handleCopyStockTemplate}
+                className="inline-flex min-h-[36px] shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+              >
+                <Copy className="h-3.5 w-3.5" />
+                <span>Salin Template Awal</span>
+              </button>
+            </div>
+          )}
+      </section>
+
+      {/* Period Settings */}
+      <section className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
+        <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+          Periode Kerja · {config.label}
+        </h3>
+        <form onSubmit={handleSavePeriod} className="mt-3 flex flex-wrap items-end gap-4">
+          <div>
+            <label
+              htmlFor="cfg-start"
+              className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
+            >
+              Tanggal Mulai
+            </label>
+            <input
+              id="cfg-start"
+              type="date"
+              value={editStart}
+              onChange={(e) => setEditStart(e.target.value)}
+              className="min-h-[40px] rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 font-mono text-sm text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+            />
+          </div>
+          <div>
+            <label
+              htmlFor="cfg-ndays"
+              className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
+            >
+              Jumlah Hari Kerja (Senin–Sabtu)
+            </label>
+            <input
+              id="cfg-ndays"
+              type="number"
+              min={1}
+              max={60}
+              value={editNdays}
+              onChange={(e) => setEditNdays(e.target.value)}
+              className="min-h-[40px] w-28 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 font-mono text-sm text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+            />
+          </div>
+          <button
+            type="submit"
+            disabled={busy}
+            className="inline-flex min-h-[40px] items-center gap-2 rounded-lg bg-blue-700 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-800 disabled:opacity-50 dark:bg-blue-600 dark:hover:bg-blue-500"
+          >
+            <Save className="h-4 w-4" />
+            <span>Simpan Periode</span>
+          </button>
+        </form>
+      </section>
+
+      {/* Tasks Manager */}
+      <section className="rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+        <div className="border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+          <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+            Daftar Tugas · {config.label} ({config.tasks.length})
+          </h3>
+        </div>
+
+        <form
+          onSubmit={handleAddTask}
+          className="grid grid-cols-1 items-end gap-3 border-b border-slate-200 bg-slate-50/60 p-5 sm:grid-cols-2 lg:grid-cols-12 dark:border-slate-800 dark:bg-slate-800/30"
+        >
+          <div className="lg:col-span-3">
+            <label
+              htmlFor="new-task-label"
+              className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
+            >
+              Nama Tugas
+            </label>
+            <input
+              id="new-task-label"
+              type="text"
+              required
+              value={taskLabel}
+              onChange={(e) => setTaskLabel(e.target.value)}
+              placeholder="Contoh: Rekonsiliasi Bank"
+              className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+            />
+          </div>
+
+          <div className="lg:col-span-2">
+            <label
+              htmlFor="new-task-short"
+              className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
+            >
+              Singkatan
+            </label>
+            <input
+              id="new-task-short"
+              type="text"
+              value={taskShort}
+              onChange={(e) => setTaskShort(e.target.value)}
+              placeholder="Rekon Bank"
+              className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+            />
+          </div>
+
+          <div className="lg:col-span-2">
+            <label
+              htmlFor="new-task-date"
+              className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
+            >
+              Tgl Default
+            </label>
+            <input
+              id="new-task-date"
+              type="date"
+              value={taskDefaultDate}
+              onChange={(e) => setTaskDefaultDate(e.target.value)}
+              className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+            />
+          </div>
+
+          <div className="lg:col-span-3">
+            <label
+              htmlFor="new-task-formula"
+              className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
+            >
+              Rumus Keterlambatan
+            </label>
+            <select
+              id="new-task-formula"
+              value={taskFormula}
+              onChange={(e) => setTaskFormula(e.target.value as FormulaType)}
+              className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+            >
+              <option value="daily_plus_1">Harian (+1 dari tgl kerja)</option>
+              <option value="memo_month">Bulanan (Selisih bulan + 1)</option>
+              {config.tasks.length > 0 && (
+                <option value="ref_task">Mengikuti tugas lain</option>
+              )}
+            </select>
+          </div>
+
+          {taskFormula === 'ref_task' && config.tasks.length > 0 && (
+            <div className="lg:col-span-2">
+              <label
+                htmlFor="new-task-ref"
+                className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
+              >
+                Tugas Acuan
+              </label>
+              <select
+                id="new-task-ref"
+                value={taskRefKey}
+                onChange={(e) => setTaskRefKey(e.target.value)}
+                className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+              >
+                <option value="">Pilih tugas...</option>
+                {config.tasks.map((t) => (
+                  <option key={t.key} value={t.key}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          <div className="lg:col-span-2">
+            <button
+              type="submit"
+              disabled={busy || !taskLabel.trim()}
+              className="flex min-h-[40px] w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-blue-700 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-800 disabled:opacity-50 dark:bg-blue-600 dark:hover:bg-blue-500"
+            >
+              <Plus className="h-4 w-4" />
+              <span>Tambah Tugas</span>
+            </button>
+          </div>
+        </form>
+
+        {config.tasks.length === 0 ? (
+          <div className="px-5 py-10 text-center text-sm text-slate-500 dark:text-slate-400">
+            Belum ada tugas untuk role {config.label}. Gunakan formulir di atas untuk menambahkan tugas.
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[640px] border-collapse text-left text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-50/70 text-xs font-medium text-slate-500 dark:border-slate-800 dark:bg-slate-800/40 dark:text-slate-400">
+                  <th className="px-5 py-3">Nama Tugas</th>
+                  <th className="px-4 py-3">Singkatan</th>
+                  <th className="px-4 py-3">Tgl Default</th>
+                  <th className="px-4 py-3">Rumus</th>
+                  <th className="px-5 py-3 text-right">Hapus</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                {config.tasks.map((t) => (
+                  <tr key={t.key} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/30">
+                    <td className="px-5 py-3 font-medium text-slate-900 dark:text-slate-100">
+                      {t.label}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-slate-600 dark:text-slate-300">
+                      {t.shortLabel}
+                    </td>
+                    <td className="px-4 py-3 font-mono text-xs text-slate-600 tabular-nums dark:text-slate-300">
+                      {t.defaultDate}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-slate-500 dark:text-slate-400">
+                      {FORMULA_LABELS[t.formulaType]}
+                      {t.refTaskKey ? ` (${t.refTaskKey})` : ''}
+                    </td>
+                    <td className="px-5 py-3 text-right">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setPendingDelete({ type: 'task', key: t.key, label: t.label })
+                        }
+                        aria-label={`Hapus tugas ${t.label}`}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/50 dark:hover:text-red-400"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </section>
+
+      {/* Outlets & PIC Manager */}
+      <section className="rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+        <div className="border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+          <h3 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+            Daftar PIC & Outlet · {config.label} ({config.outlets.length} outlet)
+          </h3>
+        </div>
+
+        <form
+          onSubmit={handleAddOutlet}
+          className="grid grid-cols-1 items-end gap-3 border-b border-slate-200 bg-slate-50/60 p-5 sm:grid-cols-3 dark:border-slate-800 dark:bg-slate-800/30"
+        >
+          <div>
+            <label
+              htmlFor="new-outlet-person"
+              className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
+            >
+              Nama PIC
+            </label>
+            <input
+              id="new-outlet-person"
+              type="text"
+              list="existing-pic-list"
+              required
+              value={outletPerson}
+              onChange={(e) => setOutletPerson(e.target.value)}
+              placeholder="Contoh: PETER atau PIC baru"
+              className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+            />
+            <datalist id="existing-pic-list">
+              {peopleList.map((p) => (
+                <option key={p} value={p} />
+              ))}
+            </datalist>
+          </div>
+
+          <div>
+            <label
+              htmlFor="new-outlet-code"
+              className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
+            >
+              Kode / Nama Outlet
+            </label>
+            <input
+              id="new-outlet-code"
+              type="text"
+              required
+              value={outletCode}
+              onChange={(e) => setOutletCode(e.target.value)}
+              placeholder="Contoh: NKPM atau OUTLET-A"
+              className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={busy || !outletPerson.trim() || !outletCode.trim()}
+            className="flex min-h-[40px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-blue-700 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-800 disabled:opacity-50 dark:bg-blue-600 dark:hover:bg-blue-500"
+          >
+            <Plus className="h-4 w-4" />
+            <span>Tambah Outlet</span>
+          </button>
+        </form>
+
+        {peopleList.length === 0 ? (
+          <div className="px-5 py-10 text-center text-sm text-slate-500 dark:text-slate-400">
+            Belum ada outlet untuk role {config.label}. Tambahkan PIC dan kode outlet di atas.
+          </div>
+        ) : (
+          <div className="divide-y divide-slate-100 dark:divide-slate-800">
+            {peopleList.map((person) => (
+              <div key={person} className="flex flex-col gap-2.5 px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                    {person}
+                  </div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400">
+                    {peopleMap[person].length} outlet ditugaskan
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {peopleMap[person].map((code) => (
+                    <div
+                      key={code}
+                      className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-medium text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                    >
+                      <span>{code}</span>
+                      <button
+                        type="button"
+                        onClick={() => setPendingDelete({ type: 'outlet', code, person })}
+                        aria-label={`Hapus outlet ${code}`}
+                        className="text-slate-400 transition-colors hover:text-red-600 dark:hover:text-red-400"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <ConfirmModal
+        open={Boolean(pendingDelete)}
+        title={
+          pendingDelete?.type === 'task'
+            ? `Hapus tugas "${pendingDelete.label}"?`
+            : `Hapus outlet "${pendingDelete?.code}"?`
+        }
+        description="Item ini akan dihapus dari konfigurasi role aktif. Riwayat input sebelumnya tidak ikut terhapus dari database."
+        confirmLabel="Ya, Hapus"
+        destructive
+        onCancel={() => setPendingDelete(null)}
+        onConfirm={handleConfirmDelete}
+      />
+    </div>
+  );
+}

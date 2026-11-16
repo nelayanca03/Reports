@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Update Harian Outlet</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--tx:#1b1f24;--mu:#667085;--bd:#e3e6ea;--ac:#2457d6;--bad:#c62828;--badbg:#fdecea;--ok:#1b7f3b;--okbg:#e6f4ea;color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#14171b;--card:#1d2127;--tx:#e8eaed;--mu:#9aa3ad;--bd:#2d333b;--ac:#6b9bff;--bad:#ff8a80;--badbg:#3a1f1f;--ok:#6fd08c;--okbg:#17301f;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#14171b;--card:#1d2127;--tx:#e8eaed;--mu:#9aa3ad;--bd:#2d333b;--ac:#6b9bff;--bad:#ff8a80;--badbg:#3a1f1f;--ok:#6fd08c;--okbg:#17301f;color-scheme:dark}
+*{box-sizing:border-box}html{scroll-padding-top:env(safe-area-inset-top,0px)}
+body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Arial,sans-serif}
+header{padding:14px 16px 0;max-width:1000px;margin:auto}
+h1{font-size:18px;margin:0 0 2px}.sub{color:var(--mu);font-size:12px}
+nav{display:flex;gap:6px;margin:12px 0;flex-wrap:wrap}
+nav button,.btn{border:1px solid var(--bd);background:var(--card);color:var(--tx);padding:8px 14px;border-radius:8px;font:inherit;cursor:pointer}
+nav button.on{background:var(--ac);border-color:var(--ac);color:#fff}
+main{max-width:1000px;margin:auto;padding:0 16px 40px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:10px;padding:14px;margin-bottom:14px}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:end}
+label{display:flex;flex-direction:column;font-size:12px;color:var(--mu);gap:3px}
+input,select{font:inherit;padding:7px 9px;border:1px solid var(--bd);border-radius:7px;background:var(--bg);color:var(--tx);min-width:0}
+.sw{overflow-x:auto}
+table{border-collapse:collapse;width:100%;min-width:560px}
+th,td{padding:7px 8px;border-bottom:1px solid var(--bd);text-align:left;vertical-align:middle}
+th{font-size:11px;text-transform:uppercase;color:var(--mu);letter-spacing:.03em}
+td.n,th.n{text-align:right}
+.pill{display:inline-block;padding:2px 9px;border-radius:99px;font-size:11px;font-weight:600}
+.p{background:var(--badbg);color:var(--bad)}.u{background:var(--okbg);color:var(--ok)}
+h2{font-size:14px;margin:0 0 10px}
+.neg{color:var(--bad);font-weight:600}
+.hint{color:var(--mu);font-size:12px;margin-top:8px}
+.bar{height:8px;background:var(--bd);border-radius:5px;overflow:hidden;min-width:80px}.bar i{display:block;height:100%;background:var(--ac)}
+.chk{display:flex;gap:8px;align-items:center;font-size:14px;color:var(--tx)}
+.chk input{width:18px;height:18px}
+</style>
+</head>
+<body>
+<header>
+<h1>Update Harian Outlet</h1>
+<div class="sub">Memo Penyelesaian Discrepancy, HAM SPC, Barang Masuk, Penjualan, Konversi, BT, dan kunjungan outlet</div>
+<nav id="nav"></nav>
+</header>
+<main id="app"></main>
+<script>
+const PEOPLE={PETER:["NKPM","DELICA","DLS","NUANSA"],MELVIN:["NKMHT","NSCMB","J2MRLN","J2MF"],EDBERT:["NIS","MJ","JKRCW","BSM","NBC"],CHARLES:["SKCP","NSCP","NCBC"]};
+const TASKS=[["memo","Memo Penyelesaian Discrepancy"],["ham","HAM SPC"],["bm","Barang Masuk"],["jual","Penjualan"],["konv","Konversi"],["bt","BT"]];
+const DEF={memo:"2026-09-01",ham:"2026-10-30",bm:"2026-10-29",jual:"2026-10-31",konv:"2026-10-31",bt:"2026-10-31"};
+const START="2026-11-02",NDAYS=25;
+const OUT=Object.entries(PEOPLE).flatMap(([p,l])=>l.map(o=>[o,p]));
+const iso=d=>d.toISOString().slice(0,10);
+const D=s=>new Date(s+"T00:00:00Z");
+const diff=(a,b)=>Math.round((D(a)-D(b))/864e5);
+const todayIso=()=>{const d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0")};
+const fmt=s=>{const d=D(s);return d.toLocaleDateString("id-ID",{day:"2-digit",month:"short",timeZone:"UTC"})};
+const DAYS=(()=>{const a=[];let d=D(START);while(a.length<NDAYS){if(d.getUTCDay()!==0)a.push(iso(d));d=new Date(d.getTime()+864e5)}return a})();
+let S={ent:{},visit:{},start:START};
+try{const r=localStorage.getItem("disc-v1");if(r)S=Object.assign(S,JSON.parse(r))}catch(e){}
+const save=()=>{try{localStorage.setItem("disc-v1",JSON.stringify(S))}catch(e){}};
+// tanggal update: pakai entri hari itu, jika kosong ikut entri hari kerja sebelumnya, jika kosong pakai default
+function entry(o,day,t){
+  const i=DAYS.indexOf(day);
+  for(let k=i;k>=0;k--){const e=(S.ent[o]||{})[DAYS[k]+"|"+t];if(e&&e.d)return{d:e.d,n:k===i?(e.n||""):"",own:k===i}}
+  return{d:DEF[t],n:"",own:false}
+}
+function calc(o,day,t){
+  const e=entry(o,day,t),today=todayIso();let rumus,pm;
+  if(t==="memo"){rumus=today;const a=D(e.d),b=D(today);pm=(a.getUTCFullYear()-b.getUTCFullYear())*12+a.getUTCMonth()-b.getUTCMonth()+1}
+  else if(t==="bm"){rumus=entry(o,day,"ham").d;pm=diff(e.d,rumus)}
+  else{rumus=day;pm=diff(e.d,rumus)+1}
+  return{d:e.d,n:e.n,rumus,pm,pend:pm<0}
+}
+// rata-rata kumulatif +/- sampai tanggal, dan jumlah PENDING
+function recap(o,t,upto){
+  const ds=DAYS.filter(d=>d<=upto);if(!ds.length)return{avg:0,pend:0};
+  let s=0,p=0;ds.forEach(d=>{const c=calc(o,d,t);s+=c.pm;if(c.pend)p++});
+  return{avg:s/ds.length,pend:p}
+}
+let tab="input",st={person:"PETER",outlet:"NKPM",day:null,rdate:todayIso(),task:"memo"};
+function nearestDay(t){const l=DAYS.filter(d=>d<=t);return l.length?l[l.length-1]:DAYS[0]}
+st.day=nearestDay(todayIso());
+const $=s=>document.querySelector(s);
+function nav(){$("#nav").innerHTML=[["input","Input harian"],["rekap","Rekap dan ranking"],["kunj","Kunjungan"]].map(([k,l])=>`<button class="${tab===k?"on":""}" data-t="${k}">${l}</button>`).join("");
+  $("#nav").onclick=e=>{if(e.target.dataset.t){tab=e.target.dataset.t;render()}}}
+const opt=(l,v)=>l.map(x=>`<option ${x===v?"selected":""}>${x}</option>`).join("");
+function vInput(){
+  const outs=PEOPLE[st.person];if(!outs.includes(st.outlet))st.outlet=outs[0];
+  const rows=TASKS.map(([t,l])=>{const c=calc(st.outlet,st.day,t);return`<tr><td>${l}</td>
+  <td><input type="date" data-t="${t}" data-f="d" value="${c.d}"></td>
+  <td>${fmt(c.rumus)}</td><td class="n ${c.pm<0?"neg":""}">${c.pm}</td>
+  <td><span class="pill ${c.pend?"p":"u"}">${c.pend?"PENDING":"UPDATE"}</span></td>
+  <td><input type="text" data-t="${t}" data-f="n" value="${c.n.replace(/"/g,"&quot;")}" placeholder="Keterangan"></td></tr>`}).join("");
+  const vk=st.person+"|"+st.day,v=S.visit[vk]||{};
+  return`<div class="card"><div class="row">
+  <label>Nama<select id="sp">${opt(Object.keys(PEOPLE),st.person)}</select></label>
+  <label>Outlet<select id="so">${opt(outs,st.outlet)}</select></label>
+  <label>Tanggal<select id="sd">${DAYS.map(d=>`<option value="${d}" ${d===st.day?"selected":""}>${fmt(d)}</option>`).join("")}</select></label></div></div>
+  <div class="card"><h2>${st.outlet} &middot; ${fmt(st.day)}</h2><div class="sw"><table>
+  <tr><th>Item</th><th>Tgl update</th><th>Rumus</th><th class="n">+/-</th><th>Status</th><th>Keterangan</th></tr>${rows}</table></div>
+  <div class="hint">Jika hari ini belum diisi, tanggal update otomatis mengikuti hari kerja sebelumnya. Nilai +/- negatif berarti PENDING.</div></div>
+  <div class="card"><h2>Kunjungan ke outlet &middot; ${st.person}</h2><div class="row">
+  <label class="chk"><input type="checkbox" id="vc" ${v.ok?"checked":""}> Sudah dikunjungi</label>
+  <label>Dari jam<input type="time" id="vf" value="${v.f||""}"></label><label>Ke jam<input type="time" id="vt" value="${v.t||""}"></label>
+  <label style="flex:1;min-width:160px">Keterangan<input type="text" id="vn" value="${(v.n||"").replace(/"/g,"&quot;")}"></label></div></div>`
+}
+function bindInput(){
+  $("#sp").onchange=e=>{st.person=e.target.value;st.outlet=PEOPLE[st.person][0];render()};
+  $("#so").onchange=e=>{st.outlet=e.target.value;render()};
+  $("#sd").onchange=e=>{st.day=e.target.value;render()};
+  document.querySelectorAll("[data-t]").forEach(i=>i.onchange=()=>{
+    const k=st.day+"|"+i.dataset.t,o=(S.ent[st.outlet]=S.ent[st.outlet]||{});
+    const cur=o[k]||{d:entry(st.outlet,st.day,i.dataset.t).d,n:""};cur[i.dataset.f]=i.value;o[k]=cur;save();render()});
+  const vk=st.person+"|"+st.day;
+  const sv=()=>{S.visit[vk]={ok:$("#vc").checked,f:$("#vf").value,t:$("#vt").value,n:$("#vn").value};save()};
+  ["#vc","#vf","#vt","#vn"].forEach(s=>$(s).onchange=()=>{sv();});
+}
+function vRekap(){
+  const up=st.rdate,t=st.task;
+  const rows=OUT.map(([o,p])=>({o,p,...recap(o,t,up)})).sort((a,b)=>a.avg-b.avg);
+  return`<div class="card"><div class="row"><label>Item<select id="rt">${TASKS.map(([k,l])=>`<option value="${k}" ${k===t?"selected":""}>${l}</option>`).join("")}</select></label>
+  <label>Per tanggal<input type="date" id="rd" value="${up}"></label></div></div>
+  <div class="card"><h2>Ranking dari paling telat ke paling baik</h2><div class="sw"><table><tr><th>#</th><th>Outlet</th><th>Nama</th><th class="n">Rata-rata telat</th><th class="n">Pending</th></tr>
+  ${rows.map((r,i)=>`<tr><td>${i+1}</td><td><b>${r.o}</b></td><td>${r.p}</td><td class="n ${r.avg<0?"neg":""}">${r.avg.toFixed(1)}</td><td class="n">${r.pend}</td></tr>`).join("")}</table></div>
+  <div class="hint">Rata-rata telat = rata-rata nilai +/- semua hari kerja sampai tanggal terpilih. Pending = jumlah hari berstatus PENDING.</div></div>`
+}
+function vKunj(){
+  const now=nearestDay(todayIso()),el=DAYS.filter(d=>d<=todayIso()).length;
+  const rows=Object.keys(PEOPLE).map(p=>{const n=DAYS.filter(d=>(S.visit[p+"|"+d]||{}).ok).length;return{p,n,rate:el?n/el:0}}).sort((a,b)=>b.n-a.n||b.rate-a.rate);
+  return`<div class="card"><h2>Dashboard kunjungan ke outlet</h2><div class="sw"><table><tr><th>#</th><th>Nama</th><th class="n">Hari dikunjungi</th><th class="n">Hari berjalan</th><th>Rate</th></tr>
+  ${rows.map((r,i)=>`<tr><td>${i+1}</td><td><b>${r.p}</b></td><td class="n">${r.n}</td><td class="n">${el}</td><td><div class="bar"><i style="width:${Math.round(r.rate*100)}%"></i></div>${Math.round(r.rate*100)}%</td></tr>`).join("")}</table></div></div>
+  <div class="card"><h2>Grid kunjungan per hari</h2><div class="sw"><table style="min-width:900px"><tr><th>Nama</th>${DAYS.map(d=>`<th class="n">${fmt(d).slice(0,2)}</th>`).join("")}</tr>
+  ${Object.keys(PEOPLE).map(p=>`<tr><td>${p}</td>${DAYS.map(d=>`<td class="n">${(S.visit[p+"|"+d]||{}).ok?"&#10003;":""}</td>`).join("")}</tr>`).join("")}</table></div>
+  <div style="margin-top:12px"><button class="btn" id="rs">Hapus semua data</button></div></div>`
+}
+function render(){
+  nav();const a=$("#app");
+  a.innerHTML=tab==="input"?vInput():tab==="rekap"?vRekap():vKunj();
+  if(tab==="input")bindInput();
+  if(tab==="rekap"){$("#rt").onchange=e=>{st.task=e.target.value;render()};$("#rd").onchange=e=>{st.rdate=e.target.value||todayIso();render()}}
+  if(tab==="kunj")$("#rs").onclick=()=>{if(confirm("Hapus semua data yang tersimpan?")){S={ent:{},visit:{},start:START};save();render()}}
+}
+render();
+</script>
+</body>
+</html>
