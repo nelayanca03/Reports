@@ -341,16 +341,6 @@ export function InputHarianView({
               >
                 <ChevronRight className="h-4 w-4" />
               </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setSavedNotice(null);
-                  onChangeDay(defaultDay);
-                }}
-                className="min-h-[42px] shrink-0 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-              >
-                Kemarin
-              </button>
             </div>
           </div>
 
