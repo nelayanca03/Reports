@@ -101,7 +101,7 @@ export const EXPORT_REPORT_OPTIONS: ExportReportOption[] = [
     id: 'bulanan_kpi',
     period: 'bulanan',
     label: 'Scorecard KPI Bulanan PIC (Tugas + Kunjungan)',
-    description: 'Ringkasan KPI bulanan gabungan per PIC: % kepatuhan tugas, rata-rata (+/-), rate kunjungan & rinciannya.',
+    description: 'Ringkasan KPI bulanan gabungan per PIC: % kepatuhan tugas, rata-rata (+/-), porsi kunjungan & rinciannya.',
     supportsStatusFilter: false,
   },
   {
@@ -702,7 +702,7 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
       'Rata-rata (+/-)',
       'Hari Kunjungan',
       'Total Kunjungan',
-      'Rate Kunjungan (%)',
+      'Porsi Kunjungan (%)',
       'Rincian Kategori Kunjungan',
     ];
     subtitle = `Periode: ${periodLabel}`;

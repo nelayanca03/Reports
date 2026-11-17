@@ -26,7 +26,7 @@ import {
   isSunday,
   nearestWorkingDay,
   prevMonthFirstDay,
-  shiftIsoDays,
+  prevWorkingDay,
   todayIso,
   yesterdayIso,
 } from '../utils/outletLogic';
@@ -73,6 +73,7 @@ export function InputHarianView({
   const [drafts, setDrafts] = useState<Record<string, Record<string, DraftEntry>>>({});
   const [saving, setSaving] = useState(false);
   const [savedNotice, setSavedNotice] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const today = todayIso();
   const yesterday = yesterdayIso();
@@ -165,7 +166,8 @@ export function InputHarianView({
     days,
     activeOutlet,
     selectedDay,
-    today
+    today,
+    isAdmin
   );
 
   const setTaskDraft = (
@@ -175,6 +177,7 @@ export function InputHarianView({
     patch: Partial<DraftEntry>
   ) => {
     setSavedNotice(null);
+    setSaveError(null);
     setDrafts((prev) => {
       const existingMap = prev[dayKey] || {};
       const current = existingMap[taskKey] || { d: baseD, n: baseN };
@@ -195,6 +198,7 @@ export function InputHarianView({
 
   const clearTaskDraft = (taskKey: string, hasOwnSaved: boolean) => {
     setSavedNotice(null);
+    setSaveError(null);
     setDrafts((prev) => {
       const existingMap = prev[dayKey] || {};
       if (hasOwnSaved) {
@@ -218,6 +222,8 @@ export function InputHarianView({
   const handleSaveDay = async () => {
     if (!canEditDay || !hasUnsavedChanges || saving) return;
     setSaving(true);
+    setSaveError(null);
+    setSavedNotice(null);
     try {
       await onSaveOutletDay(activeOutlet, selectedDay, dirtyEntries);
       setDrafts((prev) => {
@@ -226,6 +232,17 @@ export function InputHarianView({
         return next;
       });
       setSavedNotice(`Data ${activeOutlet} (${fmtDateLong(selectedDay)}) tersimpan.`);
+    } catch (err) {
+      let msg = 'Gagal menyimpan data harian. Periksa koneksi atau izin akses Anda.';
+      if (err instanceof Error) {
+        try {
+          const parsed = JSON.parse(err.message);
+          if (parsed?.error) msg = `Gagal menyimpan: ${parsed.error}`;
+        } catch {
+          if (err.message) msg = `Gagal menyimpan: ${err.message}`;
+        }
+      }
+      setSaveError(msg);
     } finally {
       setSaving(false);
     }
@@ -263,7 +280,15 @@ export function InputHarianView({
             </div>
           </div>
           {defaultDay !== selectedDay &&
-            canEditOutletDay(store, config.tasks, days, activeOutlet, defaultDay, today) && (
+            canEditOutletDay(
+              store,
+              config.tasks,
+              days,
+              activeOutlet,
+              defaultDay,
+              today,
+              isAdmin
+            ) && (
               <button
                 type="button"
                 onClick={() => onChangeDay(defaultDay)}
@@ -272,6 +297,18 @@ export function InputHarianView({
                 Buka {fmtDateLong(defaultDay)}
               </button>
             )}
+        </div>
+      )}
+
+      {canEditDay && isAdmin && selectedDayAlreadyFilled && selectedDay < today && (
+        <div
+          role="status"
+          className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-blue-200 bg-blue-50/70 px-4 py-2.5 text-xs text-blue-900 dark:border-blue-900/70 dark:bg-blue-950/35 dark:text-blue-200"
+        >
+          <span>
+            <span className="font-semibold">Mode Koreksi Admin</span> · Data{' '}
+            {activeOutlet} pada {fmtDateLong(selectedDay)} sudah terisi sebelumnya. Admin tetap dapat mengoreksi data ini tanpa penalti isi mundur.
+          </span>
         </div>
       )}
 
@@ -300,6 +337,7 @@ export function InputHarianView({
                 value={selectedDay}
                 onChange={(e) => {
                   setSavedNotice(null);
+                  setSaveError(null);
                   onChangeDay(e.target.value);
                 }}
                 className={`min-h-[42px] min-w-0 flex-1 rounded-lg border px-3 py-2 font-mono text-sm tabular-nums focus:border-blue-600 focus:outline-none ${
@@ -315,7 +353,8 @@ export function InputHarianView({
                     days,
                     activeOutlet,
                     d,
-                    today
+                    today,
+                    isAdmin
                   );
                   return (
                     <option
@@ -436,6 +475,14 @@ export function InputHarianView({
             </button>
           </div>
         </div>
+        {saveError && (
+          <div
+            role="alert"
+            className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3.5 py-2.5 text-xs font-medium text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300"
+          >
+            {saveError}
+          </div>
+        )}
       </section>
 
       {/* Main Dynamic Tasks Table */}
@@ -496,17 +543,17 @@ export function InputHarianView({
               {calculatedTasks.map(({ def, calc, displayD, displayN, isDirty }) => {
                 const inputType = getTaskInputType(def);
                 const isMonthly = inputType === 'month';
-                const quickTargetDate = isMonthly
-                  ? prevMonthFirstDay(today)
-                  : def.formulaType === 'memo_month'
-                    ? prevMonthFirstDay(today)
-                    : shiftIsoDays(selectedDay, -1);
+                const quickTargetDate =
+                  isMonthly || def.formulaType === 'memo_month'
+                    ? prevMonthFirstDay(selectedDay)
+                    : prevWorkingDay(selectedDay);
                 const currentComparable = isMonthly
                   ? displayD
                     ? `${displayD.slice(0, 7)}-01`
                     : ''
                   : displayD;
                 const formattedTs = fmtDateTimeWithSeconds(calc.ts);
+                const maxMonth = today.slice(0, 7);
                 return (
                   <tr
                     key={def.key}
@@ -538,29 +585,35 @@ export function InputHarianView({
                         {isMonthly ? (
                           <input
                             type="month"
+                            max={maxMonth}
                             disabled={!canEditDay}
                             aria-label={`Bulan update ${def.label}`}
                             value={displayD ? displayD.slice(0, 7) : ''}
-                            onChange={(e) =>
+                            onChange={(e) => {
+                              const raw = e.target.value;
+                              const clamped = raw && raw > maxMonth ? maxMonth : raw;
                               setTaskDraft(def.key, calc.d, calc.n, {
-                                d: e.target.value ? `${e.target.value}-01` : '',
+                                d: clamped ? `${clamped}-01` : '',
                                 cleared: false,
-                              })
-                            }
+                              });
+                            }}
                             className="h-[38px] w-[150px] shrink-0 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 font-mono text-xs text-slate-900 tabular-nums disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-200/80 disabled:text-slate-400 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:disabled:border-slate-700/70 dark:disabled:bg-slate-800/50 dark:disabled:text-slate-500"
                           />
                         ) : (
                           <input
                             type="date"
+                            max={today}
                             disabled={!canEditDay}
                             aria-label={`Tanggal update ${def.label}`}
                             value={displayD}
-                            onChange={(e) =>
+                            onChange={(e) => {
+                              const raw = e.target.value;
+                              const clamped = raw && raw > today ? today : raw;
                               setTaskDraft(def.key, calc.d, calc.n, {
-                                d: e.target.value,
+                                d: clamped,
                                 cleared: false,
-                              })
-                            }
+                              });
+                            }}
                             className="h-[38px] w-[150px] shrink-0 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 font-mono text-xs text-slate-900 tabular-nums disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-200/80 disabled:text-slate-400 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:disabled:border-slate-700/70 dark:disabled:bg-slate-800/50 dark:disabled:text-slate-500"
                           />
                         )}
@@ -651,7 +704,12 @@ export function InputHarianView({
                               : 'text-emerald-700 dark:text-emerald-400'
                         }`}
                       >
-                        {!calc.d ? '—' : calc.pm > 0 ? `+${calc.pm}` : calc.pm}
+                        <div>{!calc.d ? '—' : calc.pm > 0 ? `+${calc.pm}` : calc.pm}</div>
+                        {calc.backfillDays ? (
+                          <div className="mt-0.5 font-sans text-[10px] font-medium text-red-500 dark:text-red-400">
+                            Isi mundur {calc.backfillDays} hr
+                          </div>
+                        ) : null}
                       </td>
                     )}
 

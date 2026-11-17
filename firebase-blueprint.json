@@ -144,7 +144,7 @@
         },
         "ent": {
           "type": "object",
-          "description": "Nested map of outlet -> (day|task) -> { d, n, ts }"
+          "description": "Nested map of outlet -> (day|task) -> { d, n, ts, byAdmin? }"
         },
         "visit": {
           "type": "object",
@@ -182,7 +182,7 @@
         },
         "ent": {
           "type": "object",
-          "description": "Nested map of outlet -> (day|task) -> { d, n, ts }"
+          "description": "Nested map of outlet -> (day|task) -> { d, n, ts, byAdmin? }"
         },
         "visit": {
           "type": "object",

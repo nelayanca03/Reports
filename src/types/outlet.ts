@@ -45,6 +45,7 @@ export interface EntryItem {
   d: string;
   n: string;
   ts?: string;
+  byAdmin?: boolean;
 }
 
 export interface VisitEntry {
@@ -93,6 +94,7 @@ export interface ResolvedEntry {
   d: string;
   n: string;
   ts?: string;
+  byAdmin?: boolean;
   own: boolean;
   source: EntrySource;
   sourceDay?: string;
@@ -104,6 +106,7 @@ export interface CalculatedTask extends ResolvedEntry {
   rumus: string;
   pm: number;
   pend: boolean;
+  backfillDays?: number;
 }
 
 export interface OutletRecap {
@@ -115,6 +118,8 @@ export interface OutletRecap {
   latestPm: number;
   latestPend: boolean;
   latestNote: string;
+  hasAnyInput: boolean;
+  backfillCount: number;
 }
 
 export interface VisitPersonStats {

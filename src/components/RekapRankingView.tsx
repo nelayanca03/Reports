@@ -72,19 +72,22 @@ export function RekapRankingView({
     return true;
   });
 
+  const effectiveRecapDate = recapDate > today ? today : recapDate;
+
   const rankingRows = filteredOutlets
     .map(({ code, person }) =>
-      calcRecap(store, days, config.tasks, code, person, activeTaskKey, recapDate, today)
+      calcRecap(store, days, config.tasks, code, person, activeTaskKey, effectiveRecapDate, today)
     )
-    .sort((a, b) => a.avg - b.avg);
+    .sort((a, b) => Number(a.hasAnyInput) - Number(b.hasAnyInput) || a.avg - b.avg);
 
   const avgAll = rankingRows.length
     ? rankingRows.reduce((acc, r) => acc + r.avg, 0) / rankingRows.length
     : 0;
+  const neverInputOutlets = rankingRows.filter((r) => !r.hasAnyInput).length;
   const latestPendingOutlets = rankingRows.filter((r) => r.latestPend).length;
   const latestUpdateOutlets = rankingRows.length - latestPendingOutlets;
 
-  const activeDayForMatrix = nearestWorkingDay(days, recapDate);
+  const activeDayForMatrix = nearestWorkingDay(days, effectiveRecapDate);
 
   return (
     <div className="space-y-5">
@@ -163,8 +166,12 @@ export function RekapRankingView({
             <input
               id="rekap-date"
               type="date"
+              max={today}
               value={recapDate}
-              onChange={(e) => onChangeRecapDate(e.target.value || today)}
+              onChange={(e) => {
+                const val = e.target.value || today;
+                onChangeRecapDate(val > today ? today : val);
+              }}
               className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-sm text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
             />
           </div>
@@ -240,7 +247,9 @@ export function RekapRankingView({
                 Ranking dari Paling Telat ke Paling Baik
               </h2>
               <span className="text-xs text-slate-500 dark:text-slate-400">
-                {config.label} · Per tanggal {fmtDate(recapDate)}
+                {config.label} · Per tanggal {fmtDate(effectiveRecapDate)}
+                {recapDate > today ? ` (dibatasi hari ini)` : ''}
+                {neverInputOutlets > 0 ? ` · ${neverInputOutlets} belum pernah input` : ''}
               </span>
             </div>
 
@@ -279,10 +288,23 @@ export function RekapRankingView({
                           {row.person}
                         </td>
                         <td className="px-4 py-3 font-mono text-xs text-slate-600 tabular-nums dark:text-slate-300">
-                          {isActiveTaskMonthly ? fmtMonth(row.latestDate) : fmtDate(row.latestDate)}
+                          {!row.hasAnyInput ? (
+                            <span className="font-sans text-slate-400 dark:text-slate-500">
+                              Belum pernah input
+                            </span>
+                          ) : isActiveTaskMonthly ? (
+                            fmtMonth(row.latestDate)
+                          ) : (
+                            fmtDate(row.latestDate)
+                          )}
                         </td>
                         <td className="px-4 py-3">
-                          {row.latestPend ? (
+                          {!row.hasAnyInput ? (
+                            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-red-600 dark:text-red-400">
+                              <AlertCircle className="h-3.5 w-3.5 shrink-0" />
+                              <span>BELUM INPUT</span>
+                            </span>
+                          ) : row.latestPend ? (
                             <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-red-600 dark:text-red-400">
                               <AlertCircle className="h-3.5 w-3.5 shrink-0" />
                               <span>PENDING</span>
@@ -296,7 +318,7 @@ export function RekapRankingView({
                         </td>
                         <td
                           className={`px-4 py-3 text-right font-mono font-semibold tabular-nums ${
-                            row.avg < 0
+                            !row.hasAnyInput || row.avg < 0
                               ? 'text-red-600 dark:text-red-400'
                               : 'text-emerald-700 dark:text-emerald-400'
                           }`}
@@ -304,7 +326,12 @@ export function RekapRankingView({
                           {row.avg > 0 ? `+${row.avg.toFixed(1)}` : row.avg.toFixed(1)}
                         </td>
                         <td className="px-4 py-3 text-right font-mono text-slate-700 tabular-nums dark:text-slate-300">
-                          {row.pend}
+                          <div>{row.pend}</div>
+                          {row.backfillCount > 0 && (
+                            <div className="font-sans text-[10px] font-medium text-red-500 dark:text-red-400">
+                              {row.backfillCount}x isi mundur
+                            </div>
+                          )}
                         </td>
                         <td className="px-5 py-3 text-right">
                           <button

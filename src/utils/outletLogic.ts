@@ -44,7 +44,7 @@ export const STOCK_ACCOUNTING_TASKS: TaskDefinition[] = [
     inputType: 'month',
     formulaType: 'memo_month',
     toleranceOffset: 1,
-    formulaNote: 'Selisih bulan terhadap hari ini + 1',
+    formulaNote: 'Selisih bulan terhadap tanggal kerja + 1',
   },
   {
     key: 'ham',
@@ -126,7 +126,7 @@ export function buildFormulaNote(
 ): string {
   const signed = toleranceOffset >= 0 ? `+ ${toleranceOffset}` : `- ${Math.abs(toleranceOffset)}`;
   if (formulaType === 'memo_month') {
-    return `Selisih bulan terhadap hari ini ${signed}`;
+    return `Selisih bulan terhadap tanggal kerja ${signed}`;
   }
   if (formulaType === 'ref_task' && refLabel) {
     return toleranceOffset === 0
@@ -219,6 +219,15 @@ export function diffDays(a: string, b: string): number {
   return Math.round((parseUtcDate(a).getTime() - parseUtcDate(b).getTime()) / 864e5);
 }
 
+export function workingDayIndex(isoStr: string): number {
+  const dayNum = Math.floor(parseUtcDate(isoStr).getTime() / 864e5);
+  return dayNum - Math.floor((dayNum + 4) / 7);
+}
+
+export function diffWorkingDays(a: string, b: string): number {
+  return workingDayIndex(a) - workingDayIndex(b);
+}
+
 export function isSunday(isoStr: string): boolean {
   if (!isoStr) return false;
   const d = parseUtcDate(isoStr);
@@ -230,6 +239,18 @@ export function shiftIsoDays(isoStr: string, offsetDays: number): string {
   if (Number.isNaN(d.getTime())) return isoStr;
   d.setUTCDate(d.getUTCDate() + offsetDays);
   return toIsoUtc(d);
+}
+
+export function prevWorkingDay(isoStr: string): string {
+  const prev = shiftIsoDays(isoStr, -1);
+  return isSunday(prev) ? shiftIsoDays(prev, -1) : prev;
+}
+
+export function toWibIsoDate(isoTimestamp?: string): string {
+  if (!isoTimestamp) return '';
+  const ms = Date.parse(isoTimestamp);
+  if (Number.isNaN(ms)) return '';
+  return new Date(ms + 7 * 3600 * 1000).toISOString().slice(0, 10);
 }
 
 export function todayIso(): string {
@@ -512,11 +533,13 @@ export function canEditOutletDay(
   days: string[],
   outlet: string,
   day: string,
-  today: string = todayIso()
+  today: string = todayIso(),
+  isAdmin: boolean = false
 ): boolean {
   if (!day || !days.includes(day)) return false;
   if (isSunday(day)) return false;
   if (day > today) return false;
+  if (isAdmin) return true;
   if (day === today) return true;
   return !isOutletDayFilled(state, tasks, outlet, day);
 }
@@ -541,6 +564,7 @@ export function getEntry(
         d: e.d,
         n: isOwn ? e.n || '' : ownEntry?.n || '',
         ts: e.ts,
+        byAdmin: e.byAdmin,
         own: isOwn,
         source: isOwn ? 'own' : 'inherited',
         sourceDay: candidateDay,
@@ -567,6 +591,7 @@ export function getEntry(
         d: bestEntry.d,
         n: ownEntry?.n || '',
         ts: bestEntry.ts,
+        byAdmin: bestEntry.byAdmin,
         own: false,
         source: 'inherited',
         sourceDay: bestDay,
@@ -578,6 +603,7 @@ export function getEntry(
     d: '',
     n: ownEntry?.n || '',
     ts: ownEntry?.ts,
+    byAdmin: ownEntry?.byAdmin,
     own: Boolean(ownEntry && (ownEntry.d || ownEntry.n)),
     source: 'default',
   };
@@ -597,40 +623,69 @@ export function calcTask(
   const formulaType = taskDef?.formulaType || 'daily_plus_1';
   const tol = getTaskTolerance(taskDef);
 
+  const periodStart = days[0] && days[0] <= day ? days[0] : `${day.slice(0, 7)}-01`;
+  const daysSincePeriodStart = Math.max(1, diffWorkingDays(day, periodStart) + 1);
+
   let rumus: string;
   let pm: number;
+  let backfillDays = 0;
 
   if (formulaType === 'memo_month') {
-    rumus = today;
+    const anchorDay = day || today;
+    rumus = anchorDay;
     if (!resolved.d) {
-      pm = -1;
+      pm = -daysSincePeriodStart;
     } else {
       const normalizedD = resolved.d.length === 7 ? `${resolved.d}-01` : resolved.d;
-      const a = parseUtcDate(normalizedD);
-      const b = parseUtcDate(today);
+      const todayMonth = today.slice(0, 7);
+      const effectiveD =
+        normalizedD.slice(0, 7) > todayMonth ? `${todayMonth}-01` : normalizedD;
+      const a = parseUtcDate(effectiveD);
+      const b = parseUtcDate(anchorDay.length === 7 ? `${anchorDay}-01` : anchorDay);
       pm = (a.getUTCFullYear() - b.getUTCFullYear()) * 12 + a.getUTCMonth() - b.getUTCMonth() + tol;
     }
   } else if (formulaType === 'ref_task' && taskDef?.refTaskKey) {
     const refResolved = getEntry(state, days, tasks, outlet, day, taskDef.refTaskKey);
-    rumus = refResolved.d || '';
+    const rawRef = refResolved.d || '';
+    const clampedRef = rawRef && rawRef.slice(0, 10) > today ? today : rawRef;
+    rumus = clampedRef;
     if (!resolved.d) {
-      pm = -1;
+      pm = -daysSincePeriodStart;
     } else {
       const normalizedD = resolved.d.length === 7 ? `${resolved.d}-01` : resolved.d;
-      if (!refResolved.d) {
-        pm = diffDays(normalizedD, day) + tol;
+      const effectiveD = normalizedD > today ? today : normalizedD;
+      if (!clampedRef) {
+        pm = diffWorkingDays(effectiveD, day) + tol;
       } else {
-        const normalizedRef = rumus.length === 7 ? `${rumus}-01` : rumus;
-        pm = diffDays(normalizedD, normalizedRef) + tol;
+        const normalizedRef = clampedRef.length === 7 ? `${clampedRef}-01` : clampedRef;
+        pm = diffWorkingDays(effectiveD, normalizedRef) + tol;
       }
     }
   } else {
     rumus = day;
     if (!resolved.d) {
-      pm = -1;
+      pm = -daysSincePeriodStart;
     } else {
       const normalizedD = resolved.d.length === 7 ? `${resolved.d}-01` : resolved.d;
-      pm = diffDays(normalizedD, rumus) + tol;
+      const effectiveD = normalizedD > today ? today : normalizedD;
+      pm = diffWorkingDays(effectiveD, rumus) + tol;
+    }
+  }
+
+  if (
+    resolved.d &&
+    resolved.source === 'own' &&
+    resolved.sourceDay &&
+    resolved.ts &&
+    !resolved.byAdmin
+  ) {
+    const tsWibDate = toWibIsoDate(resolved.ts);
+    if (tsWibDate && tsWibDate > resolved.sourceDay) {
+      const lateWorkingDays = diffWorkingDays(tsWibDate, resolved.sourceDay) - 1;
+      if (lateWorkingDays > 0) {
+        backfillDays = lateWorkingDays;
+        pm = Math.min(pm, -backfillDays);
+      }
     }
   }
 
@@ -641,6 +696,7 @@ export function calcTask(
     rumus,
     pm,
     pend: !resolved.d || pm < 0,
+    ...(backfillDays > 0 ? { backfillDays } : {}),
   };
 }
 
@@ -654,29 +710,36 @@ export function calcRecap(
   upto: string,
   today: string = todayIso()
 ): OutletRecap {
-  const ds = days.filter((d) => d <= upto && !isSunday(d));
+  const effectiveUpto = upto && upto > today ? today : upto;
+  const ds = days.filter((d) => d <= effectiveUpto && !isSunday(d));
   if (!ds.length) {
-    const fallback = calcTask(state, days, tasks, outlet, days[0] || upto, taskKey, today);
+    const fallback = calcTask(state, days, tasks, outlet, days[0] || effectiveUpto, taskKey, today);
     return {
       outlet,
       person,
       avg: 0,
       pend: 0,
       latestDate: fallback.d,
-      latestPm: fallback.pm,
-      latestPend: fallback.pend,
+      latestPm: fallback.d ? fallback.pm : 0,
+      latestPend: fallback.d ? fallback.pend : false,
       latestNote: fallback.n,
+      hasAnyInput: Boolean(fallback.d),
+      backfillCount: fallback.backfillDays ? 1 : 0,
     };
   }
 
   let sum = 0;
   let pendCount = 0;
+  let hasAnyInput = false;
+  let backfillCount = 0;
   let latest = calcTask(state, days, tasks, outlet, ds[0], taskKey, today);
 
   for (const d of ds) {
     const c = calcTask(state, days, tasks, outlet, d, taskKey, today);
     sum += c.pm;
     if (c.pend) pendCount++;
+    if (c.d) hasAnyInput = true;
+    if ((c.backfillDays || 0) > 0) backfillCount++;
     latest = c;
   }
 
@@ -689,6 +752,8 @@ export function calcRecap(
     latestPm: latest.pm,
     latestPend: latest.pend,
     latestNote: latest.n,
+    hasAnyInput,
+    backfillCount,
   };
 }
 
@@ -850,29 +915,34 @@ export function generateRecapCsv(
     'Hari Pending',
     'Status Terakhir',
   ];
+  const effectiveUpto = upto && upto > today ? today : upto;
   const recaps = config.outlets
     .map(({ code: outlet, person }) =>
-      calcRecap(state, days, config.tasks, outlet, person, taskKey, upto, today)
+      calcRecap(state, days, config.tasks, outlet, person, taskKey, effectiveUpto, today)
     )
-    .sort((a, b) => a.avg - b.avg);
+    .sort((a, b) => Number(a.hasAnyInput) - Number(b.hasAnyInput) || a.avg - b.avg);
 
   const isMonthly = getTaskInputType(taskDef) === 'month';
   const rows: string[] = [header.map(escapeCsv).join(',')];
   recaps.forEach((r, idx) => {
-    const displayLatest = r.latestDate ? (isMonthly ? r.latestDate.slice(0, 7) : r.latestDate) : '';
+    const displayLatest = r.latestDate
+      ? isMonthly
+        ? r.latestDate.slice(0, 7)
+        : r.latestDate
+      : 'Belum pernah input';
     rows.push(
       [
         idx + 1,
         config.label,
         taskDef?.label || taskKey,
-        upto,
+        effectiveUpto,
         r.outlet,
         r.person,
         displayLatest,
-        r.latestPm,
+        r.hasAnyInput ? r.latestPm : '—',
         r.avg.toFixed(1),
         r.pend,
-        r.latestPend ? 'PENDING' : 'UPDATE',
+        !r.hasAnyInput ? 'BELUM INPUT' : r.latestPend ? 'PENDING' : 'UPDATE',
       ]
         .map(escapeCsv)
         .join(',')

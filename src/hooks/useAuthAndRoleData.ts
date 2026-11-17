@@ -11,6 +11,7 @@ import {
   onSnapshot,
   orderBy,
   query,
+  runTransaction,
   serverTimestamp,
   setDoc,
   updateDoc,
@@ -748,26 +749,6 @@ export function useAuthAndRoleData() {
     await signOut(auth);
   }, []);
 
-  const ensureMonthlyWorkspaceDoc = useCallback(
-    async (roleId: OperationalRoleId, monthKey: string, uid: string) => {
-      const docId = `${roleId}_${monthKey}`;
-      const wsRef = doc(db, 'roleMonthlyWorkspaces', docId);
-      const snap = await getDoc(wsRef);
-      if (!snap.exists()) {
-        await setDoc(wsRef, {
-          roleId,
-          monthKey,
-          ent: {},
-          visit: {},
-          updatedAt: serverTimestamp(),
-          updatedBy: uid,
-        });
-      }
-      return { wsRef, docId };
-    },
-    []
-  );
-
   const canAccessMonthForWrite = useCallback(
     (monthKey: string) => {
       if (isAdminAccount) return true;
@@ -781,13 +762,46 @@ export function useAuthAndRoleData() {
   const updateEntry = useCallback(
     async (outlet: string, day: string, taskKey: string, field: 'd' | 'n', value: string) => {
       const uid = auth.currentUser?.uid;
-      if (!uid) return;
-      if (!canEditOutletDay(workspaceData, activeConfig.tasks, days, outlet, day)) return;
+      if (!uid) {
+        throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
+      }
+      const today = todayIso();
+      if (
+        !canEditOutletDay(
+          workspaceData,
+          activeConfig.tasks,
+          days,
+          outlet,
+          day,
+          today,
+          isAdminAccount
+        )
+      ) {
+        throw new Error('Tanggal atau outlet ini terkunci dan tidak dapat diubah.');
+      }
       const monthKey = currentMonthKey(day);
-      if (!canAccessMonthForWrite(monthKey)) return;
-      const path = `roleMonthlyWorkspaces/${effectiveRoleId}_${monthKey}`;
+      if (!canAccessMonthForWrite(monthKey)) {
+        throw new Error('Akses bulan ini sudah ditutup oleh Admin.');
+      }
+
+      const taskDef = activeConfig.tasks.find((t) => t.key === taskKey);
+      const isMonthly = getTaskInputType(taskDef) === 'month';
+      const safeValue = field === 'n' ? value.slice(0, 100) : value.trim();
+
+      if (field === 'd' && safeValue) {
+        if (isMonthly) {
+          if (!/^\d{4}-\d{2}/.test(safeValue) || safeValue.slice(0, 7) > currentMonthKey(today)) {
+            throw new Error('Bulan update tidak boleh melebihi bulan berjalan.');
+          }
+        } else if (!/^\d{4}-\d{2}-\d{2}$/.test(safeValue) || safeValue > today) {
+          throw new Error('Tanggal update tidak boleh melebihi tanggal hari ini.');
+        }
+      }
+
+      const docId = `${effectiveRoleId}_${monthKey}`;
+      const path = `roleMonthlyWorkspaces/${docId}`;
+      const wsRef = doc(db, 'roleMonthlyWorkspaces', docId);
       try {
-        const { wsRef } = await ensureMonthlyWorkspaceDoc(effectiveRoleId, monthKey, uid);
         const existing = workspaceData.ent[outlet]?.[`${day}|${taskKey}`];
         const fallbackDate = getEntry(
           workspaceData,
@@ -797,29 +811,47 @@ export function useAuthAndRoleData() {
           day,
           taskKey
         ).d;
-        const safeValue = field === 'n' ? value.slice(0, 100) : value;
-        const nextEntry = {
+        const nextEntry: EntryItem = {
           d: existing?.d || fallbackDate,
           n: (existing?.n || '').slice(0, 100),
           ts: new Date().toISOString(),
+          ...(isAdminAccount ? { byAdmin: true } : {}),
           [field]: safeValue,
         };
-        await updateDoc(
-          wsRef,
-          new FieldPath('ent', outlet, `${day}|${taskKey}`),
-          nextEntry,
-          'updatedAt',
-          serverTimestamp(),
-          'updatedBy',
-          uid
-        );
+        await runTransaction(db, async (tx) => {
+          const snap = await tx.get(wsRef);
+          if (!snap.exists()) {
+            tx.set(wsRef, {
+              roleId: effectiveRoleId,
+              monthKey,
+              ent: {
+                [outlet]: {
+                  [`${day}|${taskKey}`]: nextEntry,
+                },
+              },
+              visit: {},
+              updatedAt: serverTimestamp(),
+              updatedBy: uid,
+            });
+          } else {
+            tx.update(
+              wsRef,
+              new FieldPath('ent', outlet, `${day}|${taskKey}`),
+              nextEntry,
+              'updatedAt',
+              serverTimestamp(),
+              'updatedBy',
+              uid
+            );
+          }
+        });
       } catch (error) {
         handleFirestoreError(error, OperationType.UPDATE, path);
       }
     },
     [
       effectiveRoleId,
-      ensureMonthlyWorkspaceDoc,
+      isAdminAccount,
       workspaceData,
       days,
       activeConfig.tasks,
@@ -873,38 +905,102 @@ export function useAuthAndRoleData() {
       changes: Record<string, { d: string; n: string; cleared?: boolean }>
     ) => {
       const uid = auth.currentUser?.uid;
-      if (!uid) return;
-      if (!canEditOutletDay(workspaceData, activeConfig.tasks, days, outlet, day)) return;
+      if (!uid) {
+        throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
+      }
+      const today = todayIso();
+      if (
+        !canEditOutletDay(
+          workspaceData,
+          activeConfig.tasks,
+          days,
+          outlet,
+          day,
+          today,
+          isAdminAccount
+        )
+      ) {
+        throw new Error('Tanggal atau outlet ini terkunci dan tidak dapat diubah.');
+      }
       const entries = Object.entries(changes);
       if (entries.length === 0) return;
 
       const monthKey = currentMonthKey(day);
-      if (!canAccessMonthForWrite(monthKey)) return;
-      const path = `roleMonthlyWorkspaces/${effectiveRoleId}_${monthKey}`;
+      if (!canAccessMonthForWrite(monthKey)) {
+        throw new Error('Akses bulan ini sudah ditutup oleh Admin.');
+      }
+
+      const curMonth = currentMonthKey(today);
+      for (const [taskKey, item] of entries) {
+        const cleanDate = (item.d || '').trim();
+        if (item.cleared || !cleanDate) continue;
+        const taskDef = activeConfig.tasks.find((t) => t.key === taskKey);
+        const isMonthly = getTaskInputType(taskDef) === 'month';
+        if (isMonthly) {
+          if (!/^\d{4}-\d{2}/.test(cleanDate) || cleanDate.slice(0, 7) > curMonth) {
+            throw new Error(
+              `Bulan update pada ${taskDef?.label || taskKey} tidak boleh melebihi bulan berjalan.`
+            );
+          }
+        } else if (!/^\d{4}-\d{2}-\d{2}$/.test(cleanDate) || cleanDate > today) {
+          throw new Error(
+            `Tanggal update pada ${taskDef?.label || taskKey} tidak boleh melebihi tanggal hari ini.`
+          );
+        }
+      }
+
+      const docId = `${effectiveRoleId}_${monthKey}`;
+      const path = `roleMonthlyWorkspaces/${docId}`;
+      const wsRef = doc(db, 'roleMonthlyWorkspaces', docId);
       const nowIso = new Date().toISOString();
       try {
-        const { wsRef } = await ensureMonthlyWorkspaceDoc(effectiveRoleId, monthKey, uid);
-        const updateArgs: unknown[] = [];
-
-        for (const [taskKey, item] of entries) {
-          const cleanNote = (item.n || '').slice(0, 100);
-          if (item.cleared || (!item.d && !cleanNote)) {
-            updateArgs.push(new FieldPath('ent', outlet, `${day}|${taskKey}`), deleteField());
-          } else {
-            updateArgs.push(new FieldPath('ent', outlet, `${day}|${taskKey}`), {
-              d: item.d,
-              n: cleanNote,
-              ts: nowIso,
+        await runTransaction(db, async (tx) => {
+          const snap = await tx.get(wsRef);
+          if (!snap.exists()) {
+            const initialOutletEnt: Record<string, EntryItem> = {};
+            for (const [taskKey, item] of entries) {
+              const cleanDate = (item.d || '').trim();
+              const cleanNote = (item.n || '').slice(0, 100);
+              if (!item.cleared && (cleanDate || cleanNote)) {
+                initialOutletEnt[`${day}|${taskKey}`] = {
+                  d: cleanDate,
+                  n: cleanNote,
+                  ts: nowIso,
+                  ...(isAdminAccount ? { byAdmin: true } : {}),
+                };
+              }
+            }
+            tx.set(wsRef, {
+              roleId: effectiveRoleId,
+              monthKey,
+              ent: Object.keys(initialOutletEnt).length > 0 ? { [outlet]: initialOutletEnt } : {},
+              visit: {},
+              updatedAt: serverTimestamp(),
+              updatedBy: uid,
             });
+          } else {
+            const updateArgs: unknown[] = [];
+            for (const [taskKey, item] of entries) {
+              const cleanDate = (item.d || '').trim();
+              const cleanNote = (item.n || '').slice(0, 100);
+              if (item.cleared || (!cleanDate && !cleanNote)) {
+                updateArgs.push(new FieldPath('ent', outlet, `${day}|${taskKey}`), deleteField());
+              } else {
+                updateArgs.push(new FieldPath('ent', outlet, `${day}|${taskKey}`), {
+                  d: cleanDate,
+                  n: cleanNote,
+                  ts: nowIso,
+                  ...(isAdminAccount ? { byAdmin: true } : {}),
+                });
+              }
+            }
+            updateArgs.push('updatedAt', serverTimestamp(), 'updatedBy', uid);
+            tx.update(
+              wsRef,
+              ...(updateArgs as [FieldPath | string, unknown, ...unknown[]])
+            );
           }
-        }
-
-        updateArgs.push('updatedAt', serverTimestamp(), 'updatedBy', uid);
-
-        await updateDoc(
-          wsRef,
-          ...(updateArgs as [FieldPath | string, unknown, ...unknown[]])
-        );
+        });
       } catch (error) {
         handleFirestoreError(error, OperationType.UPDATE, path);
       }
@@ -926,19 +1022,23 @@ export function useAuthAndRoleData() {
         return cleanNote ? `${label}: ${datePart} (${cleanNote})` : `${label}: ${datePart}`;
       });
 
-      await recordInputLog({
-        actionType: 'input_harian',
-        pic: assignedPic,
-        outlet,
-        day,
-        details: summaryParts.join(' · '),
-        itemCount: entries.length,
-        clientTs: nowIso,
-      });
+      try {
+        await recordInputLog({
+          actionType: 'input_harian',
+          pic: assignedPic,
+          outlet,
+          day,
+          details: summaryParts.join(' · '),
+          itemCount: entries.length,
+          clientTs: nowIso,
+        });
+      } catch (logError) {
+        console.error('Gagal mencatat log input harian (data utama tetap tersimpan):', logError);
+      }
     },
     [
       effectiveRoleId,
-      ensureMonthlyWorkspaceDoc,
+      isAdminAccount,
       workspaceData,
       activeConfig.tasks,
       activeConfig.outlets,
@@ -951,41 +1051,72 @@ export function useAuthAndRoleData() {
   const clearEntryForDay = useCallback(
     async (outlet: string, day: string, taskKey: string) => {
       const uid = auth.currentUser?.uid;
-      if (!uid) return;
-      if (!canEditOutletDay(workspaceData, activeConfig.tasks, days, outlet, day)) return;
+      if (!uid) {
+        throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
+      }
+      if (
+        !canEditOutletDay(
+          workspaceData,
+          activeConfig.tasks,
+          days,
+          outlet,
+          day,
+          todayIso(),
+          isAdminAccount
+        )
+      ) {
+        throw new Error('Tanggal atau outlet ini terkunci dan tidak dapat dikosongkan.');
+      }
       const monthKey = currentMonthKey(day);
-      if (!canAccessMonthForWrite(monthKey)) return;
+      if (!canAccessMonthForWrite(monthKey)) {
+        throw new Error('Akses bulan ini sudah ditutup oleh Admin.');
+      }
       const docId = `${effectiveRoleId}_${monthKey}`;
       const path = `roleMonthlyWorkspaces/${docId}`;
       try {
         const wsRef = doc(db, 'roleMonthlyWorkspaces', docId);
-        const snap = await getDoc(wsRef);
-        if (snap.exists()) {
-          await updateDoc(
-            wsRef,
-            new FieldPath('ent', outlet, `${day}|${taskKey}`),
-            deleteField(),
-            'updatedAt',
-            serverTimestamp(),
-            'updatedBy',
-            uid
-          );
-        }
+        await runTransaction(db, async (tx) => {
+          const snap = await tx.get(wsRef);
+          if (snap.exists()) {
+            tx.update(
+              wsRef,
+              new FieldPath('ent', outlet, `${day}|${taskKey}`),
+              deleteField(),
+              'updatedAt',
+              serverTimestamp(),
+              'updatedBy',
+              uid
+            );
+          }
+        });
       } catch (error) {
         handleFirestoreError(error, OperationType.UPDATE, path);
       }
     },
-    [effectiveRoleId, workspaceData, activeConfig.tasks, days, canAccessMonthForWrite]
+    [
+      effectiveRoleId,
+      isAdminAccount,
+      workspaceData,
+      activeConfig.tasks,
+      days,
+      canAccessMonthForWrite,
+    ]
   );
 
   const saveVisitDay = useCallback(
     async (person: string, day: string, nextVisitInput: VisitItem) => {
       const uid = auth.currentUser?.uid;
-      if (!uid) return;
-      if (isSunday(day) || day !== todayIso()) return;
+      if (!uid) {
+        throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
+      }
+      if (isSunday(day) || day !== todayIso()) {
+        throw new Error('Kunjungan hanya dapat disimpan pada Hari H (bukan hari Minggu).');
+      }
 
       const monthKey = currentMonthKey(day);
-      if (!canAccessMonthForWrite(monthKey)) return;
+      if (!canAccessMonthForWrite(monthKey)) {
+        throw new Error('Akses bulan ini sudah ditutup oleh Admin.');
+      }
 
       const normalizedEntries = getVisitEntries(nextVisitInput)
         .slice(0, 20)
@@ -1014,27 +1145,29 @@ export function useAuthAndRoleData() {
       const key = `${person}|${day}`;
 
       try {
-        const snap = await getDoc(wsRef);
-        if (!snap.exists()) {
-          await setDoc(wsRef, {
-            roleId: effectiveRoleId,
-            monthKey,
-            ent: {},
-            visit: { [key]: normalizedVisit },
-            updatedAt: serverTimestamp(),
-            updatedBy: uid,
-          });
-        } else {
-          await updateDoc(
-            wsRef,
-            new FieldPath('visit', key),
-            normalizedVisit,
-            'updatedAt',
-            serverTimestamp(),
-            'updatedBy',
-            uid
-          );
-        }
+        await runTransaction(db, async (tx) => {
+          const snap = await tx.get(wsRef);
+          if (!snap.exists()) {
+            tx.set(wsRef, {
+              roleId: effectiveRoleId,
+              monthKey,
+              ent: {},
+              visit: { [key]: normalizedVisit },
+              updatedAt: serverTimestamp(),
+              updatedBy: uid,
+            });
+          } else {
+            tx.update(
+              wsRef,
+              new FieldPath('visit', key),
+              normalizedVisit,
+              'updatedAt',
+              serverTimestamp(),
+              'updatedBy',
+              uid
+            );
+          }
+        });
       } catch (error) {
         handleFirestoreError(error, OperationType.UPDATE, path);
       }

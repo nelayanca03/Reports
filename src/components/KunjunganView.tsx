@@ -740,7 +740,12 @@ export function KunjunganView({
                 <th className="px-4 py-3 text-right">Hari Kunjungan</th>
                 <th className="px-4 py-3 text-right">Total Kunjungan</th>
                 <th className="px-4 py-3 text-right">Hari Berjalan</th>
-                <th className="px-5 py-3">Rate Kunjungan</th>
+                <th className="px-5 py-3">
+                  <div>Porsi Kunjungan</div>
+                  <div className="text-[10px] font-normal text-slate-400 dark:text-slate-500">
+                    dari total {grandTotalVisits}x
+                  </div>
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
