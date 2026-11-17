@@ -1,4 +1,4 @@
-import { Copy, Plus, Save, Trash2 } from 'lucide-react';
+import { CalendarCheck2, Copy, LockOpen, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import { FormEvent, useState } from 'react';
 import {
   AccountProfile,
@@ -14,10 +14,15 @@ import {
   STOCK_ACCOUNTING_OUTLETS,
   STOCK_ACCOUNTING_TASKS,
   buildFormulaNote,
+  buildMonthWorkingDays,
+  currentMonthKey,
+  fmtMonth,
   getPeopleMap,
   getPersonList,
   getTaskInputType,
   getTaskTolerance,
+  shiftMonthKey,
+  todayIso,
 } from '../utils/outletLogic';
 import { ConfirmModal } from './ConfirmModal';
 
@@ -26,6 +31,7 @@ interface AdminTasksOutletsViewProps {
   initialRoleId: OperationalRoleId;
   accounts: AccountProfile[];
   onSaveRoleConfig: (roleId: OperationalRoleId, nextConfig: RoleConfig) => Promise<void>;
+  onSaveOpenUntilMonthAllRoles: (openUntilMonth?: string) => Promise<void>;
 }
 
 const FORMULA_LABELS: Record<FormulaType, string> = {
@@ -48,6 +54,7 @@ export function AdminTasksOutletsView({
   initialRoleId,
   accounts,
   onSaveRoleConfig,
+  onSaveOpenUntilMonthAllRoles,
 }: AdminTasksOutletsViewProps) {
   const [targetRole, setTargetRole] = useState<OperationalRoleId>(initialRoleId);
   const config = roleConfigs[targetRole];
@@ -68,9 +75,12 @@ export function AdminTasksOutletsView({
   const [outletPerson, setOutletPerson] = useState('');
   const [outletCode, setOutletCode] = useState('');
 
-  // Period edit state
-  const [editStart, setEditStart] = useState(config.start);
-  const [editNdays, setEditNdays] = useState(String(config.ndays));
+  // Month access state (defaults to configured openUntilMonth or Dec 2027 for convenience)
+  const activeCalMonth = currentMonthKey(todayIso());
+  const autoOpenMonth = shiftMonthKey(activeCalMonth, 1);
+  const [openUntilDraft, setOpenUntilDraft] = useState<string>(
+    () => config.openUntilMonth || '2027-12'
+  );
 
   // Confirm delete dialog
   const [pendingDelete, setPendingDelete] = useState<
@@ -81,9 +91,7 @@ export function AdminTasksOutletsView({
 
   const handleSelectRole = (rId: OperationalRoleId) => {
     setTargetRole(rId);
-    const nextCfg = roleConfigs[rId];
-    setEditStart(nextCfg.start);
-    setEditNdays(String(nextCfg.ndays));
+    setOpenUntilDraft(roleConfigs[rId]?.openUntilMonth || '2027-12');
     setToleranceDrafts({});
     setFeedback(null);
   };
@@ -100,17 +108,48 @@ export function AdminTasksOutletsView({
     ])
   );
 
-  const handleSavePeriod = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!editStart) return;
+  const activeCalDays = buildMonthWorkingDays(activeCalMonth);
+  const effectiveOpenMonth =
+    config.openUntilMonth && config.openUntilMonth > autoOpenMonth
+      ? config.openUntilMonth
+      : autoOpenMonth;
+
+  const handleSaveOpenMonthSingle = async (nextMonth?: string) => {
     setBusy(true);
     try {
       await onSaveRoleConfig(targetRole, {
         ...config,
-        start: editStart,
-        ndays: Math.max(1, Math.min(60, Number(editNdays) || 25)),
+        openUntilMonth: nextMonth,
       });
-      setFeedback(`Pengaturan periode ${config.label} disimpan.`);
+      if (nextMonth) {
+        setOpenUntilDraft(nextMonth);
+        setFeedback(
+          `Akses periode ${config.label} dibuka hingga ${fmtMonth(`${nextMonth}-01`)}.`
+        );
+      } else {
+        setFeedback(
+          `Akses periode ${config.label} dikembalikan ke mode otomatis (bulan berjalan + 1).`
+        );
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleSaveOpenMonthAll = async (nextMonth?: string) => {
+    setBusy(true);
+    try {
+      await onSaveOpenUntilMonthAllRoles(nextMonth);
+      if (nextMonth) {
+        setOpenUntilDraft(nextMonth);
+        setFeedback(
+          `Akses periode untuk semua role (Stock Accounting, GL, Accounting) dibuka hingga ${fmtMonth(`${nextMonth}-01`)}.`
+        );
+      } else {
+        setFeedback(
+          'Akses periode semua role dikembalikan ke mode otomatis (bulan berjalan + 1).'
+        );
+      }
     } finally {
       setBusy(false);
     }
@@ -352,53 +391,94 @@ export function AdminTasksOutletsView({
           )}
       </section>
 
-      {/* Period Settings */}
+      {/* Automatic Monthly Period + Admin Period Access Control */}
       <section className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
-        <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-          Periode Kerja · {config.label}
-        </h3>
-        <form onSubmit={handleSavePeriod} className="mt-3 flex flex-wrap items-end gap-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex items-start gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-400">
+              <CalendarCheck2 className="h-4.5 w-4.5" />
+            </div>
+            <div>
+              <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                Periode Kerja & Akses Bulan/Tahun · {config.label}
+              </h3>
+              <p className="mt-1 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                Hari kerja otomatis mengikuti bulan kalender (Senin–Sabtu, tanpa hari Minggu) dan otomatis bertambah setiap masuk bulan baru. Admin juga dapat langsung membuka akses bulan tahun 2027 (atau tahun berikutnya) untuk semua role — tanggal yang belum tiba tetap dikunci hanya baca sampai hari kerja tersebut tiba.
+              </p>
+            </div>
+          </div>
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-3.5 py-2 text-right dark:border-slate-700 dark:bg-slate-800">
+            <div className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+              Akses Terbuka Saat Ini
+            </div>
+            <div className="font-mono text-xs font-semibold text-slate-900 tabular-nums dark:text-slate-100">
+              s.d. {fmtMonth(`${effectiveOpenMonth}-01`)} ({activeCalDays.length} hr/bln ini)
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-4 flex flex-wrap items-end gap-3 border-t border-slate-100 pt-4 dark:border-slate-800">
           <div>
             <label
-              htmlFor="cfg-start"
+              htmlFor="open-until-month"
               className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
             >
-              Tanggal Mulai
+              Buka Akses Periode Hingga Bulan
             </label>
             <input
-              id="cfg-start"
-              type="date"
-              value={editStart}
-              onChange={(e) => setEditStart(e.target.value)}
-              className="min-h-[40px] rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 font-mono text-sm text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+              id="open-until-month"
+              type="month"
+              min="2026-11"
+              max="2030-12"
+              value={openUntilDraft}
+              onChange={(e) => setOpenUntilDraft(e.target.value)}
+              className="min-h-[40px] rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
             />
           </div>
-          <div>
-            <label
-              htmlFor="cfg-ndays"
-              className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
-            >
-              Jumlah Hari Kerja (Senin–Sabtu)
-            </label>
-            <input
-              id="cfg-ndays"
-              type="number"
-              min={1}
-              max={60}
-              value={editNdays}
-              onChange={(e) => setEditNdays(e.target.value)}
-              className="min-h-[40px] w-28 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 font-mono text-sm text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-            />
-          </div>
+
           <button
-            type="submit"
-            disabled={busy}
-            className="inline-flex min-h-[40px] items-center gap-2 rounded-lg bg-blue-700 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-800 disabled:opacity-50 dark:bg-blue-600 dark:hover:bg-blue-500"
+            type="button"
+            disabled={busy || !openUntilDraft}
+            onClick={() => handleSaveOpenMonthSingle(openUntilDraft)}
+            className="inline-flex min-h-[40px] items-center gap-1.5 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
           >
-            <Save className="h-4 w-4" />
-            <span>Simpan Periode</span>
+            <LockOpen className="h-3.5 w-3.5" />
+            <span>Buka untuk {config.label}</span>
           </button>
-        </form>
+
+          <button
+            type="button"
+            disabled={busy || !openUntilDraft}
+            onClick={() => handleSaveOpenMonthAll(openUntilDraft)}
+            className="inline-flex min-h-[40px] items-center gap-1.5 whitespace-nowrap rounded-lg bg-blue-700 px-3.5 py-2 text-xs font-semibold text-white transition-colors hover:bg-blue-800 disabled:opacity-50 dark:bg-blue-600 dark:hover:bg-blue-500"
+          >
+            <LockOpen className="h-3.5 w-3.5" />
+            <span>Terapkan ke Semua Role</span>
+          </button>
+
+          {effectiveOpenMonth < '2027-12' && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => handleSaveOpenMonthAll('2027-12')}
+              className="inline-flex min-h-[40px] items-center gap-1.5 whitespace-nowrap rounded-lg border border-blue-200 bg-blue-50 px-3.5 py-2 text-xs font-semibold text-blue-800 transition-colors hover:bg-blue-100 disabled:opacity-50 dark:border-blue-800 dark:bg-blue-950/60 dark:text-blue-300 dark:hover:bg-blue-900/60"
+            >
+              <span>Buka Penuh 2027 (Semua Role)</span>
+            </button>
+          )}
+
+          {config.openUntilMonth && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => handleSaveOpenMonthAll(undefined)}
+              className="inline-flex min-h-[40px] items-center gap-1.5 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700 dark:hover:text-slate-200"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+              <span>Mode Otomatis</span>
+            </button>
+          )}
+        </div>
       </section>
 
       {/* Tasks Manager */}

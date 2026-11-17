@@ -1,11 +1,14 @@
-import { Download, HardDrive, Menu, Moon, Sun } from 'lucide-react';
+import { CalendarDays, Download, HardDrive, Menu, Moon, Sun } from 'lucide-react';
 import { AppView, FirebaseStorageStats } from '../types/outlet';
-import { formatStorageBytes } from '../utils/outletLogic';
+import { fmtMonth, formatStorageBytes } from '../utils/outletLogic';
 
 interface TopBarProps {
   activeView: AppView;
   roleLabel: string;
   isAdmin: boolean;
+  activeMonth: string;
+  selectableMonths: string[];
+  onChangeMonth: (monthKey: string) => void;
   firebaseStorage: FirebaseStorageStats | null;
   theme: 'light' | 'dark';
   onToggleTheme: () => void;
@@ -27,6 +30,9 @@ export function TopBar({
   activeView,
   roleLabel,
   isAdmin,
+  activeMonth,
+  selectableMonths,
+  onChangeMonth,
   firebaseStorage,
   theme,
   onToggleTheme,
@@ -64,6 +70,31 @@ export function TopBar({
       </div>
 
       <div className="flex shrink-0 items-center gap-2.5">
+        {!isAdminView && (
+          <div className="inline-flex h-10 items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
+            <CalendarDays className="h-3.5 w-3.5 shrink-0 text-blue-700 dark:text-blue-400" />
+            <label htmlFor="topbar-month-select" className="sr-only">
+              Pilih Bulan Kerja
+            </label>
+            <select
+              id="topbar-month-select"
+              value={activeMonth}
+              onChange={(e) => onChangeMonth(e.target.value)}
+              className="bg-transparent pr-1 font-medium text-slate-800 focus:outline-none dark:text-slate-100"
+            >
+              {selectableMonths.map((mKey) => (
+                <option
+                  key={mKey}
+                  value={mKey}
+                  className="bg-white text-slate-900 dark:bg-slate-900 dark:text-slate-100"
+                >
+                  {fmtMonth(`${mKey}-01`)}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
         {isAdmin && firebaseStorage && (
           <div
             title={`Estimasi storage Firestore: terpakai ~${formatStorageBytes(firebaseStorage.usedBytes)} dari ${formatStorageBytes(firebaseStorage.limitBytes)} (${firebaseStorage.totalDocs} dokumen)`}

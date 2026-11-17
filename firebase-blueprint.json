@@ -100,6 +100,12 @@
           "type": "integer",
           "description": "Number of working days in period"
         },
+        "openUntilMonth": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}$",
+          "maxLength": 7,
+          "description": "Optional Admin-configured furthest accessible calendar month (YYYY-MM)"
+        },
         "tasks": {
           "type": "array",
           "description": "List of tasks assigned to this role"
@@ -124,7 +130,7 @@
     },
     "RoleWorkspace": {
       "title": "RoleWorkspace",
-      "description": "Daily update entries and outlet visit logs for an operational role",
+      "description": "Legacy daily update entries and outlet visit logs for an operational role",
       "type": "object",
       "properties": {
         "roleId": {
@@ -153,6 +159,44 @@
         }
       },
       "required": ["roleId", "ent", "visit", "updatedAt", "updatedBy"]
+    },
+    "RoleMonthlyWorkspace": {
+      "title": "RoleMonthlyWorkspace",
+      "description": "Monthly partitioned daily update entries and outlet visit logs for an operational role",
+      "type": "object",
+      "properties": {
+        "roleId": {
+          "type": "string",
+          "enum": ["stock_accounting", "gl", "accounting"],
+          "description": "Operational role identifier"
+        },
+        "monthKey": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}$",
+          "maxLength": 7,
+          "description": "Calendar month key in YYYY-MM format"
+        },
+        "ent": {
+          "type": "object",
+          "description": "Nested map of outlet -> (day|task) -> { d, n, ts }"
+        },
+        "visit": {
+          "type": "object",
+          "description": "Map of (person|day) -> { ok, outlet?, f, t, n, entries?: [{ id, outlet, f, t, n }] }"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last monthly workspace update"
+        },
+        "updatedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "UID of user who performed the last write"
+        }
+      },
+      "required": ["roleId", "monthKey", "ent", "visit", "updatedAt", "updatedBy"]
     },
     "InputLog": {
       "title": "InputLog",
@@ -269,7 +313,11 @@
     },
     "/roleWorkspaces/{roleId}": {
       "schema": { "$ref": "#/entities/RoleWorkspace" },
-      "description": "Daily task entries and outlet visit logs per operational role"
+      "description": "Legacy daily task entries and outlet visit logs per operational role"
+    },
+    "/roleMonthlyWorkspaces/{workspaceMonthId}": {
+      "schema": { "$ref": "#/entities/RoleMonthlyWorkspace" },
+      "description": "Monthly partitioned daily task entries and outlet visit logs indexed by roleId_YYYY-MM"
     },
     "/inputLogs/{logId}": {
       "schema": { "$ref": "#/entities/InputLog" },

@@ -1,5 +1,5 @@
-import { Download, History, RotateCcw, Search } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { ChevronLeft, ChevronRight, Download, History, RotateCcw, Search } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   AccountProfile,
   InputLogActionType,
@@ -23,6 +23,8 @@ interface AdminLogsViewProps {
   roleConfigs: Record<OperationalRoleId, RoleConfig>;
 }
 
+const LOG_PAGE_SIZE = 5;
+
 export function AdminLogsView({ logs, accounts, roleConfigs }: AdminLogsViewProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [userFilter, setUserFilter] = useState<string>('ALL');
@@ -31,6 +33,11 @@ export function AdminLogsView({ logs, accounts, roleConfigs }: AdminLogsViewProp
   const [outletFilter, setOutletFilter] = useState<string>('ALL');
   const [dateFrom, setDateFrom] = useState<string>('');
   const [dateTo, setDateTo] = useState<string>('');
+  const [currentPage, setCurrentPage] = useState<number>(1);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchQuery, userFilter, roleFilter, actionFilter, outletFilter, dateFrom, dateTo]);
 
   const userOptions = useMemo(() => {
     const map = new Map<string, string>();
@@ -114,6 +121,15 @@ export function AdminLogsView({ logs, accounts, roleConfigs }: AdminLogsViewProp
     Boolean(dateFrom) ||
     Boolean(dateTo);
 
+  const totalPages = Math.max(1, Math.ceil(filteredLogs.length / LOG_PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const startIndex = filteredLogs.length === 0 ? 0 : (safePage - 1) * LOG_PAGE_SIZE;
+  const endIndex = Math.min(startIndex + LOG_PAGE_SIZE, filteredLogs.length);
+  const displayedLogs = useMemo(
+    () => filteredLogs.slice(startIndex, endIndex),
+    [filteredLogs, startIndex, endIndex]
+  );
+
   const handleResetFilters = () => {
     setSearchQuery('');
     setUserFilter('ALL');
@@ -122,6 +138,7 @@ export function AdminLogsView({ logs, accounts, roleConfigs }: AdminLogsViewProp
     setOutletFilter('ALL');
     setDateFrom('');
     setDateTo('');
+    setCurrentPage(1);
   };
 
   const handleExportLogs = () => {
@@ -318,9 +335,40 @@ export function AdminLogsView({ logs, accounts, roleConfigs }: AdminLogsViewProp
               {filteredLogs.length !== logs.length ? ` dari ${logs.length}` : ''})
             </h3>
           </div>
-          <span className="text-xs text-slate-500 dark:text-slate-400">
-            Urutan terbaru di atas
-          </span>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <span className="text-xs text-slate-500 dark:text-slate-400">
+              Terbaru di atas
+            </span>
+            <span className="font-mono text-xs font-semibold text-slate-700 tabular-nums dark:text-slate-200">
+              {filteredLogs.length === 0
+                ? '(0/0)'
+                : `(${startIndex + 1}–${endIndex}/${filteredLogs.length})`}
+            </span>
+            {totalPages > 1 && (
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  disabled={safePage <= 1}
+                  onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                  aria-label="Halaman log sebelumnya"
+                  title="5 log lebih baru"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <button
+                  type="button"
+                  disabled={safePage >= totalPages}
+                  onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                  aria-label="Halaman log berikutnya"
+                  title="5 log berikutnya"
+                  className="flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         {filteredLogs.length === 0 ? (
@@ -343,7 +391,7 @@ export function AdminLogsView({ logs, accounts, roleConfigs }: AdminLogsViewProp
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                {filteredLogs.map((log) => (
+                {displayedLogs.map((log) => (
                   <tr
                     key={log.id}
                     className="align-top transition-colors hover:bg-slate-50/70 dark:hover:bg-slate-800/30"
@@ -396,6 +444,34 @@ export function AdminLogsView({ logs, accounts, roleConfigs }: AdminLogsViewProp
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {totalPages > 1 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-5 py-3 dark:border-slate-800">
+            <span className="text-xs text-slate-500 tabular-nums dark:text-slate-400">
+              Menampilkan data <strong className="font-semibold text-slate-700 dark:text-slate-200">{startIndex + 1}–{endIndex}</strong> dari <strong className="font-semibold text-slate-700 dark:text-slate-200">{filteredLogs.length}</strong> (Halaman {safePage}/{totalPages})
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={safePage <= 1}
+                onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                className="inline-flex min-h-[34px] items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+                <span>Sebelumnya</span>
+              </button>
+              <button
+                type="button"
+                disabled={safePage >= totalPages}
+                onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                className="inline-flex min-h-[34px] items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-40 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+              >
+                <span>Berikutnya</span>
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+            </div>
           </div>
         )}
       </section>

@@ -13,6 +13,7 @@ import { BOOTSTRAPPED_ADMIN_EMAIL } from './firebase';
 import { useAuthAndRoleData } from './hooks/useAuthAndRoleData';
 import { AppView } from './types/outlet';
 import {
+  currentMonthKey,
   downloadTextFile,
   generateDailyFleetCsv,
   generateRecapCsv,
@@ -32,10 +33,14 @@ export default function App() {
     currentAccount,
     activeRoleId,
     setActiveRoleId,
+    activeMonth,
+    setActiveMonth,
+    selectableMonths,
     roleConfigs,
     activeConfig,
     days,
     store,
+    allWorkspaces,
     managedAccounts,
     inputLogs,
     firebaseStorage,
@@ -46,6 +51,7 @@ export default function App() {
     saveOutletDayEntries,
     saveVisitDay,
     saveRoleConfig,
+    saveOpenUntilMonthAllRoles,
     saveAccount,
     deleteAccount,
     importWorkspaceData,
@@ -106,10 +112,28 @@ export default function App() {
   }, [activeConfig.tasks, selectedTask]);
 
   useEffect(() => {
+    if (days.length === 0) return;
+    const today = todayIso();
+    const curMonth = currentMonthKey(today);
     if (!days.includes(selectedDay)) {
-      setSelectedDay(nearestWorkingDay(days, yesterdayIso()));
+      setSelectedDay(
+        activeMonth === curMonth
+          ? nearestWorkingDay(days, yesterdayIso())
+          : activeMonth < curMonth
+            ? days[days.length - 1]
+            : days[0]
+      );
     }
-  }, [days, selectedDay]);
+    if (recapDate.slice(0, 7) !== activeMonth) {
+      setRecapDate(
+        activeMonth === curMonth
+          ? today
+          : activeMonth < curMonth
+            ? days[days.length - 1]
+            : days[0]
+      );
+    }
+  }, [days, selectedDay, activeMonth, recapDate]);
 
   useEffect(() => {
     if (
@@ -207,6 +231,9 @@ export default function App() {
           activeView={activeView}
           roleLabel={activeConfig.label}
           isAdmin={isAdmin}
+          activeMonth={activeMonth}
+          selectableMonths={selectableMonths}
+          onChangeMonth={setActiveMonth}
           firebaseStorage={firebaseStorage}
           theme={theme}
           onToggleTheme={toggleTheme}
@@ -259,12 +286,15 @@ export default function App() {
           {activeView === 'data' && isAdmin && (
             <DataEksporView
               config={activeConfig}
+              roleConfigs={roleConfigs}
               store={store}
+              allWorkspaces={allWorkspaces}
+              inputLogs={inputLogs}
               days={days}
+              activeMonth={activeMonth}
+              selectableMonths={selectableMonths}
               isAdmin={isAdmin}
               selectedDay={selectedDay}
-              selectedTask={selectedTask}
-              recapDate={recapDate}
               onImportStore={importWorkspaceData}
               onResetAllData={resetRoleWorkspace}
             />
@@ -276,6 +306,7 @@ export default function App() {
               initialRoleId={activeRoleId}
               accounts={managedAccounts}
               onSaveRoleConfig={saveRoleConfig}
+              onSaveOpenUntilMonthAllRoles={saveOpenUntilMonthAllRoles}
             />
           )}
 

@@ -32,6 +32,7 @@ export const OPERATIONAL_ROLES: Array<{ id: OperationalRoleId; label: string }> 
 
 export const DEFAULT_START = '2026-11-02';
 export const DEFAULT_NDAYS = 25;
+export const MIN_WORKSPACE_MONTH = '2026-11';
 export const LEGACY_STORAGE_KEY = 'disc-v1';
 
 export const STOCK_ACCOUNTING_TASKS: TaskDefinition[] = [
@@ -248,6 +249,54 @@ export function prevMonthFirstDay(isoStr: string): string {
   return toIsoUtc(d);
 }
 
+export function currentMonthKey(today: string = todayIso()): string {
+  return /^\d{4}-\d{2}/.test(today) ? today.slice(0, 7) : MIN_WORKSPACE_MONTH;
+}
+
+export function shiftMonthKey(monthKey: string, offsetMonths: number): string {
+  const match = /^(\d{4})-(\d{2})$/.exec(monthKey);
+  if (!match) return MIN_WORKSPACE_MONTH;
+  const year = Number(match[1]);
+  const monthIdx = Number(match[2]) - 1 + offsetMonths;
+  const d = new Date(Date.UTC(year, monthIdx, 1));
+  return d.toISOString().slice(0, 7);
+}
+
+export function getSelectableMonths(
+  today: string = todayIso(),
+  extraMonths: string[] = [],
+  openUntilMonth?: string
+): string[] {
+  const cur = currentMonthKey(today);
+  const startMonth = cur < MIN_WORKSPACE_MONTH ? cur : MIN_WORKSPACE_MONTH;
+  const autoMax = shiftMonthKey(cur > MIN_WORKSPACE_MONTH ? cur : MIN_WORKSPACE_MONTH, 1);
+  const capMax = shiftMonthKey(startMonth, 48);
+  const customMax =
+    openUntilMonth && /^\d{4}-\d{2}$/.test(openUntilMonth)
+      ? openUntilMonth > capMax
+        ? capMax
+        : openUntilMonth
+      : '';
+  const maxMonth = customMax && customMax > autoMax ? customMax : autoMax;
+
+  const set = new Set<string>();
+  let cursor = startMonth;
+  let safety = 0;
+  while (cursor <= maxMonth && safety < 60) {
+    set.add(cursor);
+    cursor = shiftMonthKey(cursor, 1);
+    safety++;
+  }
+
+  for (const m of extraMonths) {
+    if (/^\d{4}-\d{2}$/.test(m)) {
+      set.add(m);
+    }
+  }
+
+  return Array.from(set).sort();
+}
+
 export function formatPicTitle(person: string): string {
   return person
     .trim()
@@ -353,6 +402,57 @@ export function buildWorkingDays(start: string = DEFAULT_START, count: number = 
   return result;
 }
 
+export function buildMonthWorkingDays(monthKey: string): string[] {
+  const match = /^(\d{4})-(\d{2})$/.exec(monthKey);
+  if (!match) return [];
+  const year = Number(match[1]);
+  const monthNum = Number(match[2]);
+  if (monthNum < 1 || monthNum > 12) return [];
+  const daysInMonth = new Date(Date.UTC(year, monthNum, 0)).getUTCDate();
+  const result: string[] = [];
+  for (let dayNum = 1; dayNum <= daysInMonth; dayNum++) {
+    const d = new Date(Date.UTC(year, monthNum - 1, dayNum));
+    if (d.getUTCDay() !== 0) {
+      result.push(toIsoUtc(d));
+    }
+  }
+  return result;
+}
+
+export function buildMonthsWorkingDays(monthKeys: string[]): string[] {
+  const set = new Set<string>();
+  for (const m of monthKeys) {
+    for (const d of buildMonthWorkingDays(m)) {
+      set.add(d);
+    }
+  }
+  return Array.from(set).sort();
+}
+
+export function mergeWorkspaceStates(
+  ...states: Array<Partial<OutletStoreState> | undefined>
+): OutletStoreState {
+  const ent: OutletStoreState['ent'] = {};
+  const visit: OutletStoreState['visit'] = {};
+  let start = DEFAULT_START;
+
+  for (const st of states) {
+    if (!st) continue;
+    if (st.start) start = st.start;
+    if (st.ent) {
+      for (const [outlet, outletMap] of Object.entries(st.ent)) {
+        if (!ent[outlet]) ent[outlet] = {};
+        Object.assign(ent[outlet], outletMap);
+      }
+    }
+    if (st.visit) {
+      Object.assign(visit, st.visit);
+    }
+  }
+
+  return { ent, visit, start };
+}
+
 export function nearestWorkingDay(days: string[], targetIso: string): string {
   if (!days.length) return targetIso;
   const eligible = days.filter((d) => d <= targetIso);
@@ -415,6 +515,33 @@ export function getEntry(
       };
     }
   }
+
+  // Cross-month carry-over: if no entry exists in the active month's days up to `day`,
+  // inherit the chronologically latest saved entry before `day` (e.g., from previous month).
+  if (day) {
+    const suffix = `|${taskKey}`;
+    let bestDay = '';
+    let bestEntry: EntryItem | undefined;
+    for (const [k, e] of Object.entries(outletMap)) {
+      if (!k.endsWith(suffix) || !e?.d) continue;
+      const entryDay = k.slice(0, k.length - suffix.length);
+      if (/^\d{4}-\d{2}-\d{2}$/.test(entryDay) && entryDay < day && entryDay > bestDay) {
+        bestDay = entryDay;
+        bestEntry = e;
+      }
+    }
+    if (bestEntry && bestDay) {
+      return {
+        d: bestEntry.d,
+        n: ownEntry?.n || '',
+        ts: bestEntry.ts,
+        own: false,
+        source: 'inherited',
+        sourceDay: bestDay,
+      };
+    }
+  }
+
   return {
     d: '',
     n: ownEntry?.n || '',

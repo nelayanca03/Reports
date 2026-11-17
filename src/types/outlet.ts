@@ -26,6 +26,7 @@ export interface RoleConfig {
   label: string;
   start: string;
   ndays: number;
+  openUntilMonth?: string;
   tasks: TaskDefinition[];
   outlets: OutletAssignment[];
 }

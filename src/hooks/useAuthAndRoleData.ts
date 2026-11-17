@@ -28,6 +28,7 @@ import {
 import {
   AccountProfile,
   AccountRole,
+  EntryItem,
   FirebaseStorageStats,
   InputLogActionType,
   InputLogEntry,
@@ -41,21 +42,29 @@ import {
   DEFAULT_START,
   FIRESTORE_SPARK_LIMIT_BYTES,
   LEGACY_STORAGE_KEY,
-  buildWorkingDays,
+  buildMonthWorkingDays,
   canEditOutletDay,
+  currentMonthKey,
   estimateFirestoreDocBytes,
   fmtDateLong,
   fmtMonth,
   getEntry,
+  getSelectableMonths,
   getTaskInputType,
   getVisitEntries,
   isSunday,
+  mergeWorkspaceStates,
+  shiftMonthKey,
   todayIso,
 } from '../utils/outletLogic';
 
 const THEME_STORAGE_KEY = 'outlet-theme-v1';
 
 export type AuthStatus = 'loading' | 'signed_out' | 'unregistered' | 'inactive' | 'ready';
+
+type WorkspaceSlice = Pick<OutletStoreState, 'ent' | 'visit'>;
+
+const EMPTY_SLICE: WorkspaceSlice = { ent: {}, visit: {} };
 
 function loadInitialTheme(): 'light' | 'dark' {
   try {
@@ -94,20 +103,55 @@ export function useAuthAndRoleData() {
 
   // Admin can inspect any of the 3 operational roles; non-admin is locked to their own role.
   const [activeRoleId, setActiveRoleId] = useState<OperationalRoleId>('stock_accounting');
+  // Active working month (YYYY-MM), defaults automatically to today's calendar month
+  const [activeMonth, setActiveMonth] = useState<string>(() => currentMonthKey(todayIso()));
 
   const [roleConfigs, setRoleConfigs] = useState<Record<OperationalRoleId, RoleConfig>>(
     DEFAULT_ROLE_CONFIGS
   );
-  const [workspaceData, setWorkspaceData] = useState<OutletStoreState>({
-    ent: {},
-    visit: {},
-    start: DEFAULT_START,
-  });
+
+  // Active role slices (legacy + previous month for carry-over + active month)
+  const [legacySlice, setLegacySlice] = useState<WorkspaceSlice>(EMPTY_SLICE);
+  const [monthlySlices, setMonthlySlices] = useState<Record<string, WorkspaceSlice>>({});
+
   const [managedAccounts, setManagedAccounts] = useState<AccountProfile[]>([]);
   const [inputLogs, setInputLogs] = useState<InputLogEntry[]>([]);
   const [adminWorkspaceBytes, setAdminWorkspaceBytes] = useState<Record<string, number>>({});
+  const [adminLegacySlices, setAdminLegacySlices] = useState<
+    Record<OperationalRoleId, WorkspaceSlice>
+  >({
+    stock_accounting: EMPTY_SLICE,
+    gl: EMPTY_SLICE,
+    accounting: EMPTY_SLICE,
+  });
+  const [adminMonthlySlices, setAdminMonthlySlices] = useState<Record<string, WorkspaceSlice>>({});
   const [totalInputLogCount, setTotalInputLogCount] = useState<number>(0);
   const [theme, setTheme] = useState<'light' | 'dark'>(loadInitialTheme);
+
+  const effectiveRoleId: OperationalRoleId =
+    currentAccount?.role === 'admin'
+      ? activeRoleId
+      : (currentAccount?.role as OperationalRoleId) || 'stock_accounting';
+
+  const activeConfig = roleConfigs[effectiveRoleId] || DEFAULT_ROLE_CONFIGS[effectiveRoleId];
+
+  const maxAdminOpenMonth = useMemo(() => {
+    const candidates = Object.values(roleConfigs)
+      .map((c) => c.openUntilMonth || '')
+      .filter((m) => /^\d{4}-\d{2}$/.test(m))
+      .sort();
+    return candidates[candidates.length - 1] || '';
+  }, [roleConfigs]);
+
+  const selectableMonths = useMemo(
+    () =>
+      getSelectableMonths(
+        todayIso(),
+        [activeMonth],
+        currentAccount?.role === 'admin' ? maxAdminOpenMonth : activeConfig.openUntilMonth
+      ),
+    [activeMonth, currentAccount?.role, maxAdminOpenMonth, activeConfig.openUntilMonth]
+  );
 
   // Theme sync
   useEffect(() => {
@@ -207,7 +251,7 @@ export function useAuthAndRoleData() {
       }
     }
 
-    // Seed stock_accounting workspace (migrating legacy localStorage disc-v1 if available)
+    // Seed stock_accounting legacy workspace if missing
     const saWsPath = 'roleWorkspaces/stock_accounting';
     const saWsRef = doc(db, 'roleWorkspaces', 'stock_accounting');
     try {
@@ -248,7 +292,6 @@ export function useAuthAndRoleData() {
       }
 
       const accId = emailToAccountId(email);
-      const accPath = `accounts/${accId}`;
 
       try {
         if (email === BOOTSTRAPPED_ADMIN_EMAIL) {
@@ -292,12 +335,13 @@ export function useAuthAndRoleData() {
     return () => unsubscribe();
   }, [bootstrapOwnerEnvironment]);
 
-  // Listen to active role config & workspace once authenticated & authorized
+  // Listen to active role config & workspace (legacy + prevMonth + activeMonth)
   useEffect(() => {
     if (authStatus !== 'ready' || !currentAccount) return;
 
     const targetRole: OperationalRoleId =
       currentAccount.role === 'admin' ? activeRoleId : currentAccount.role;
+    const prevMonth = shiftMonthKey(activeMonth, -1);
 
     const cfgPath = `roleConfigs/${targetRole}`;
     const unsubCfg = onSnapshot(
@@ -310,6 +354,9 @@ export function useAuthAndRoleData() {
             label: String(d.label || DEFAULT_ROLE_CONFIGS[targetRole].label),
             start: String(d.start || DEFAULT_START),
             ndays: Number(d.ndays || 25),
+            ...(typeof d.openUntilMonth === 'string' && /^\d{4}-\d{2}$/.test(d.openUntilMonth)
+              ? { openUntilMonth: d.openUntilMonth }
+              : {}),
             tasks: Array.isArray(d.tasks) ? d.tasks : [],
             outlets: Array.isArray(d.outlets) ? d.outlets : [],
           };
@@ -321,36 +368,50 @@ export function useAuthAndRoleData() {
       (error) => handleFirestoreError(error, OperationType.GET, cfgPath)
     );
 
-    const wsPath = `roleWorkspaces/${targetRole}`;
-    const unsubWs = onSnapshot(
+    const legacyPath = `roleWorkspaces/${targetRole}`;
+    const unsubLegacy = onSnapshot(
       doc(db, 'roleWorkspaces', targetRole),
       (snap) => {
         if (snap.exists()) {
           const d = snap.data();
-          setWorkspaceData({
+          setLegacySlice({
             ent: (d.ent as OutletStoreState['ent']) || {},
             visit: (d.visit as OutletStoreState['visit']) || {},
-            start: roleConfigs[targetRole]?.start || DEFAULT_START,
           });
         } else {
-          setWorkspaceData({
-            ent: {},
-            visit: {},
-            start: roleConfigs[targetRole]?.start || DEFAULT_START,
-          });
+          setLegacySlice(EMPTY_SLICE);
         }
       },
-      (error) => handleFirestoreError(error, OperationType.GET, wsPath)
+      (error) => handleFirestoreError(error, OperationType.GET, legacyPath)
     );
+
+    const monthsToListen = prevMonth === activeMonth ? [activeMonth] : [prevMonth, activeMonth];
+    const unsubMonths = monthsToListen.map((mKey) => {
+      const docId = `${targetRole}_${mKey}`;
+      const mPath = `roleMonthlyWorkspaces/${docId}`;
+      return onSnapshot(
+        doc(db, 'roleMonthlyWorkspaces', docId),
+        (snap) => {
+          const nextSlice: WorkspaceSlice = snap.exists()
+            ? {
+                ent: (snap.data().ent as OutletStoreState['ent']) || {},
+                visit: (snap.data().visit as OutletStoreState['visit']) || {},
+              }
+            : EMPTY_SLICE;
+          setMonthlySlices((prev) => ({ ...prev, [docId]: nextSlice }));
+        },
+        (error) => handleFirestoreError(error, OperationType.GET, mPath)
+      );
+    });
 
     return () => {
       unsubCfg();
-      unsubWs();
+      unsubLegacy();
+      unsubMonths.forEach((u) => u());
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authStatus, currentAccount, activeRoleId]);
+  }, [authStatus, currentAccount, activeRoleId, activeMonth]);
 
-  // Admin-only listeners: all 3 roleConfigs + adminRegistry/accounts
+  // Admin-only listeners: all 3 roleConfigs + all legacy/monthly workspaces + adminRegistry + inputLogs
   useEffect(() => {
     if (authStatus !== 'ready' || currentAccount?.role !== 'admin') return;
 
@@ -372,6 +433,9 @@ export function useAuthAndRoleData() {
                   label: String(d.label || DEFAULT_ROLE_CONFIGS[rId].label),
                   start: String(d.start || DEFAULT_START),
                   ndays: Number(d.ndays || 25),
+                  ...(typeof d.openUntilMonth === 'string' && /^\d{4}-\d{2}$/.test(d.openUntilMonth)
+                    ? { openUntilMonth: d.openUntilMonth }
+                    : {}),
                   tasks: Array.isArray(d.tasks) ? d.tasks : [],
                   outlets: Array.isArray(d.outlets) ? d.outlets : [],
                 },
@@ -381,6 +445,7 @@ export function useAuthAndRoleData() {
           (error) => handleFirestoreError(error, OperationType.GET, path)
         )
       );
+
       unsubs.push(
         onSnapshot(
           doc(db, 'roleWorkspaces', rId),
@@ -388,11 +453,46 @@ export function useAuthAndRoleData() {
             const bytes = snap.exists()
               ? estimateFirestoreDocBytes(`roleWorkspaces/${rId}`, snap.data())
               : 0;
-            setAdminWorkspaceBytes((prev) => ({ ...prev, [rId]: bytes }));
+            setAdminWorkspaceBytes((prev) => ({ ...prev, [`legacy_${rId}`]: bytes }));
+
+            const d = snap.exists() ? snap.data() : null;
+            setAdminLegacySlices((prev) => ({
+              ...prev,
+              [rId]: {
+                ent: (d?.ent as OutletStoreState['ent']) || {},
+                visit: (d?.visit as OutletStoreState['visit']) || {},
+              },
+            }));
           },
           (error) => handleFirestoreError(error, OperationType.GET, `roleWorkspaces/${rId}`)
         )
       );
+
+      for (const mKey of selectableMonths) {
+        const docId = `${rId}_${mKey}`;
+        const mPath = `roleMonthlyWorkspaces/${docId}`;
+        unsubs.push(
+          onSnapshot(
+            doc(db, 'roleMonthlyWorkspaces', docId),
+            (snap) => {
+              const bytes = snap.exists()
+                ? estimateFirestoreDocBytes(mPath, snap.data())
+                : 0;
+              setAdminWorkspaceBytes((prev) => ({ ...prev, [docId]: bytes }));
+
+              const d = snap.exists() ? snap.data() : null;
+              setAdminMonthlySlices((prev) => ({
+                ...prev,
+                [docId]: {
+                  ent: (d?.ent as OutletStoreState['ent']) || {},
+                  visit: (d?.visit as OutletStoreState['visit']) || {},
+                },
+              }));
+            },
+            (error) => handleFirestoreError(error, OperationType.GET, mPath)
+          )
+        );
+      }
     }
 
     const regPath = 'adminRegistry/accounts';
@@ -469,27 +569,36 @@ export function useAuthAndRoleData() {
     return () => {
       unsubs.forEach((u) => u());
     };
-  }, [authStatus, currentAccount]);
+  }, [authStatus, currentAccount, selectableMonths]);
 
-  const effectiveRoleId: OperationalRoleId =
-    currentAccount?.role === 'admin'
-      ? activeRoleId
-      : (currentAccount?.role as OperationalRoleId) || 'stock_accounting';
+  const days = useMemo(() => buildMonthWorkingDays(activeMonth), [activeMonth]);
 
-  const activeConfig = roleConfigs[effectiveRoleId] || DEFAULT_ROLE_CONFIGS[effectiveRoleId];
+  const workspaceData: OutletStoreState = useMemo(() => {
+    const prevMonth = shiftMonthKey(activeMonth, -1);
+    const merged = mergeWorkspaceStates(
+      legacySlice,
+      monthlySlices[`${effectiveRoleId}_${prevMonth}`],
+      monthlySlices[`${effectiveRoleId}_${activeMonth}`]
+    );
+    return {
+      ...merged,
+      start: `${activeMonth}-01`,
+    };
+  }, [legacySlice, monthlySlices, effectiveRoleId, activeMonth]);
 
-  const days = useMemo(
-    () => buildWorkingDays(activeConfig.start, activeConfig.ndays),
-    [activeConfig.start, activeConfig.ndays]
-  );
-
-  const storeWithConfigStart: OutletStoreState = useMemo(
-    () => ({
-      ...workspaceData,
-      start: activeConfig.start,
-    }),
-    [workspaceData, activeConfig.start]
-  );
+  const adminAllWorkspaces: Record<OperationalRoleId, OutletStoreState> = useMemo(() => {
+    const result = {} as Record<OperationalRoleId, OutletStoreState>;
+    const roleIds: OperationalRoleId[] = ['stock_accounting', 'gl', 'accounting'];
+    for (const rId of roleIds) {
+      const monthStates = selectableMonths.map((m) => adminMonthlySlices[`${rId}_${m}`]);
+      const merged = mergeWorkspaceStates(adminLegacySlices[rId], ...monthStates);
+      result[rId] = {
+        ...merged,
+        start: `${activeMonth}-01`,
+      };
+    }
+    return result;
+  }, [adminLegacySlices, adminMonthlySlices, selectableMonths, activeMonth]);
 
   const firebaseStorage: FirebaseStorageStats | null = useMemo(() => {
     if (currentAccount?.role !== 'admin') return null;
@@ -504,9 +613,8 @@ export function useAuthAndRoleData() {
       totalDocs += 1;
     }
 
-    // 3 roleWorkspaces docs
-    for (const rId of roleIds) {
-      const wsBytes = adminWorkspaceBytes[rId] || 0;
+    // All measured workspace docs (legacy roleWorkspaces + monthly roleMonthlyWorkspaces)
+    for (const wsBytes of Object.values(adminWorkspaceBytes)) {
       if (wsBytes > 0) {
         usedBytes += wsBytes;
         totalDocs += 1;
@@ -604,20 +712,22 @@ export function useAuthAndRoleData() {
     await signOut(auth);
   }, []);
 
-  const ensureWorkspaceDoc = useCallback(
-    async (roleId: OperationalRoleId, uid: string) => {
-      const wsRef = doc(db, 'roleWorkspaces', roleId);
+  const ensureMonthlyWorkspaceDoc = useCallback(
+    async (roleId: OperationalRoleId, monthKey: string, uid: string) => {
+      const docId = `${roleId}_${monthKey}`;
+      const wsRef = doc(db, 'roleMonthlyWorkspaces', docId);
       const snap = await getDoc(wsRef);
       if (!snap.exists()) {
         await setDoc(wsRef, {
           roleId,
+          monthKey,
           ent: {},
           visit: {},
           updatedAt: serverTimestamp(),
           updatedBy: uid,
         });
       }
-      return wsRef;
+      return { wsRef, docId };
     },
     []
   );
@@ -626,13 +736,14 @@ export function useAuthAndRoleData() {
     async (outlet: string, day: string, taskKey: string, field: 'd' | 'n', value: string) => {
       const uid = auth.currentUser?.uid;
       if (!uid) return;
-      if (!canEditOutletDay(storeWithConfigStart, activeConfig.tasks, days, outlet, day)) return;
-      const path = `roleWorkspaces/${effectiveRoleId}`;
+      if (!canEditOutletDay(workspaceData, activeConfig.tasks, days, outlet, day)) return;
+      const monthKey = currentMonthKey(day);
+      const path = `roleMonthlyWorkspaces/${effectiveRoleId}_${monthKey}`;
       try {
-        const wsRef = await ensureWorkspaceDoc(effectiveRoleId, uid);
+        const { wsRef } = await ensureMonthlyWorkspaceDoc(effectiveRoleId, monthKey, uid);
         const existing = workspaceData.ent[outlet]?.[`${day}|${taskKey}`];
         const fallbackDate = getEntry(
-          storeWithConfigStart,
+          workspaceData,
           days,
           activeConfig.tasks,
           outlet,
@@ -661,9 +772,8 @@ export function useAuthAndRoleData() {
     },
     [
       effectiveRoleId,
-      ensureWorkspaceDoc,
-      workspaceData.ent,
-      storeWithConfigStart,
+      ensureMonthlyWorkspaceDoc,
+      workspaceData,
       days,
       activeConfig.tasks,
     ]
@@ -716,14 +826,15 @@ export function useAuthAndRoleData() {
     ) => {
       const uid = auth.currentUser?.uid;
       if (!uid) return;
-      if (!canEditOutletDay(storeWithConfigStart, activeConfig.tasks, days, outlet, day)) return;
+      if (!canEditOutletDay(workspaceData, activeConfig.tasks, days, outlet, day)) return;
       const entries = Object.entries(changes);
       if (entries.length === 0) return;
 
-      const path = `roleWorkspaces/${effectiveRoleId}`;
+      const monthKey = currentMonthKey(day);
+      const path = `roleMonthlyWorkspaces/${effectiveRoleId}_${monthKey}`;
       const nowIso = new Date().toISOString();
       try {
-        const wsRef = await ensureWorkspaceDoc(effectiveRoleId, uid);
+        const { wsRef } = await ensureMonthlyWorkspaceDoc(effectiveRoleId, monthKey, uid);
         const updateArgs: unknown[] = [];
 
         for (const [taskKey, item] of entries) {
@@ -778,8 +889,8 @@ export function useAuthAndRoleData() {
     },
     [
       effectiveRoleId,
-      ensureWorkspaceDoc,
-      storeWithConfigStart,
+      ensureMonthlyWorkspaceDoc,
+      workspaceData,
       activeConfig.tasks,
       activeConfig.outlets,
       days,
@@ -791,24 +902,29 @@ export function useAuthAndRoleData() {
     async (outlet: string, day: string, taskKey: string) => {
       const uid = auth.currentUser?.uid;
       if (!uid) return;
-      if (!canEditOutletDay(storeWithConfigStart, activeConfig.tasks, days, outlet, day)) return;
-      const path = `roleWorkspaces/${effectiveRoleId}`;
+      if (!canEditOutletDay(workspaceData, activeConfig.tasks, days, outlet, day)) return;
+      const monthKey = currentMonthKey(day);
+      const docId = `${effectiveRoleId}_${monthKey}`;
+      const path = `roleMonthlyWorkspaces/${docId}`;
       try {
-        const wsRef = doc(db, 'roleWorkspaces', effectiveRoleId);
-        await updateDoc(
-          wsRef,
-          new FieldPath('ent', outlet, `${day}|${taskKey}`),
-          deleteField(),
-          'updatedAt',
-          serverTimestamp(),
-          'updatedBy',
-          uid
-        );
+        const wsRef = doc(db, 'roleMonthlyWorkspaces', docId);
+        const snap = await getDoc(wsRef);
+        if (snap.exists()) {
+          await updateDoc(
+            wsRef,
+            new FieldPath('ent', outlet, `${day}|${taskKey}`),
+            deleteField(),
+            'updatedAt',
+            serverTimestamp(),
+            'updatedBy',
+            uid
+          );
+        }
       } catch (error) {
         handleFirestoreError(error, OperationType.UPDATE, path);
       }
     },
-    [effectiveRoleId, storeWithConfigStart, activeConfig.tasks, days]
+    [effectiveRoleId, workspaceData, activeConfig.tasks, days]
   );
 
   const saveVisitDay = useCallback(
@@ -837,10 +953,11 @@ export function useAuthAndRoleData() {
         entries: nextVisitInput.ok ? normalizedEntries : [],
       };
 
-      const path = `roleWorkspaces/${effectiveRoleId}`;
+      const monthKey = currentMonthKey(day);
+      const path = `roleMonthlyWorkspaces/${effectiveRoleId}_${monthKey}`;
       const nowIso = new Date().toISOString();
       try {
-        const wsRef = await ensureWorkspaceDoc(effectiveRoleId, uid);
+        const { wsRef } = await ensureMonthlyWorkspaceDoc(effectiveRoleId, monthKey, uid);
         const key = `${person}|${day}`;
         await updateDoc(
           wsRef,
@@ -882,7 +999,7 @@ export function useAuthAndRoleData() {
         clientTs: nowIso,
       });
     },
-    [effectiveRoleId, ensureWorkspaceDoc, recordInputLog]
+    [effectiveRoleId, ensureMonthlyWorkspaceDoc, recordInputLog]
   );
 
   const updateVisit = useCallback(
@@ -898,12 +1015,17 @@ export function useAuthAndRoleData() {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
     const path = `roleConfigs/${roleId}`;
+    const validOpenMonth =
+      nextConfig.openUntilMonth && /^\d{4}-\d{2}$/.test(nextConfig.openUntilMonth)
+        ? nextConfig.openUntilMonth
+        : undefined;
     try {
       await setDoc(doc(db, 'roleConfigs', roleId), {
         roleId,
         label: nextConfig.label.slice(0, 60),
         start: nextConfig.start,
         ndays: Math.max(1, Math.min(60, Math.round(nextConfig.ndays))),
+        ...(validOpenMonth ? { openUntilMonth: validOpenMonth } : {}),
         tasks: nextConfig.tasks.slice(0, 30),
         outlets: nextConfig.outlets.slice(0, 100),
         updatedAt: serverTimestamp(),
@@ -913,6 +1035,24 @@ export function useAuthAndRoleData() {
       handleFirestoreError(error, OperationType.WRITE, path);
     }
   }, []);
+
+  const saveOpenUntilMonthAllRoles = useCallback(
+    async (openUntilMonth?: string) => {
+      const uid = auth.currentUser?.uid;
+      if (!uid || currentAccount?.role !== 'admin') return;
+      const validOpenMonth =
+        openUntilMonth && /^\d{4}-\d{2}$/.test(openUntilMonth) ? openUntilMonth : undefined;
+      const roleIds: OperationalRoleId[] = ['stock_accounting', 'gl', 'accounting'];
+      for (const rId of roleIds) {
+        const currentCfg = roleConfigs[rId] || DEFAULT_ROLE_CONFIGS[rId];
+        await saveRoleConfig(rId, {
+          ...currentCfg,
+          openUntilMonth: validOpenMonth,
+        });
+      }
+    },
+    [currentAccount?.role, roleConfigs, saveRoleConfig]
+  );
 
   const saveAccount = useCallback(
     async (input: {
@@ -1006,38 +1146,129 @@ export function useAuthAndRoleData() {
     async (incoming: OutletStoreState) => {
       const uid = auth.currentUser?.uid;
       if (!uid || currentAccount?.role !== 'admin') return;
-      const path = `roleWorkspaces/${effectiveRoleId}`;
-      try {
-        await setDoc(doc(db, 'roleWorkspaces', effectiveRoleId), {
-          roleId: effectiveRoleId,
-          ent: incoming.ent || {},
-          visit: incoming.visit || {},
-          updatedAt: serverTimestamp(),
-          updatedBy: uid,
-        });
-      } catch (error) {
-        handleFirestoreError(error, OperationType.WRITE, path);
+
+      const byMonth: Record<string, { ent: OutletStoreState['ent']; visit: OutletStoreState['visit'] }> = {};
+      const ensureBucket = (mKey: string) => {
+        if (!byMonth[mKey]) byMonth[mKey] = { ent: {}, visit: {} };
+        return byMonth[mKey];
+      };
+
+      for (const [outlet, outletMap] of Object.entries(incoming.ent || {})) {
+        for (const [k, item] of Object.entries(outletMap || {})) {
+          const day = k.split('|')[0] || '';
+          const mKey = /^\d{4}-\d{2}-\d{2}$/.test(day) ? day.slice(0, 7) : activeMonth;
+          const bucket = ensureBucket(mKey);
+          if (!bucket.ent[outlet]) bucket.ent[outlet] = {};
+          bucket.ent[outlet][k] = item as EntryItem;
+        }
+      }
+
+      for (const [vKey, vItem] of Object.entries(incoming.visit || {})) {
+        const parts = vKey.split('|');
+        const day = parts[1] || '';
+        const mKey = /^\d{4}-\d{2}-\d{2}$/.test(day) ? day.slice(0, 7) : activeMonth;
+        const bucket = ensureBucket(mKey);
+        bucket.visit[vKey] = vItem;
+      }
+
+      const monthKeys = Object.keys(byMonth);
+      if (monthKeys.length === 0) {
+        monthKeys.push(activeMonth);
+        ensureBucket(activeMonth);
+      }
+
+      for (const mKey of monthKeys) {
+        const docId = `${effectiveRoleId}_${mKey}`;
+        const path = `roleMonthlyWorkspaces/${docId}`;
+        try {
+          const wsRef = doc(db, 'roleMonthlyWorkspaces', docId);
+          const snap = await getDoc(wsRef);
+          const payload = byMonth[mKey];
+          if (snap.exists()) {
+            await updateDoc(wsRef, {
+              ent: payload.ent,
+              visit: payload.visit,
+              updatedAt: serverTimestamp(),
+              updatedBy: uid,
+            });
+          } else {
+            await setDoc(wsRef, {
+              roleId: effectiveRoleId,
+              monthKey: mKey,
+              ent: payload.ent,
+              visit: payload.visit,
+              updatedAt: serverTimestamp(),
+              updatedBy: uid,
+            });
+          }
+        } catch (error) {
+          handleFirestoreError(error, OperationType.WRITE, path);
+        }
       }
     },
-    [currentAccount?.role, effectiveRoleId]
+    [currentAccount?.role, effectiveRoleId, activeMonth]
   );
 
   const resetRoleWorkspace = useCallback(async () => {
     const uid = auth.currentUser?.uid;
     if (!uid) return;
-    const path = `roleWorkspaces/${effectiveRoleId}`;
+
+    const docId = `${effectiveRoleId}_${activeMonth}`;
+    const monthlyPath = `roleMonthlyWorkspaces/${docId}`;
     try {
-      await setDoc(doc(db, 'roleWorkspaces', effectiveRoleId), {
-        roleId: effectiveRoleId,
-        ent: {},
-        visit: {},
-        updatedAt: serverTimestamp(),
-        updatedBy: uid,
-      });
+      const mRef = doc(db, 'roleMonthlyWorkspaces', docId);
+      const mSnap = await getDoc(mRef);
+      if (mSnap.exists()) {
+        await updateDoc(mRef, {
+          ent: {},
+          visit: {},
+          updatedAt: serverTimestamp(),
+          updatedBy: uid,
+        });
+      }
     } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, path);
+      handleFirestoreError(error, OperationType.WRITE, monthlyPath);
     }
-  }, [effectiveRoleId]);
+
+    // Also prune entries belonging to activeMonth from legacy doc so cleared month items never resurface
+    const legacyPath = `roleWorkspaces/${effectiveRoleId}`;
+    try {
+      const legacyRef = doc(db, 'roleWorkspaces', effectiveRoleId);
+      const legacySnap = await getDoc(legacyRef);
+      if (legacySnap.exists()) {
+        const d = legacySnap.data();
+        const prevEnt = (d.ent as OutletStoreState['ent']) || {};
+        const prevVisit = (d.visit as OutletStoreState['visit']) || {};
+        const nextEnt: OutletStoreState['ent'] = {};
+        for (const [outlet, outletMap] of Object.entries(prevEnt)) {
+          const kept: Record<string, EntryItem> = {};
+          for (const [k, v] of Object.entries(outletMap || {})) {
+            if (!k.startsWith(`${activeMonth}-`)) {
+              kept[k] = v;
+            }
+          }
+          if (Object.keys(kept).length > 0) {
+            nextEnt[outlet] = kept;
+          }
+        }
+        const nextVisit: OutletStoreState['visit'] = {};
+        for (const [vKey, vVal] of Object.entries(prevVisit)) {
+          const dayPart = vKey.split('|')[1] || '';
+          if (!dayPart.startsWith(`${activeMonth}-`)) {
+            nextVisit[vKey] = vVal;
+          }
+        }
+        await updateDoc(legacyRef, {
+          ent: nextEnt,
+          visit: nextVisit,
+          updatedAt: serverTimestamp(),
+          updatedBy: uid,
+        });
+      }
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, legacyPath);
+    }
+  }, [effectiveRoleId, activeMonth]);
 
   return {
     firebaseUser,
@@ -1046,10 +1277,14 @@ export function useAuthAndRoleData() {
     currentAccount,
     activeRoleId: effectiveRoleId,
     setActiveRoleId,
+    activeMonth,
+    setActiveMonth,
+    selectableMonths,
     roleConfigs,
     activeConfig,
     days,
-    store: storeWithConfigStart,
+    store: workspaceData,
+    allWorkspaces: adminAllWorkspaces,
     managedAccounts,
     inputLogs,
     firebaseStorage,
@@ -1063,6 +1298,7 @@ export function useAuthAndRoleData() {
     updateVisit,
     saveVisitDay,
     saveRoleConfig,
+    saveOpenUntilMonthAllRoles,
     saveAccount,
     deleteAccount,
     importWorkspaceData,

@@ -92,11 +92,12 @@ service cloud.firestore {
 
     function isValidRoleConfig(data) {
       return data.keys().hasAll(['roleId', 'label', 'start', 'ndays', 'tasks', 'outlets', 'updatedAt', 'updatedBy'])
-        && data.keys().hasOnly(['roleId', 'label', 'start', 'ndays', 'tasks', 'outlets', 'updatedAt', 'updatedBy'])
+        && data.keys().hasOnly(['roleId', 'label', 'start', 'ndays', 'openUntilMonth', 'tasks', 'outlets', 'updatedAt', 'updatedBy'])
         && data.roleId is string && isOperationalRole(data.roleId)
         && data.label is string && data.label.size() >= 2 && data.label.size() <= 60
         && data.start is string && data.start.size() == 10 && data.start.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
         && data.ndays is int && data.ndays >= 1 && data.ndays <= 60
+        && (!('openUntilMonth' in data) || isValidMonthKey(data.openUntilMonth))
         && data.tasks is list && data.tasks.size() <= 30
         && (data.tasks.size() == 0 || (
           data.tasks[0] is map
@@ -118,6 +119,35 @@ service cloud.firestore {
       return data.keys().hasAll(['roleId', 'ent', 'visit', 'updatedAt', 'updatedBy'])
         && data.keys().hasOnly(['roleId', 'ent', 'visit', 'updatedAt', 'updatedBy'])
         && data.roleId is string && isOperationalRole(data.roleId)
+        && data.ent is map && data.ent.size() <= 100
+        && data.visit is map && data.visit.size() <= 1000
+        && data.updatedAt is timestamp
+        && data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128
+        && data.updatedBy == request.auth.uid;
+    }
+
+    function isValidMonthKey(monthKey) {
+      return monthKey is string && monthKey.size() == 7 && monthKey.matches('^[0-9]{4}-[0-9]{2}$');
+    }
+
+    function isValidMonthDocId(docId) {
+      return docId is string
+        && docId.size() >= 10
+        && docId.size() <= 40
+        && docId.matches('^(stock_accounting|gl|accounting)_[0-9]{4}-[0-9]{2}$');
+    }
+
+    function roleFromMonthDocId(docId) {
+      return docId.matches('^stock_accounting_.*')
+        ? 'stock_accounting'
+        : (docId.matches('^gl_.*') ? 'gl' : 'accounting');
+    }
+
+    function isValidRoleMonthlyWorkspace(data) {
+      return data.keys().hasAll(['roleId', 'monthKey', 'ent', 'visit', 'updatedAt', 'updatedBy'])
+        && data.keys().hasOnly(['roleId', 'monthKey', 'ent', 'visit', 'updatedAt', 'updatedBy'])
+        && data.roleId is string && isOperationalRole(data.roleId)
+        && isValidMonthKey(data.monthKey)
         && data.ent is map && data.ent.size() <= 100
         && data.visit is map && data.visit.size() <= 1000
         && data.updatedAt is timestamp
@@ -221,7 +251,7 @@ service cloud.firestore {
         && isAdmin()
         && incoming().roleId == existing().roleId
         && incoming().updatedAt == request.time
-        && incoming().diff(existing()).affectedKeys().hasOnly(['label', 'start', 'ndays', 'tasks', 'outlets', 'updatedAt', 'updatedBy']);
+        && incoming().diff(existing()).affectedKeys().hasOnly(['label', 'start', 'ndays', 'openUntilMonth', 'tasks', 'outlets', 'updatedAt', 'updatedBy']);
       allow delete: if false;
     }
 
@@ -244,6 +274,27 @@ service cloud.firestore {
         && incoming().updatedAt == request.time
         && incoming().diff(existing()).affectedKeys().hasOnly(['ent', 'visit', 'updatedAt', 'updatedBy']);
       allow delete: if isVerifiedUser() && isValidId(roleId) && isOperationalRole(roleId) && isAdmin();
+    }
+
+    match /roleMonthlyWorkspaces/{workspaceMonthId} {
+      allow get: if isVerifiedUser() && isValidMonthDocId(workspaceMonthId) && hasRoleAccess(roleFromMonthDocId(workspaceMonthId));
+      allow list: if false;
+      allow create: if isVerifiedUser()
+        && isValidMonthDocId(workspaceMonthId)
+        && isValidRoleMonthlyWorkspace(incoming())
+        && hasRoleAccess(incoming().roleId)
+        && workspaceMonthId == (incoming().roleId + '_' + incoming().monthKey)
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidMonthDocId(workspaceMonthId)
+        && isValidRoleMonthlyWorkspace(incoming())
+        && hasRoleAccess(existing().roleId)
+        && incoming().roleId == existing().roleId
+        && incoming().monthKey == existing().monthKey
+        && workspaceMonthId == (existing().roleId + '_' + existing().monthKey)
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['ent', 'visit', 'updatedAt', 'updatedBy']);
+      allow delete: if isVerifiedUser() && isValidMonthDocId(workspaceMonthId) && hasRoleAccess(roleFromMonthDocId(workspaceMonthId)) && isAdmin();
     }
 
     match /inputLogs/{logId} {
