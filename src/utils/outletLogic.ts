@@ -262,12 +262,37 @@ export function shiftMonthKey(monthKey: string, offsetMonths: number): string {
   return d.toISOString().slice(0, 7);
 }
 
+export function getPastMonths(today: string = todayIso()): string[] {
+  const cur = currentMonthKey(today);
+  if (cur <= MIN_WORKSPACE_MONTH) return [];
+  const result: string[] = [];
+  let cursor = MIN_WORKSPACE_MONTH;
+  let safety = 0;
+  while (cursor < cur && safety < 60) {
+    result.push(cursor);
+    cursor = shiftMonthKey(cursor, 1);
+    safety++;
+  }
+  return result;
+}
+
 export function getSelectableMonths(
   today: string = todayIso(),
   extraMonths: string[] = [],
-  openUntilMonth?: string
+  openUntilMonth?: string,
+  options?: {
+    isAdmin?: boolean;
+    unlockedPastMonths?: string[];
+  }
 ): string[] {
   const cur = currentMonthKey(today);
+  const isAdmin = options?.isAdmin ?? true;
+  const unlockedPast = new Set(
+    (options?.unlockedPastMonths || []).filter(
+      (m) => /^\d{4}-\d{2}$/.test(m) && m < cur
+    )
+  );
+
   const startMonth = cur < MIN_WORKSPACE_MONTH ? cur : MIN_WORKSPACE_MONTH;
   const autoMax = shiftMonthKey(cur > MIN_WORKSPACE_MONTH ? cur : MIN_WORKSPACE_MONTH, 1);
   const capMax = shiftMonthKey(startMonth, 48);
@@ -283,15 +308,22 @@ export function getSelectableMonths(
   let cursor = startMonth;
   let safety = 0;
   while (cursor <= maxMonth && safety < 60) {
-    set.add(cursor);
+    if (cursor >= cur || isAdmin || unlockedPast.has(cursor)) {
+      set.add(cursor);
+    }
     cursor = shiftMonthKey(cursor, 1);
     safety++;
   }
 
   for (const m of extraMonths) {
-    if (/^\d{4}-\d{2}$/.test(m)) {
+    if (/^\d{4}-\d{2}$/.test(m) && (m >= cur || isAdmin || unlockedPast.has(m))) {
       set.add(m);
     }
+  }
+
+  // Current calendar month must always remain open
+  if (/^\d{4}-\d{2}$/.test(cur)) {
+    set.add(cur);
   }
 
   return Array.from(set).sort();

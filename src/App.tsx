@@ -52,6 +52,7 @@ export default function App() {
     saveVisitDay,
     saveRoleConfig,
     saveOpenUntilMonthAllRoles,
+    togglePastMonthAllRoles,
     saveAccount,
     deleteAccount,
     importWorkspaceData,
@@ -307,6 +308,7 @@ export default function App() {
               accounts={managedAccounts}
               onSaveRoleConfig={saveRoleConfig}
               onSaveOpenUntilMonthAllRoles={saveOpenUntilMonthAllRoles}
+              onTogglePastMonthAllRoles={togglePastMonthAllRoles}
             />
           )}
 

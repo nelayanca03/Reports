@@ -66,6 +66,17 @@ type WorkspaceSlice = Pick<OutletStoreState, 'ent' | 'visit'>;
 
 const EMPTY_SLICE: WorkspaceSlice = { ent: {}, visit: {} };
 
+function parseUnlockedPastMonths(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return Array.from(
+    new Set(
+      raw.filter((m): m is string => typeof m === 'string' && /^\d{4}-\d{2}$/.test(m))
+    )
+  )
+    .sort()
+    .slice(0, 24);
+}
+
 function loadInitialTheme(): 'light' | 'dark' {
   try {
     const saved = localStorage.getItem(THEME_STORAGE_KEY);
@@ -135,6 +146,8 @@ export function useAuthAndRoleData() {
 
   const activeConfig = roleConfigs[effectiveRoleId] || DEFAULT_ROLE_CONFIGS[effectiveRoleId];
 
+  const isAdminAccount = currentAccount?.role === 'admin';
+
   const maxAdminOpenMonth = useMemo(() => {
     const candidates = Object.values(roleConfigs)
       .map((c) => c.openUntilMonth || '')
@@ -147,11 +160,30 @@ export function useAuthAndRoleData() {
     () =>
       getSelectableMonths(
         todayIso(),
-        [activeMonth],
-        currentAccount?.role === 'admin' ? maxAdminOpenMonth : activeConfig.openUntilMonth
+        isAdminAccount ? [activeMonth] : [],
+        isAdminAccount ? maxAdminOpenMonth : activeConfig.openUntilMonth,
+        {
+          isAdmin: isAdminAccount,
+          unlockedPastMonths: activeConfig.unlockedPastMonths,
+        }
       ),
-    [activeMonth, currentAccount?.role, maxAdminOpenMonth, activeConfig.openUntilMonth]
+    [
+      activeMonth,
+      isAdminAccount,
+      maxAdminOpenMonth,
+      activeConfig.openUntilMonth,
+      activeConfig.unlockedPastMonths,
+    ]
   );
+
+  // Immediately redirect non-admin away from closed past months (e.g., if Admin locks it or month rolls over)
+  useEffect(() => {
+    if (authStatus !== 'ready' || !currentAccount) return;
+    if (!selectableMonths.includes(activeMonth)) {
+      const cur = currentMonthKey(todayIso());
+      setActiveMonth(selectableMonths.includes(cur) ? cur : selectableMonths[0] || cur);
+    }
+  }, [authStatus, currentAccount, selectableMonths, activeMonth]);
 
   // Theme sync
   useEffect(() => {
@@ -349,6 +381,7 @@ export function useAuthAndRoleData() {
       (snap) => {
         if (snap.exists()) {
           const d = snap.data();
+          const unlockedPastMonths = parseUnlockedPastMonths(d.unlockedPastMonths);
           const parsed: RoleConfig = {
             roleId: targetRole,
             label: String(d.label || DEFAULT_ROLE_CONFIGS[targetRole].label),
@@ -357,6 +390,7 @@ export function useAuthAndRoleData() {
             ...(typeof d.openUntilMonth === 'string' && /^\d{4}-\d{2}$/.test(d.openUntilMonth)
               ? { openUntilMonth: d.openUntilMonth }
               : {}),
+            ...(unlockedPastMonths.length > 0 ? { unlockedPastMonths } : {}),
             tasks: Array.isArray(d.tasks) ? d.tasks : [],
             outlets: Array.isArray(d.outlets) ? d.outlets : [],
           };
@@ -426,6 +460,7 @@ export function useAuthAndRoleData() {
           (snap) => {
             if (snap.exists()) {
               const d = snap.data();
+              const unlockedPastMonths = parseUnlockedPastMonths(d.unlockedPastMonths);
               setRoleConfigs((prev) => ({
                 ...prev,
                 [rId]: {
@@ -436,6 +471,7 @@ export function useAuthAndRoleData() {
                   ...(typeof d.openUntilMonth === 'string' && /^\d{4}-\d{2}$/.test(d.openUntilMonth)
                     ? { openUntilMonth: d.openUntilMonth }
                     : {}),
+                  ...(unlockedPastMonths.length > 0 ? { unlockedPastMonths } : {}),
                   tasks: Array.isArray(d.tasks) ? d.tasks : [],
                   outlets: Array.isArray(d.outlets) ? d.outlets : [],
                 },
@@ -732,12 +768,23 @@ export function useAuthAndRoleData() {
     []
   );
 
+  const canAccessMonthForWrite = useCallback(
+    (monthKey: string) => {
+      if (isAdminAccount) return true;
+      const cur = currentMonthKey(todayIso());
+      if (monthKey >= cur) return true;
+      return (activeConfig.unlockedPastMonths || []).includes(monthKey);
+    },
+    [isAdminAccount, activeConfig.unlockedPastMonths]
+  );
+
   const updateEntry = useCallback(
     async (outlet: string, day: string, taskKey: string, field: 'd' | 'n', value: string) => {
       const uid = auth.currentUser?.uid;
       if (!uid) return;
       if (!canEditOutletDay(workspaceData, activeConfig.tasks, days, outlet, day)) return;
       const monthKey = currentMonthKey(day);
+      if (!canAccessMonthForWrite(monthKey)) return;
       const path = `roleMonthlyWorkspaces/${effectiveRoleId}_${monthKey}`;
       try {
         const { wsRef } = await ensureMonthlyWorkspaceDoc(effectiveRoleId, monthKey, uid);
@@ -776,6 +823,7 @@ export function useAuthAndRoleData() {
       workspaceData,
       days,
       activeConfig.tasks,
+      canAccessMonthForWrite,
     ]
   );
 
@@ -831,6 +879,7 @@ export function useAuthAndRoleData() {
       if (entries.length === 0) return;
 
       const monthKey = currentMonthKey(day);
+      if (!canAccessMonthForWrite(monthKey)) return;
       const path = `roleMonthlyWorkspaces/${effectiveRoleId}_${monthKey}`;
       const nowIso = new Date().toISOString();
       try {
@@ -895,6 +944,7 @@ export function useAuthAndRoleData() {
       activeConfig.outlets,
       days,
       recordInputLog,
+      canAccessMonthForWrite,
     ]
   );
 
@@ -904,6 +954,7 @@ export function useAuthAndRoleData() {
       if (!uid) return;
       if (!canEditOutletDay(workspaceData, activeConfig.tasks, days, outlet, day)) return;
       const monthKey = currentMonthKey(day);
+      if (!canAccessMonthForWrite(monthKey)) return;
       const docId = `${effectiveRoleId}_${monthKey}`;
       const path = `roleMonthlyWorkspaces/${docId}`;
       try {
@@ -924,7 +975,7 @@ export function useAuthAndRoleData() {
         handleFirestoreError(error, OperationType.UPDATE, path);
       }
     },
-    [effectiveRoleId, workspaceData, activeConfig.tasks, days]
+    [effectiveRoleId, workspaceData, activeConfig.tasks, days, canAccessMonthForWrite]
   );
 
   const saveVisitDay = useCallback(
@@ -1019,6 +1070,10 @@ export function useAuthAndRoleData() {
       nextConfig.openUntilMonth && /^\d{4}-\d{2}$/.test(nextConfig.openUntilMonth)
         ? nextConfig.openUntilMonth
         : undefined;
+    const curMonth = currentMonthKey(todayIso());
+    const validUnlockedPast = parseUnlockedPastMonths(nextConfig.unlockedPastMonths).filter(
+      (m) => m < curMonth
+    );
     try {
       await setDoc(doc(db, 'roleConfigs', roleId), {
         roleId,
@@ -1026,6 +1081,7 @@ export function useAuthAndRoleData() {
         start: nextConfig.start,
         ndays: Math.max(1, Math.min(60, Math.round(nextConfig.ndays))),
         ...(validOpenMonth ? { openUntilMonth: validOpenMonth } : {}),
+        ...(validUnlockedPast.length > 0 ? { unlockedPastMonths: validUnlockedPast } : {}),
         tasks: nextConfig.tasks.slice(0, 30),
         outlets: nextConfig.outlets.slice(0, 100),
         updatedAt: serverTimestamp(),
@@ -1048,6 +1104,28 @@ export function useAuthAndRoleData() {
         await saveRoleConfig(rId, {
           ...currentCfg,
           openUntilMonth: validOpenMonth,
+        });
+      }
+    },
+    [currentAccount?.role, roleConfigs, saveRoleConfig]
+  );
+
+  const togglePastMonthAllRoles = useCallback(
+    async (monthKey: string, open: boolean) => {
+      const uid = auth.currentUser?.uid;
+      if (!uid || currentAccount?.role !== 'admin') return;
+      const curMonth = currentMonthKey(todayIso());
+      if (!/^\d{4}-\d{2}$/.test(monthKey) || monthKey >= curMonth) return;
+      const roleIds: OperationalRoleId[] = ['stock_accounting', 'gl', 'accounting'];
+      for (const rId of roleIds) {
+        const currentCfg = roleConfigs[rId] || DEFAULT_ROLE_CONFIGS[rId];
+        const prevList = currentCfg.unlockedPastMonths || [];
+        const nextList = open
+          ? Array.from(new Set([...prevList, monthKey])).sort()
+          : prevList.filter((m) => m !== monthKey);
+        await saveRoleConfig(rId, {
+          ...currentCfg,
+          unlockedPastMonths: nextList,
         });
       }
     },
@@ -1299,6 +1377,7 @@ export function useAuthAndRoleData() {
     saveVisitDay,
     saveRoleConfig,
     saveOpenUntilMonthAllRoles,
+    togglePastMonthAllRoles,
     saveAccount,
     deleteAccount,
     importWorkspaceData,

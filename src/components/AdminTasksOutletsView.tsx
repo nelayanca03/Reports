@@ -1,4 +1,4 @@
-import { CalendarCheck2, Copy, LockOpen, Plus, RotateCcw, Trash2 } from 'lucide-react';
+import { CalendarCheck2, Copy, Lock, LockOpen, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import { FormEvent, useState } from 'react';
 import {
   AccountProfile,
@@ -17,6 +17,7 @@ import {
   buildMonthWorkingDays,
   currentMonthKey,
   fmtMonth,
+  getPastMonths,
   getPeopleMap,
   getPersonList,
   getTaskInputType,
@@ -32,6 +33,7 @@ interface AdminTasksOutletsViewProps {
   accounts: AccountProfile[];
   onSaveRoleConfig: (roleId: OperationalRoleId, nextConfig: RoleConfig) => Promise<void>;
   onSaveOpenUntilMonthAllRoles: (openUntilMonth?: string) => Promise<void>;
+  onTogglePastMonthAllRoles: (monthKey: string, open: boolean) => Promise<void>;
 }
 
 const FORMULA_LABELS: Record<FormulaType, string> = {
@@ -55,6 +57,7 @@ export function AdminTasksOutletsView({
   accounts,
   onSaveRoleConfig,
   onSaveOpenUntilMonthAllRoles,
+  onTogglePastMonthAllRoles,
 }: AdminTasksOutletsViewProps) {
   const [targetRole, setTargetRole] = useState<OperationalRoleId>(initialRoleId);
   const config = roleConfigs[targetRole];
@@ -113,6 +116,8 @@ export function AdminTasksOutletsView({
     config.openUntilMonth && config.openUntilMonth > autoOpenMonth
       ? config.openUntilMonth
       : autoOpenMonth;
+  const pastMonths = getPastMonths(todayIso()).slice().reverse();
+  const unlockedPastSet = new Set(config.unlockedPastMonths || []);
 
   const handleSaveOpenMonthSingle = async (nextMonth?: string) => {
     setBusy(true);
@@ -150,6 +155,41 @@ export function AdminTasksOutletsView({
           'Akses periode semua role dikembalikan ke mode otomatis (bulan berjalan + 1).'
         );
       }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleTogglePastMonthSingle = async (monthKey: string, open: boolean) => {
+    setBusy(true);
+    try {
+      const prev = config.unlockedPastMonths || [];
+      const next = open
+        ? Array.from(new Set([...prev, monthKey])).sort()
+        : prev.filter((m) => m !== monthKey);
+      await onSaveRoleConfig(targetRole, {
+        ...config,
+        unlockedPastMonths: next,
+      });
+      setFeedback(
+        open
+          ? `Akses bulan ${fmtMonth(`${monthKey}-01`)} dibuka untuk user ${config.label}.`
+          : `Akses bulan ${fmtMonth(`${monthKey}-01`)} ditutup kembali untuk user ${config.label}.`
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleTogglePastMonthAll = async (monthKey: string, open: boolean) => {
+    setBusy(true);
+    try {
+      await onTogglePastMonthAllRoles(monthKey, open);
+      setFeedback(
+        open
+          ? `Akses bulan ${fmtMonth(`${monthKey}-01`)} dibuka untuk semua role.`
+          : `Akses bulan ${fmtMonth(`${monthKey}-01`)} ditutup kembali untuk semua role.`
+      );
     } finally {
       setBusy(false);
     }
@@ -477,6 +517,115 @@ export function AdminTasksOutletsView({
               <RotateCcw className="h-3.5 w-3.5" />
               <span>Mode Otomatis</span>
             </button>
+          )}
+        </div>
+
+        {/* Past Month Lock / Unlock Management */}
+        <div className="mt-5 border-t border-slate-200 pt-4 dark:border-slate-800">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h4 className="text-xs font-semibold tracking-wide text-slate-900 uppercase dark:text-slate-100">
+                Akses Bulan yang Sudah Terlewati (User Non-Admin)
+              </h4>
+              <p className="mt-1 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
+                Bulan yang sudah terlewati otomatis tertutup bagi user non-admin. Admin tetap dapat melihat semua bulan dan berhak membuka atau menutup kembali akses bulan lalu. Bulan berjalan selalu terbuka.
+              </p>
+            </div>
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-300">
+              Bulan Berjalan ({fmtMonth(`${activeCalMonth}-01`)}) · Selalu Terbuka
+            </div>
+          </div>
+
+          {pastMonths.length === 0 ? (
+            <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-xs text-slate-600 dark:border-slate-700 dark:bg-slate-800/50 dark:text-slate-300">
+              Belum ada bulan yang terlewati sebelum {fmtMonth(`${activeCalMonth}-01`)}. Memasuki bulan berikutnya, bulan yang telah lewat otomatis terkunci bagi user dan kontrol Buka / Tutup akan muncul di sini.
+            </div>
+          ) : (
+            <div className="mt-3 divide-y divide-slate-200 rounded-lg border border-slate-200 bg-slate-50/60 dark:divide-slate-800 dark:border-slate-700 dark:bg-slate-800/30">
+              {pastMonths.map((mKey) => {
+                const isOpenForRole = unlockedPastSet.has(mKey);
+                const openRolesCount = OPERATIONAL_ROLES.filter((r) =>
+                  (roleConfigs[r.id]?.unlockedPastMonths || []).includes(mKey)
+                ).length;
+                const allRolesOpen = openRolesCount === OPERATIONAL_ROLES.length;
+
+                return (
+                  <div
+                    key={mKey}
+                    className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="font-mono text-xs font-semibold text-slate-900 tabular-nums dark:text-slate-100">
+                        {fmtMonth(`${mKey}-01`)}
+                      </span>
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-md border px-2 py-0.5 text-[11px] font-medium ${
+                          isOpenForRole
+                            ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-300'
+                            : 'border-slate-200 bg-white text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-400'
+                        }`}
+                      >
+                        {isOpenForRole ? (
+                          <LockOpen className="h-3 w-3" />
+                        ) : (
+                          <Lock className="h-3 w-3" />
+                        )}
+                        <span>
+                          {isOpenForRole
+                            ? `Terbuka (${config.label})`
+                            : `Tertutup (${config.label})`}
+                        </span>
+                      </span>
+                      <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                        {openRolesCount}/{OPERATIONAL_ROLES.length} role terbuka
+                      </span>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => handleTogglePastMonthSingle(mKey, !isOpenForRole)}
+                        className={`inline-flex min-h-[34px] items-center gap-1.5 whitespace-nowrap rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors disabled:opacity-50 ${
+                          isOpenForRole
+                            ? 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
+                            : 'border-blue-200 bg-blue-50 text-blue-800 hover:bg-blue-100 dark:border-blue-800 dark:bg-blue-950/60 dark:text-blue-300 dark:hover:bg-blue-900/60'
+                        }`}
+                      >
+                        {isOpenForRole ? (
+                          <Lock className="h-3.5 w-3.5" />
+                        ) : (
+                          <LockOpen className="h-3.5 w-3.5" />
+                        )}
+                        <span>
+                          {isOpenForRole
+                            ? `Tutup ${config.label}`
+                            : `Buka ${config.label}`}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={busy}
+                        onClick={() => handleTogglePastMonthAll(mKey, !allRolesOpen)}
+                        className={`inline-flex min-h-[34px] items-center gap-1.5 whitespace-nowrap rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors disabled:opacity-50 ${
+                          allRolesOpen
+                            ? 'border border-slate-300 bg-slate-200/80 text-slate-800 hover:bg-slate-300/80 dark:border-slate-600 dark:bg-slate-700 dark:text-slate-100 dark:hover:bg-slate-600'
+                            : 'bg-blue-700 text-white hover:bg-blue-800 dark:bg-blue-600 dark:hover:bg-blue-500'
+                        }`}
+                      >
+                        {allRolesOpen ? (
+                          <Lock className="h-3.5 w-3.5" />
+                        ) : (
+                          <LockOpen className="h-3.5 w-3.5" />
+                        )}
+                        <span>{allRolesOpen ? 'Tutup Semua Role' : 'Buka Semua Role'}</span>
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </div>
       </section>

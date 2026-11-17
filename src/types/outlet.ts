@@ -27,6 +27,7 @@ export interface RoleConfig {
   start: string;
   ndays: number;
   openUntilMonth?: string;
+  unlockedPastMonths?: string[];
   tasks: TaskDefinition[];
   outlets: OutletAssignment[];
 }

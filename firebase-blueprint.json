@@ -106,6 +106,10 @@
           "maxLength": 7,
           "description": "Optional Admin-configured furthest accessible calendar month (YYYY-MM)"
         },
+        "unlockedPastMonths": {
+          "type": "array",
+          "description": "Bounded list of past YYYY-MM months explicitly reopened for non-admin users by Admin"
+        },
         "tasks": {
           "type": "array",
           "description": "List of tasks assigned to this role"
