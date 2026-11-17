@@ -161,11 +161,11 @@ service cloud.firestore {
     }
 
     function currentWibMonthKey() {
-      return string((request.time + duration.time(7, 0, 0)).year())
+      return string((request.time + duration.time(7, 0, 0, 0)).year())
         + '-'
-        + ((request.time + duration.time(7, 0, 0)).month() < 10
-          ? '0' + string((request.time + duration.time(7, 0, 0)).month())
-          : string((request.time + duration.time(7, 0, 0)).month()));
+        + ((request.time + duration.time(7, 0, 0, 0)).month() < 10
+          ? '0' + string((request.time + duration.time(7, 0, 0, 0)).month())
+          : string((request.time + duration.time(7, 0, 0, 0)).month()));
     }
 
     function isMonthUnlockedForRole(roleId, monthKey) {

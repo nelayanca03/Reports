@@ -984,6 +984,9 @@ export function useAuthAndRoleData() {
       if (!uid) return;
       if (isSunday(day) || day !== todayIso()) return;
 
+      const monthKey = currentMonthKey(day);
+      if (!canAccessMonthForWrite(monthKey)) return;
+
       const normalizedEntries = getVisitEntries(nextVisitInput)
         .slice(0, 20)
         .map((entry, idx) => ({
@@ -1004,21 +1007,34 @@ export function useAuthAndRoleData() {
         entries: nextVisitInput.ok ? normalizedEntries : [],
       };
 
-      const monthKey = currentMonthKey(day);
-      const path = `roleMonthlyWorkspaces/${effectiveRoleId}_${monthKey}`;
+      const docId = `${effectiveRoleId}_${monthKey}`;
+      const path = `roleMonthlyWorkspaces/${docId}`;
+      const wsRef = doc(db, 'roleMonthlyWorkspaces', docId);
       const nowIso = new Date().toISOString();
+      const key = `${person}|${day}`;
+
       try {
-        const { wsRef } = await ensureMonthlyWorkspaceDoc(effectiveRoleId, monthKey, uid);
-        const key = `${person}|${day}`;
-        await updateDoc(
-          wsRef,
-          new FieldPath('visit', key),
-          normalizedVisit,
-          'updatedAt',
-          serverTimestamp(),
-          'updatedBy',
-          uid
-        );
+        const snap = await getDoc(wsRef);
+        if (!snap.exists()) {
+          await setDoc(wsRef, {
+            roleId: effectiveRoleId,
+            monthKey,
+            ent: {},
+            visit: { [key]: normalizedVisit },
+            updatedAt: serverTimestamp(),
+            updatedBy: uid,
+          });
+        } else {
+          await updateDoc(
+            wsRef,
+            new FieldPath('visit', key),
+            normalizedVisit,
+            'updatedAt',
+            serverTimestamp(),
+            'updatedBy',
+            uid
+          );
+        }
       } catch (error) {
         handleFirestoreError(error, OperationType.UPDATE, path);
       }
@@ -1040,17 +1056,21 @@ export function useAuthAndRoleData() {
             .join(' · ') || 'Sudah dikunjungi'
         : 'Status kunjungan dibatalkan / tidak dikunjungi';
 
-      await recordInputLog({
-        actionType: 'kunjungan',
-        pic: person,
-        outlet: uniqueOutlets.join(', ') || '-',
-        day,
-        details: visitSummary,
-        itemCount: normalizedVisit.ok ? Math.max(1, (normalizedVisit.entries || []).length) : 1,
-        clientTs: nowIso,
-      });
+      try {
+        await recordInputLog({
+          actionType: 'kunjungan',
+          pic: person,
+          outlet: uniqueOutlets.join(', ') || '-',
+          day,
+          details: visitSummary,
+          itemCount: normalizedVisit.ok ? Math.max(1, (normalizedVisit.entries || []).length) : 1,
+          clientTs: nowIso,
+        });
+      } catch (logError) {
+        console.error('Gagal mencatat log kunjungan (data kunjungan tetap tersimpan):', logError);
+      }
     },
-    [effectiveRoleId, ensureMonthlyWorkspaceDoc, recordInputLog]
+    [effectiveRoleId, canAccessMonthForWrite, recordInputLog]
   );
 
   const updateVisit = useCallback(

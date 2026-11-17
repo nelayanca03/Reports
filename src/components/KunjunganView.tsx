@@ -1,5 +1,5 @@
 import { ArrowUpRight, Check, Lock, Minus, Plus, Save, Trash2 } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { OutletStoreState, RoleConfig, VisitEntry, VisitItem } from '../types/outlet';
 import {
   calcVisitLeaderboard,
@@ -99,6 +99,13 @@ export function KunjunganView({
   const [isDirty, setIsDirty] = useState<boolean>(false);
   const [saving, setSaving] = useState<boolean>(false);
   const [savedNotice, setSavedNotice] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  const lastContextKeyRef = useRef<string>('');
+  const isDirtyRef = useRef<boolean>(false);
+  const savingRef = useRef<boolean>(false);
+  isDirtyRef.current = isDirty;
+  savingRef.current = saving;
 
   useEffect(() => {
     if (personList.length > 0 && !personList.includes(visitPerson)) {
@@ -120,7 +127,8 @@ export function KunjunganView({
   const otherOutlets = allOutlets.filter((o) => !activePersonOutlets.includes(o));
   const defaultOutletForPerson = activePersonOutlets[0] || allOutlets[0] || '';
 
-  const savedVisit: VisitItem = store.visit[`${activePerson}|${activeDay}`] || {
+  const contextKey = `${activePerson}|${activeDay}`;
+  const savedVisit: VisitItem = store.visit[contextKey] || {
     ok: false,
     outlet: '',
     f: '',
@@ -129,15 +137,30 @@ export function KunjunganView({
     entries: [],
   };
 
-  // Sync draft when switching PIC, day, or when Firestore snapshot updates while not dirty
+  // Sync draft when switching PIC/day, or when Firestore snapshot updates while not editing/saving
   useEffect(() => {
+    const contextChanged = lastContextKeyRef.current !== contextKey;
+    if (!contextChanged && (isDirtyRef.current || savingRef.current)) {
+      return;
+    }
+    lastContextKeyRef.current = contextKey;
     const entries = getVisitEntries(savedVisit);
     setDraftOk(savedVisit.ok);
     setDraftEntries(savedVisit.ok ? entries : []);
-    setCustomModeByRow({});
+    setCustomModeByRow((prev) => {
+      if (contextChanged) return {};
+      const next: Record<string, boolean> = {};
+      for (const e of entries) {
+        if (prev[e.id] && !e.n) next[e.id] = true;
+      }
+      return next;
+    });
     setIsDirty(false);
+    if (contextChanged) {
+      setSaveError(null);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activePerson, activeDay, store.visit[`${activePerson}|${activeDay}`]]);
+  }, [contextKey, store.visit[contextKey]]);
 
   if (personList.length === 0) {
     return (
@@ -237,6 +260,9 @@ export function KunjunganView({
   const handleSave = async () => {
     if (!canSave) return;
     setSaving(true);
+    savingRef.current = true;
+    setSaveError(null);
+    setSavedNotice(null);
     try {
       const first = draftEntries[0];
       await onSaveVisitDay(activePerson, activeDay, {
@@ -247,13 +273,26 @@ export function KunjunganView({
         n: first?.n || '',
         entries: draftOk ? draftEntries : [],
       });
+      isDirtyRef.current = false;
       setIsDirty(false);
       setSavedNotice(
-        draftOk
-          ? `Kunjungan ${activePerson} (${fmtDateLong(activeDay)}) tersimpan.`
+        draftOk && draftEntries.length > 0
+          ? `Kunjungan ${activePerson} (${fmtDateLong(activeDay)}) tersimpan (${draftEntries.length}x).`
           : `Kunjungan ${activePerson} (${fmtDateLong(activeDay)}) dihapus.`
       );
+    } catch (err) {
+      let msg = 'Gagal menyimpan data kunjungan. Periksa koneksi atau izin akses.';
+      if (err instanceof Error) {
+        try {
+          const parsed = JSON.parse(err.message);
+          if (parsed?.error) msg = `Gagal menyimpan: ${parsed.error}`;
+        } catch {
+          if (err.message) msg = `Gagal menyimpan: ${err.message}`;
+        }
+      }
+      setSaveError(msg);
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
@@ -447,6 +486,15 @@ export function KunjunganView({
             </button>
           </div>
         </div>
+
+        {saveError && (
+          <div
+            role="alert"
+            className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3.5 py-2.5 text-xs font-medium text-red-700 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300"
+          >
+            {saveError}
+          </div>
+        )}
 
         {canEditSelectedCell && isDirty && hasIncompleteRows && (
           <div
