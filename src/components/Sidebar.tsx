@@ -3,6 +3,7 @@ import {
   CalendarCheck,
   ClipboardEdit,
   Database,
+  HardDrive,
   History,
   LogOut,
   SlidersHorizontal,
@@ -12,11 +13,13 @@ import {
 import {
   AccountProfile,
   AppView,
+  FirebaseStorageStats,
   OperationalRoleId,
 } from '../types/outlet';
 import {
   OPERATIONAL_ROLES,
   ROLE_LABELS,
+  formatStorageBytes,
 } from '../utils/outletLogic';
 
 interface SidebarProps {
@@ -25,6 +28,7 @@ interface SidebarProps {
   onChangeRoleId: (roleId: OperationalRoleId) => void;
   activeView: AppView;
   onSelectView: (view: AppView) => void;
+  firebaseStorage: FirebaseStorageStats | null;
   mobileOpen: boolean;
   onCloseMobile: () => void;
   onSignOut: () => void;
@@ -57,6 +61,7 @@ export function Sidebar({
   onChangeRoleId,
   activeView,
   onSelectView,
+  firebaseStorage,
   mobileOpen,
   onCloseMobile,
   onSignOut,
@@ -166,8 +171,36 @@ export function Sidebar({
         )}
       </div>
 
-      {/* Bottom Account */}
-      <div className="border-t border-slate-200 pt-3 dark:border-slate-800">
+      {/* Bottom Storage & Account */}
+      <div className="space-y-3 border-t border-slate-200 pt-3 dark:border-slate-800">
+        {isAdmin && firebaseStorage && (
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 dark:border-slate-800 dark:bg-slate-800/60">
+            <div className="flex items-center justify-between gap-2 text-[11px] font-medium text-slate-600 dark:text-slate-300">
+              <span className="inline-flex items-center gap-1.5">
+                <HardDrive className="h-3.5 w-3.5 shrink-0 text-blue-700 dark:text-blue-400" />
+                <span>Sisa Firebase</span>
+              </span>
+              <span className="font-mono font-semibold text-slate-900 tabular-nums dark:text-slate-100">
+                {formatStorageBytes(firebaseStorage.remainingBytes)}
+              </span>
+            </div>
+            <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded-full bg-slate-200 dark:bg-slate-700">
+              <div
+                className={`h-full rounded-full ${
+                  firebaseStorage.usedPercent >= 90
+                    ? 'bg-red-600 dark:bg-red-500'
+                    : 'bg-blue-700 dark:bg-blue-500'
+                }`}
+                style={{ width: `${Math.max(2, Math.min(100, firebaseStorage.usedPercent))}%` }}
+              />
+            </div>
+            <div className="mt-1 flex items-center justify-between text-[10px] text-slate-500 tabular-nums dark:text-slate-400">
+              <span>Terpakai ~{formatStorageBytes(firebaseStorage.usedBytes)}</span>
+              <span>Kuota 1,00 GB</span>
+            </div>
+          </div>
+        )}
+
         <div className="px-2">
           <div className="truncate text-xs font-semibold text-slate-900 dark:text-slate-100">
             {account.name}

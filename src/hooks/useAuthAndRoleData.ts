@@ -5,6 +5,7 @@ import {
   deleteDoc,
   deleteField,
   doc,
+  getCountFromServer,
   getDoc,
   limit,
   onSnapshot,
@@ -27,6 +28,7 @@ import {
 import {
   AccountProfile,
   AccountRole,
+  FirebaseStorageStats,
   InputLogActionType,
   InputLogEntry,
   OperationalRoleId,
@@ -37,9 +39,11 @@ import {
 import {
   DEFAULT_ROLE_CONFIGS,
   DEFAULT_START,
+  FIRESTORE_SPARK_LIMIT_BYTES,
   LEGACY_STORAGE_KEY,
   buildWorkingDays,
   canEditOutletDay,
+  estimateFirestoreDocBytes,
   fmtDateLong,
   fmtMonth,
   getEntry,
@@ -101,6 +105,8 @@ export function useAuthAndRoleData() {
   });
   const [managedAccounts, setManagedAccounts] = useState<AccountProfile[]>([]);
   const [inputLogs, setInputLogs] = useState<InputLogEntry[]>([]);
+  const [adminWorkspaceBytes, setAdminWorkspaceBytes] = useState<Record<string, number>>({});
+  const [totalInputLogCount, setTotalInputLogCount] = useState<number>(0);
   const [theme, setTheme] = useState<'light' | 'dark'>(loadInitialTheme);
 
   // Theme sync
@@ -375,6 +381,18 @@ export function useAuthAndRoleData() {
           (error) => handleFirestoreError(error, OperationType.GET, path)
         )
       );
+      unsubs.push(
+        onSnapshot(
+          doc(db, 'roleWorkspaces', rId),
+          (snap) => {
+            const bytes = snap.exists()
+              ? estimateFirestoreDocBytes(`roleWorkspaces/${rId}`, snap.data())
+              : 0;
+            setAdminWorkspaceBytes((prev) => ({ ...prev, [rId]: bytes }));
+          },
+          (error) => handleFirestoreError(error, OperationType.GET, `roleWorkspaces/${rId}`)
+        )
+      );
     }
 
     const regPath = 'adminRegistry/accounts';
@@ -434,6 +452,15 @@ export function useAuthAndRoleData() {
             };
           });
           setInputLogs(list);
+
+          void (async () => {
+            try {
+              const countSnap = await getCountFromServer(collection(db, 'inputLogs'));
+              setTotalInputLogCount(countSnap.data().count);
+            } catch (error) {
+              handleFirestoreError(error, OperationType.LIST, 'inputLogs');
+            }
+          })();
         },
         (error) => handleFirestoreError(error, OperationType.LIST, 'inputLogs')
       )
@@ -463,6 +490,89 @@ export function useAuthAndRoleData() {
     }),
     [workspaceData, activeConfig.start]
   );
+
+  const firebaseStorage: FirebaseStorageStats | null = useMemo(() => {
+    if (currentAccount?.role !== 'admin') return null;
+
+    const roleIds: OperationalRoleId[] = ['stock_accounting', 'gl', 'accounting'];
+    let usedBytes = 0;
+    let totalDocs = 0;
+
+    // 3 roleConfigs docs
+    for (const rId of roleIds) {
+      usedBytes += estimateFirestoreDocBytes(`roleConfigs/${rId}`, roleConfigs[rId]);
+      totalDocs += 1;
+    }
+
+    // 3 roleWorkspaces docs
+    for (const rId of roleIds) {
+      const wsBytes = adminWorkspaceBytes[rId] || 0;
+      if (wsBytes > 0) {
+        usedBytes += wsBytes;
+        totalDocs += 1;
+      }
+    }
+
+    // adminRegistry/accounts + accounts/*
+    const accountsRegistryMap: Record<string, unknown> = {};
+    for (const acc of managedAccounts) {
+      accountsRegistryMap[acc.id] = {
+        email: acc.email,
+        name: acc.name,
+        role: acc.role,
+        picName: acc.picName,
+        active: acc.active,
+      };
+      usedBytes += estimateFirestoreDocBytes(`accounts/${acc.id}`, {
+        email: acc.email,
+        name: acc.name,
+        role: acc.role,
+        picName: acc.picName,
+        active: acc.active,
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        createdBy: 'uid_placeholder_28chars_admin',
+      });
+      totalDocs += 1;
+    }
+    usedBytes += estimateFirestoreDocBytes('adminRegistry/accounts', {
+      accounts: accountsRegistryMap,
+      updatedAt: new Date(),
+      updatedBy: 'uid_placeholder_28chars_admin',
+    });
+    totalDocs += 1;
+
+    // inputLogs collection (exact total count * average measured doc size)
+    const effectiveLogCount = Math.max(inputLogs.length, totalInputLogCount);
+    if (inputLogs.length > 0 && effectiveLogCount > 0) {
+      const sampleTotal = inputLogs.reduce(
+        (sum, log) => sum + estimateFirestoreDocBytes(`inputLogs/${log.id}`, log),
+        0
+      );
+      const avgLogBytes = sampleTotal / inputLogs.length;
+      usedBytes += Math.round(avgLogBytes * effectiveLogCount);
+      totalDocs += effectiveLogCount;
+    }
+
+    const limitBytes = FIRESTORE_SPARK_LIMIT_BYTES;
+    const remainingBytes = Math.max(0, limitBytes - usedBytes);
+    const usedPercent = Math.min(100, (usedBytes / limitBytes) * 100);
+
+    return {
+      usedBytes,
+      limitBytes,
+      remainingBytes,
+      usedPercent,
+      totalDocs,
+    };
+  }, [
+    currentAccount?.role,
+    roleConfigs,
+    adminWorkspaceBytes,
+    managedAccounts,
+    inputLogs,
+    totalInputLogCount,
+  ]);
 
   const signInWithGoogle = useCallback(async () => {
     setAuthError(null);
@@ -942,6 +1052,7 @@ export function useAuthAndRoleData() {
     store: storeWithConfigStart,
     managedAccounts,
     inputLogs,
+    firebaseStorage,
     theme,
     toggleTheme,
     signInWithGoogle,

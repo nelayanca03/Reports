@@ -123,6 +123,14 @@ export interface VisitPersonStats {
   rate: number;
 }
 
+export interface FirebaseStorageStats {
+  usedBytes: number;
+  limitBytes: number;
+  remainingBytes: number;
+  usedPercent: number;
+  totalDocs: number;
+}
+
 export type AppView =
   | 'input'
   | 'rekap'

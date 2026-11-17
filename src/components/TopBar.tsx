@@ -1,10 +1,12 @@
-import { Download, Menu, Moon, Sun } from 'lucide-react';
-import { AppView } from '../types/outlet';
+import { Download, HardDrive, Menu, Moon, Sun } from 'lucide-react';
+import { AppView, FirebaseStorageStats } from '../types/outlet';
+import { formatStorageBytes } from '../utils/outletLogic';
 
 interface TopBarProps {
   activeView: AppView;
   roleLabel: string;
   isAdmin: boolean;
+  firebaseStorage: FirebaseStorageStats | null;
   theme: 'light' | 'dark';
   onToggleTheme: () => void;
   onOpenMobileMenu: () => void;
@@ -25,6 +27,7 @@ export function TopBar({
   activeView,
   roleLabel,
   isAdmin,
+  firebaseStorage,
   theme,
   onToggleTheme,
   onOpenMobileMenu,
@@ -61,6 +64,21 @@ export function TopBar({
       </div>
 
       <div className="flex shrink-0 items-center gap-2.5">
+        {isAdmin && firebaseStorage && (
+          <div
+            title={`Estimasi storage Firestore: terpakai ~${formatStorageBytes(firebaseStorage.usedBytes)} dari ${formatStorageBytes(firebaseStorage.limitBytes)} (${firebaseStorage.totalDocs} dokumen)`}
+            className="hidden h-10 items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 text-xs text-slate-700 md:inline-flex dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+          >
+            <HardDrive className="h-3.5 w-3.5 shrink-0 text-blue-700 dark:text-blue-400" />
+            <span className="whitespace-nowrap">
+              Sisa Storage:{' '}
+              <strong className="font-mono font-semibold tabular-nums text-slate-900 dark:text-slate-100">
+                {formatStorageBytes(firebaseStorage.remainingBytes)}
+              </strong>
+            </span>
+          </div>
+        )}
+
         <button
           type="button"
           onClick={onToggleTheme}

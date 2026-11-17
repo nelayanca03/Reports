@@ -38,6 +38,7 @@ export default function App() {
     store,
     managedAccounts,
     inputLogs,
+    firebaseStorage,
     theme,
     toggleTheme,
     signInWithGoogle,
@@ -195,6 +196,7 @@ export default function App() {
         }}
         activeView={activeView}
         onSelectView={setActiveView}
+        firebaseStorage={firebaseStorage}
         mobileOpen={mobileMenuOpen}
         onCloseMobile={() => setMobileMenuOpen(false)}
         onSignOut={signOutUser}
@@ -205,6 +207,7 @@ export default function App() {
           activeView={activeView}
           roleLabel={activeConfig.label}
           isAdmin={isAdmin}
+          firebaseStorage={firebaseStorage}
           theme={theme}
           onToggleTheme={toggleTheme}
           onOpenMobileMenu={() => setMobileMenuOpen(true)}

@@ -476,7 +476,11 @@ export function InputHarianView({
         </div>
 
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[820px] border-collapse text-left text-sm">
+          <table
+            className={`w-full border-collapse text-left text-sm ${
+              isAdmin ? 'min-w-[960px]' : 'min-w-[860px]'
+            }`}
+          >
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50/70 text-xs font-medium text-slate-500 dark:border-slate-800 dark:bg-slate-800/40 dark:text-slate-400">
                 <th className="px-5 py-3">Item</th>
@@ -530,7 +534,7 @@ export function InputHarianView({
                     </td>
 
                     <td className="px-4 py-3.5 align-middle whitespace-nowrap">
-                      <div className="flex flex-nowrap items-center gap-1.5 whitespace-nowrap">
+                      <div className="inline-flex flex-nowrap items-center gap-2 whitespace-nowrap">
                         {isMonthly ? (
                           <input
                             type="month"
@@ -543,7 +547,7 @@ export function InputHarianView({
                                 cleared: false,
                               })
                             }
-                            className="min-h-[38px] min-w-[140px] rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 font-mono text-xs text-slate-900 tabular-nums disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-200/80 disabled:text-slate-400 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:disabled:border-slate-700/70 dark:disabled:bg-slate-800/50 dark:disabled:text-slate-500"
+                            className="h-[38px] w-[150px] shrink-0 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 font-mono text-xs text-slate-900 tabular-nums disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-200/80 disabled:text-slate-400 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:disabled:border-slate-700/70 dark:disabled:bg-slate-800/50 dark:disabled:text-slate-500"
                           />
                         ) : (
                           <input
@@ -557,35 +561,41 @@ export function InputHarianView({
                                 cleared: false,
                               })
                             }
-                            className="min-h-[38px] min-w-[138px] rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 font-mono text-xs text-slate-900 tabular-nums disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-200/80 disabled:text-slate-400 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:disabled:border-slate-700/70 dark:disabled:bg-slate-800/50 dark:disabled:text-slate-500"
+                            className="h-[38px] w-[150px] shrink-0 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 font-mono text-xs text-slate-900 tabular-nums disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-200/80 disabled:text-slate-400 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:disabled:border-slate-700/70 dark:disabled:bg-slate-800/50 dark:disabled:text-slate-500"
                           />
                         )}
-                        {canEditDay && currentComparable !== quickTargetDate && (
-                          <button
-                            type="button"
-                            onClick={() =>
-                              setTaskDraft(def.key, calc.d, calc.n, {
-                                d: quickTargetDate,
-                                cleared: false,
-                              })
-                            }
-                            title={`Atur ke ${isMonthly ? fmtMonth(quickTargetDate) : fmtDate(quickTargetDate)}`}
-                            className="min-h-[38px] shrink-0 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-                          >
-                            Set {isMonthly ? fmtMonth(quickTargetDate) : fmtDate(quickTargetDate)}
-                          </button>
-                        )}
-                        {canEditDay && (calc.own || isDirty) && (
-                          <button
-                            type="button"
-                            onClick={() => clearTaskDraft(def.key, calc.own)}
-                            title={calc.own ? 'Kosongkan entri' : 'Batalkan perubahan draft'}
-                            aria-label={`Reset entri ${def.label}`}
-                            className="flex h-[38px] w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
-                          >
-                            <RotateCcw className="h-3.5 w-3.5" />
-                          </button>
-                        )}
+                        {canEditDay &&
+                          (currentComparable !== quickTargetDate ? (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setTaskDraft(def.key, calc.d, calc.n, {
+                                  d: quickTargetDate,
+                                  cleared: false,
+                                })
+                              }
+                              title={`Atur ke ${isMonthly ? fmtMonth(quickTargetDate) : fmtDate(quickTargetDate)}`}
+                              className="inline-flex h-[38px] w-[108px] shrink-0 items-center justify-center whitespace-nowrap rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                            >
+                              Set {isMonthly ? fmtMonth(quickTargetDate) : fmtDate(quickTargetDate)}
+                            </button>
+                          ) : (
+                            <span className="h-[38px] w-[108px] shrink-0" aria-hidden="true" />
+                          ))}
+                        {canEditDay &&
+                          (calc.own || isDirty ? (
+                            <button
+                              type="button"
+                              onClick={() => clearTaskDraft(def.key, calc.own)}
+                              title={calc.own ? 'Kosongkan entri' : 'Batalkan perubahan draft'}
+                              aria-label={`Reset entri ${def.label}`}
+                              className="flex h-[38px] w-8 shrink-0 items-center justify-center rounded-lg text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                            >
+                              <RotateCcw className="h-3.5 w-3.5" />
+                            </button>
+                          ) : (
+                            <span className="h-[38px] w-8 shrink-0" aria-hidden="true" />
+                          ))}
                       </div>
                     </td>
 

@@ -563,37 +563,43 @@ export function calcVisitLeaderboard(
   days: string[],
   personList: string[],
   today: string = todayIso()
-): { elapsedDays: number; rows: VisitPersonStats[] } {
+): { elapsedDays: number; grandTotalVisits: number; rows: VisitPersonStats[] } {
   const workingDays = days.filter((d) => !isSunday(d));
   const elapsedDays = workingDays.filter((d) => d <= today).length;
-  const rows = personList
-    .map((person) => {
-      let visitedCount = 0;
-      let totalVisits = 0;
-      for (const d of workingDays) {
-        const v = state.visit[`${person}|${d}`];
-        if (v?.ok) {
-          visitedCount++;
-          const entries = getVisitEntries(v);
-          totalVisits += Math.max(1, entries.length);
-        }
+  const rawRows = personList.map((person) => {
+    let visitedCount = 0;
+    let totalVisits = 0;
+    for (const d of workingDays) {
+      const v = state.visit[`${person}|${d}`];
+      if (v?.ok) {
+        visitedCount++;
+        const entries = getVisitEntries(v);
+        totalVisits += Math.max(1, entries.length);
       }
-      return {
-        person,
-        visitedCount,
-        totalVisits,
-        elapsedDays,
-        rate: elapsedDays ? visitedCount / elapsedDays : 0,
-      };
-    })
+    }
+    return {
+      person,
+      visitedCount,
+      totalVisits,
+      elapsedDays,
+    };
+  });
+
+  const grandTotalVisits = rawRows.reduce((sum, row) => sum + row.totalVisits, 0);
+
+  const rows: VisitPersonStats[] = rawRows
+    .map((row) => ({
+      ...row,
+      rate: grandTotalVisits > 0 ? row.totalVisits / grandTotalVisits : 0,
+    }))
     .sort(
       (a, b) =>
-        b.visitedCount - a.visitedCount ||
         b.totalVisits - a.totalVisits ||
-        b.rate - a.rate
+        b.visitedCount - a.visitedCount ||
+        a.person.localeCompare(b.person)
     );
 
-  return { elapsedDays, rows };
+  return { elapsedDays, grandTotalVisits, rows };
 }
 
 function escapeCsv(val: string | number): string {
@@ -827,3 +833,57 @@ export function downloadTextFile(filename: string, content: string, mimeType: st
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
 }
+
+export const FIRESTORE_SPARK_LIMIT_BYTES = 1024 * 1024 * 1024; // 1 GiB Spark free tier
+
+const textEncoder = typeof TextEncoder !== 'undefined' ? new TextEncoder() : null;
+
+function utf8ByteLength(str: string): number {
+  if (textEncoder) return textEncoder.encode(str).length;
+  return unescape(encodeURIComponent(str)).length;
+}
+
+function estimateFirestoreValueBytes(value: unknown): number {
+  if (value === null || value === undefined) return 1;
+  if (typeof value === 'boolean') return 1;
+  if (typeof value === 'number') return 8;
+  if (typeof value === 'string') return utf8ByteLength(value) + 1;
+  if (value instanceof Date) return 8;
+  if (Array.isArray(value)) {
+    let total = 0;
+    for (const item of value) {
+      total += estimateFirestoreValueBytes(item);
+    }
+    return total;
+  }
+  if (typeof value === 'object') {
+    let total = 0;
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      if (v === undefined) continue;
+      total += utf8ByteLength(k) + 1 + estimateFirestoreValueBytes(v);
+    }
+    return total;
+  }
+  return 8;
+}
+
+export function estimateFirestoreDocBytes(docPath: string, data: unknown): number {
+  const segments = docPath.split('/').filter(Boolean);
+  let nameBytes = 16;
+  for (const seg of segments) {
+    nameBytes += utf8ByteLength(seg) + 1;
+  }
+  return 32 + nameBytes + estimateFirestoreValueBytes(data);
+}
+
+export function formatStorageBytes(bytes: number): string {
+  const safe = Math.max(0, bytes);
+  if (safe < 1024) return `${Math.round(safe)} B`;
+  const kb = safe / 1024;
+  if (kb < 1024) return `${kb.toFixed(1).replace('.', ',')} KB`;
+  const mb = kb / 1024;
+  if (mb < 1024) return `${mb.toFixed(1).replace('.', ',')} MB`;
+  const gb = mb / 1024;
+  return `${gb.toFixed(2).replace('.', ',')} GB`;
+}
+
