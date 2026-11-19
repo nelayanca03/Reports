@@ -10,7 +10,7 @@ import {
   Users,
   X,
 } from 'lucide-react';
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, MouseEvent, useEffect, useMemo, useState } from 'react';
 import { AccountProfile, CalendarEvent, OperationalRoleId } from '../types/outlet';
 import {
   CALENDAR_TIME_SLOTS,
@@ -51,6 +51,7 @@ interface KalenderViewProps {
 }
 
 const WEEKDAY_SHORT = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
+const WEEKDAY_UPPER = ['MIN', 'SEN', 'SEL', 'RAB', 'KAM', 'JUM', 'SAB'];
 const ALL_DEPARTMENTS: OperationalRoleId[] = ['stock_accounting', 'gl', 'accounting'];
 
 function getMondayOfWeek(isoDate: string): string {
@@ -122,6 +123,22 @@ export function KalenderView({
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
+  // Day overflow popup (> 3 events in a single day)
+  const [dayPopup, setDayPopup] = useState<{
+    date: string;
+    top: number;
+    left: number;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!dayPopup) return;
+    const onKeyDown = (ev: KeyboardEvent) => {
+      if (ev.key === 'Escape') setDayPopup(null);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [dayPopup]);
+
   // Create / Edit form modal
   const [formOpen, setFormOpen] = useState(false);
   const [editingEventId, setEditingEventId] = useState<string | null>(null);
@@ -170,6 +187,7 @@ export function KalenderView({
 
   const openCreateModal = (prefillDate?: string, prefillTime?: string) => {
     if (!canManage) return;
+    setDayPopup(null);
     setEditingEventId(null);
     setFormTitle('');
     setFormDate(prefillDate || cursorDate || today);
@@ -180,6 +198,20 @@ export function KalenderView({
     setFormNotes('');
     setFormError(null);
     setFormOpen(true);
+  };
+
+  const openDayOverflowPopup = (dayIso: string, e: MouseEvent<HTMLButtonElement>) => {
+    e.stopPropagation();
+    const cellEl = e.currentTarget.closest('[data-day-cell]') || e.currentTarget;
+    const rect = cellEl.getBoundingClientRect();
+    const popupWidth = Math.min(280, window.innerWidth - 24);
+    const count = (eventsByDate.get(dayIso) || []).length;
+    const estHeight = Math.min(420, 130 + count * 34);
+    const rawLeft = rect.left + rect.width / 2 - popupWidth / 2;
+    const left = Math.max(12, Math.min(rawLeft, window.innerWidth - popupWidth - 12));
+    const rawTop = rect.top - 12;
+    const top = Math.max(12, Math.min(rawTop, window.innerHeight - estHeight - 12));
+    setDayPopup({ date: dayIso, top, left });
   };
 
   const openEditModal = (evt: CalendarEvent) => {
@@ -409,6 +441,7 @@ export function KalenderView({
               return (
                 <div
                   key={dayIso}
+                  data-day-cell={dayIso}
                   onClick={() => {
                     if (canManage) openCreateModal(dayIso);
                   }}
@@ -453,12 +486,8 @@ export function KalenderView({
                     {extraCount > 0 && (
                       <button
                         type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setCursorDate(dayIso);
-                          setViewMode('day');
-                        }}
-                        className="w-full px-1 text-left text-[11px] font-semibold text-blue-700 hover:underline dark:text-blue-400"
+                        onClick={(e) => openDayOverflowPopup(dayIso, e)}
+                        className="w-full rounded-md px-1.5 py-0.5 text-left text-[11px] font-semibold text-blue-700 transition-colors hover:bg-slate-100 hover:underline dark:text-blue-400 dark:hover:bg-slate-800"
                       >
                         +{extraCount} lainnya
                       </button>
@@ -651,6 +680,95 @@ export function KalenderView({
           </div>
         </section>
       )}
+
+      {/* DAY EVENTS OVERFLOW POP-UP (> 3 events) */}
+      {dayPopup && (() => {
+        const popupEvents = eventsByDate.get(dayPopup.date) || [];
+        const parsedDay = parseUtcDate(dayPopup.date);
+        const weekdayLabel = WEEKDAY_UPPER[parsedDay.getUTCDay()] || '';
+        const dayNumber = parsedDay.getUTCDate();
+        const isPopupToday = dayPopup.date === today;
+
+        return (
+          <div
+            className="fixed inset-0 z-40"
+            onClick={() => setDayPopup(null)}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-label={`Daftar event ${fmtDateWeekdayLong(dayPopup.date)}`}
+              style={{ top: `${dayPopup.top}px`, left: `${dayPopup.left}px` }}
+              onClick={(e) => e.stopPropagation()}
+              className="fixed z-50 w-[min(280px,calc(100vw-24px))] rounded-2xl border border-slate-200 bg-white p-3.5 shadow-lg dark:border-slate-700 dark:bg-slate-900"
+            >
+              <div className="relative flex flex-col items-center pb-2.5">
+                <span className="text-[10px] font-semibold tracking-wider text-slate-500 uppercase dark:text-slate-400">
+                  {weekdayLabel}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const target = dayPopup.date;
+                    setDayPopup(null);
+                    setCursorDate(target);
+                    setViewMode('day');
+                  }}
+                  title="Buka tampilan Harian"
+                  className={`mt-1 inline-flex h-9 w-9 items-center justify-center rounded-full font-mono text-xl font-semibold tabular-nums transition-colors ${
+                    isPopupToday
+                      ? 'bg-blue-700 text-white dark:bg-blue-600'
+                      : 'text-slate-900 hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-800'
+                  }`}
+                >
+                  {dayNumber}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDayPopup(null)}
+                  aria-label="Tutup daftar event hari ini"
+                  className="absolute top-0 right-0 flex h-7 w-7 items-center justify-center rounded-full text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="max-h-[260px] space-y-1 overflow-y-auto pr-0.5">
+                {popupEvents.map((evt) => (
+                  <button
+                    key={evt.id}
+                    type="button"
+                    onClick={() => {
+                      setDayPopup(null);
+                      setSelectedEvent(evt);
+                    }}
+                    className="flex w-full items-center gap-2 rounded-md border border-transparent bg-slate-50/70 px-2 py-1.5 text-left text-xs text-slate-900 transition-colors hover:border-blue-200 hover:bg-blue-50/90 dark:bg-slate-800/50 dark:text-slate-100 dark:hover:border-blue-800/70 dark:hover:bg-blue-950/50"
+                  >
+                    <span className="h-2 w-2 shrink-0 rounded-full bg-blue-600 dark:bg-blue-400" />
+                    <span className="shrink-0 font-mono text-[11px] font-semibold text-blue-800 tabular-nums dark:text-blue-400">
+                      {evt.startTime}
+                    </span>
+                    <span className="truncate font-medium">{evt.title}</span>
+                  </button>
+                ))}
+              </div>
+
+              {canManage && (
+                <div className="mt-2.5 border-t border-slate-100 pt-2 dark:border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => openCreateModal(dayPopup.date)}
+                    className="flex w-full items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs font-semibold text-blue-700 transition-colors hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-950/40"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    <span>Buat Event di Tanggal Ini</span>
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
 
       {/* EVENT DETAIL POP-UP MODAL */}
       {selectedEvent && (
