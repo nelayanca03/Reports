@@ -352,6 +352,17 @@ export function InputHarianView({
 
   return (
     <div className="space-y-5">
+      {/* Integrated Saved Data, + Tambah & Multi-Filter Search Bar */}
+      <SavedRecordsSection
+        account={account}
+        activeRoleId={activeRoleId}
+        roleConfigs={roleConfigs}
+        records={savedRecords}
+        onCreateRecord={onCreateSavedRecord}
+        onUpdateRecord={onUpdateSavedRecord}
+        onDeleteRecord={onDeleteSavedRecord}
+      />
+
       {!hasDailySetup ? (
         <section className="rounded-xl border border-slate-200 bg-white p-6 text-center dark:border-slate-800 dark:bg-slate-900">
           <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
@@ -359,7 +370,7 @@ export function InputHarianView({
           </h2>
           <p className="mx-auto mt-2 max-w-md text-sm text-slate-500 dark:text-slate-400">
             {personList.length === 0 && config.tasks.length === 0
-              ? `Admin belum menambahkan daftar tugas maupun outlet untuk role ${config.label}. Anda tetap dapat menggunakan tabel Data Tersimpan di bawah.`
+              ? `Admin belum menambahkan daftar tugas maupun outlet untuk role ${config.label}. Anda tetap dapat menggunakan tabel Data Tersimpan di atas.`
               : personList.length === 0
                 ? `Admin belum menambahkan outlet untuk role ${config.label}.`
                 : `Admin belum menambahkan daftar tugas untuk role ${config.label}.`}
@@ -936,17 +947,6 @@ export function InputHarianView({
           </section>
         </>
       )}
-
-      {/* Integrated Saved Data, + Tambah & Multi-Filter Search Bar */}
-      <SavedRecordsSection
-        account={account}
-        activeRoleId={activeRoleId}
-        roleConfigs={roleConfigs}
-        records={savedRecords}
-        onCreateRecord={onCreateSavedRecord}
-        onUpdateRecord={onUpdateSavedRecord}
-        onDeleteRecord={onDeleteSavedRecord}
-      />
 
       {/* Admin Export, JSON Backup & Month Reset Tools */}
       {isAdmin && (
