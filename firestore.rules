@@ -68,13 +68,37 @@ service cloud.firestore {
       return isAdmin() || (hasActiveAccount() && currentAccountRole() == roleId);
     }
 
+    function isAccountingOrAdmin() {
+      return isAdmin() || (hasActiveAccount() && currentAccountRole() == 'accounting');
+    }
+
+    function accountData() {
+      return get(/databases/$(database)/documents/accounts/$(emailDocId())).data;
+    }
+
+    function isAuthorizedRecordPrefix(prefix) {
+      return prefix in ['SA', 'GL'] && (
+        isAdmin()
+        || (
+          hasActiveAccount()
+          && currentAccountRole() == 'accounting'
+          && (
+            ('refPrefix' in accountData() && accountData().refPrefix in ['SA', 'GL'])
+              ? prefix == accountData().refPrefix
+              : prefix == 'SA'
+          )
+        )
+      );
+    }
+
     function isValidAccount(data) {
       return data.keys().hasAll(['email', 'name', 'role', 'picName', 'active', 'createdAt', 'updatedAt', 'createdBy'])
-        && data.keys().hasOnly(['email', 'name', 'role', 'picName', 'active', 'createdAt', 'updatedAt', 'createdBy'])
+        && data.keys().hasOnly(['email', 'name', 'role', 'picName', 'refPrefix', 'active', 'createdAt', 'updatedAt', 'createdBy'])
         && data.email is string && data.email.size() >= 5 && data.email.size() <= 120
         && data.name is string && data.name.size() >= 1 && data.name.size() <= 80
         && data.role is string && isAccountRole(data.role)
         && data.picName is string && data.picName.size() <= 60
+        && (!('refPrefix' in data) || (data.refPrefix is string && data.refPrefix in ['SA', 'GL']))
         && data.active is bool
         && data.createdAt is timestamp
         && data.updatedAt is timestamp
@@ -231,7 +255,7 @@ service cloud.firestore {
         && incoming().createdAt == existing().createdAt
         && incoming().createdBy == existing().createdBy
         && incoming().updatedAt == request.time
-        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'role', 'picName', 'active', 'updatedAt']);
+        && incoming().diff(existing()).affectedKeys().hasOnly(['name', 'role', 'picName', 'refPrefix', 'active', 'updatedAt']);
       allow delete: if isVerifiedUser()
         && isValidId(accountId)
         && isAdmin()
@@ -259,7 +283,7 @@ service cloud.firestore {
     }
 
     match /roleConfigs/{roleId} {
-      allow get: if isVerifiedUser() && isValidId(roleId) && isOperationalRole(roleId) && hasRoleAccess(roleId);
+      allow get: if isVerifiedUser() && isValidId(roleId) && isOperationalRole(roleId) && hasActiveAccount();
       allow list: if false;
       allow create: if isVerifiedUser()
         && isValidId(roleId)
@@ -332,6 +356,197 @@ service cloud.firestore {
         && hasRoleAccess(incoming().roleId)
         && incoming().createdAt == request.time;
       allow update, delete: if false;
+    }
+
+    function isValidCalendarStartTime(t) {
+      return t is string
+        && t.size() == 5
+        && t.matches('^((0[89]|1[0-8]):(00|30)|19:00)$');
+    }
+
+    function isValidVisibleToList(arr) {
+      return arr is list
+        && arr.size() >= 1
+        && arr.size() <= 3
+        && arr[0] is string && isOperationalRole(arr[0])
+        && (arr.size() < 2 || (arr[1] is string && isOperationalRole(arr[1])))
+        && (arr.size() < 3 || (arr[2] is string && isOperationalRole(arr[2])));
+    }
+
+    function isValidCalendarEvent(data) {
+      return data.keys().hasAll([
+          'title', 'date', 'startTime', 'visibleTo', 'notes',
+          'createdAt', 'updatedAt', 'createdBy', 'updatedBy',
+          'createdByEmail', 'createdByName'
+        ])
+        && data.keys().hasOnly([
+          'title', 'date', 'startTime', 'visibleTo', 'notes',
+          'createdAt', 'updatedAt', 'createdBy', 'updatedBy',
+          'createdByEmail', 'createdByName'
+        ])
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 120
+        && data.date is string && data.date.size() == 10 && data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && isValidCalendarStartTime(data.startTime)
+        && isValidVisibleToList(data.visibleTo)
+        && data.notes is string && data.notes.size() <= 500
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && data.createdBy is string && data.createdBy.size() >= 1 && data.createdBy.size() <= 128
+        && data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128
+        && data.createdByEmail is string && data.createdByEmail.size() >= 5 && data.createdByEmail.size() <= 120
+        && data.createdByName is string && data.createdByName.size() >= 1 && data.createdByName.size() <= 80;
+    }
+
+    function canViewCalendarEvent(data) {
+      return isAdmin()
+        || (hasActiveAccount() && currentAccountRole() == 'accounting')
+        || (
+          hasActiveAccount()
+          && currentAccountRole() in ['stock_accounting', 'gl']
+          && currentAccountRole() in data.visibleTo
+        );
+    }
+
+    match /calendarEvents/{eventId} {
+      allow get: if isVerifiedUser() && isValidId(eventId) && canViewCalendarEvent(existing());
+      allow list: if isVerifiedUser() && canViewCalendarEvent(resource.data);
+      allow create: if isVerifiedUser()
+        && isValidId(eventId)
+        && isAccountingOrAdmin()
+        && isValidCalendarEvent(incoming())
+        && incoming().createdBy == request.auth.uid
+        && incoming().updatedBy == request.auth.uid
+        && incoming().createdByEmail == request.auth.token.email.lower()
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidId(eventId)
+        && isAccountingOrAdmin()
+        && isValidCalendarEvent(incoming())
+        && incoming().createdAt == existing().createdAt
+        && incoming().createdBy == existing().createdBy
+        && incoming().createdByEmail == existing().createdByEmail
+        && incoming().createdByName == existing().createdByName
+        && incoming().updatedBy == request.auth.uid
+        && incoming().updatedAt == request.time;
+      allow delete: if isVerifiedUser() && isValidId(eventId) && isAccountingOrAdmin();
+    }
+
+    function isValidCounterId(id) {
+      return id is string && id.size() == 7 && id.matches('^(SA|GL)_[0-9]{4}$');
+    }
+
+    function isValidRecordCounter(data) {
+      return data.keys().hasAll(['prefix', 'yymm', 'seq', 'updatedAt', 'updatedBy'])
+        && data.keys().hasOnly(['prefix', 'yymm', 'seq', 'updatedAt', 'updatedBy'])
+        && data.prefix is string && data.prefix in ['SA', 'GL']
+        && data.yymm is string && data.yymm.size() == 4 && data.yymm.matches('^[0-9]{4}$')
+        && data.seq is int && data.seq >= 1 && data.seq <= 999999
+        && data.updatedAt is timestamp
+        && data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128;
+    }
+
+    match /recordCounters/{counterId} {
+      allow get: if isVerifiedUser() && isValidCounterId(counterId) && isAccountingOrAdmin();
+      allow list, delete: if false;
+      allow create: if isVerifiedUser()
+        && isValidCounterId(counterId)
+        && isAccountingOrAdmin()
+        && isValidRecordCounter(incoming())
+        && counterId == (incoming().prefix + '_' + incoming().yymm)
+        && incoming().seq == 1
+        && isAuthorizedRecordPrefix(incoming().prefix)
+        && incoming().updatedBy == request.auth.uid
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidCounterId(counterId)
+        && isAccountingOrAdmin()
+        && isValidRecordCounter(incoming())
+        && incoming().prefix == existing().prefix
+        && incoming().yymm == existing().yymm
+        && counterId == (existing().prefix + '_' + existing().yymm)
+        && incoming().seq == existing().seq + 1
+        && isAuthorizedRecordPrefix(incoming().prefix)
+        && incoming().updatedBy == request.auth.uid
+        && incoming().updatedAt == request.time;
+    }
+
+    function isValidRecordId(id) {
+      return id is string && id.size() >= 10 && id.size() <= 16 && id.matches('^(SA|GL)[0-9]{8,}$');
+    }
+
+    function isValidSavedRecord(data) {
+      return data.keys().hasAll([
+          'refCode', 'prefix', 'yymm', 'department', 'date', 'pic', 'outlet',
+          'summary', 'notes', 'createdAt', 'updatedAt', 'createdBy', 'updatedBy',
+          'createdByEmail', 'createdByName'
+        ])
+        && data.keys().hasOnly([
+          'refCode', 'prefix', 'yymm', 'department', 'date', 'pic', 'outlet',
+          'summary', 'notes', 'createdAt', 'updatedAt', 'createdBy', 'updatedBy',
+          'createdByEmail', 'createdByName'
+        ])
+        && isValidRecordId(data.refCode)
+        && data.prefix is string && data.prefix in ['SA', 'GL']
+        && data.yymm is string && data.yymm.size() == 4 && data.yymm.matches('^[0-9]{4}$')
+        && data.department is string
+        && ((data.prefix == 'SA' && data.department == 'stock_accounting')
+            || (data.prefix == 'GL' && data.department == 'gl'))
+        && data.date is string && data.date.size() == 10 && data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && data.pic is string && data.pic.size() >= 1 && data.pic.size() <= 60
+        && data.outlet is string && data.outlet.size() >= 1 && data.outlet.size() <= 40
+        && data.summary is string && data.summary.size() <= 200
+        && data.notes is string && data.notes.size() <= 1000
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && data.createdBy is string && data.createdBy.size() >= 1 && data.createdBy.size() <= 128
+        && data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128
+        && data.createdByEmail is string && data.createdByEmail.size() >= 5 && data.createdByEmail.size() <= 120
+        && data.createdByName is string && data.createdByName.size() >= 1 && data.createdByName.size() <= 80;
+    }
+
+    function canViewSavedRecord(data) {
+      return isAdmin()
+        || (hasActiveAccount() && currentAccountRole() == 'accounting')
+        || (
+          hasActiveAccount()
+          && currentAccountRole() in ['stock_accounting', 'gl']
+          && data.department == currentAccountRole()
+        );
+    }
+
+    match /savedRecords/{recordId} {
+      allow get: if isVerifiedUser() && isValidRecordId(recordId) && canViewSavedRecord(existing());
+      allow list: if isVerifiedUser() && canViewSavedRecord(resource.data);
+      allow create: if isVerifiedUser()
+        && isValidRecordId(recordId)
+        && isAccountingOrAdmin()
+        && isValidSavedRecord(incoming())
+        && recordId == incoming().refCode
+        && incoming().yymm == (incoming().date[2:4] + incoming().date[5:7])
+        && incoming().refCode.matches('^' + incoming().prefix + incoming().yymm + '[0-9]{4,}$')
+        && isAuthorizedRecordPrefix(incoming().prefix)
+        && existsAfter(/databases/$(database)/documents/recordCounters/$(incoming().prefix + '_' + incoming().yymm))
+        && incoming().createdBy == request.auth.uid
+        && incoming().updatedBy == request.auth.uid
+        && incoming().createdByEmail == request.auth.token.email.lower()
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidRecordId(recordId)
+        && isAccountingOrAdmin()
+        && isValidSavedRecord(incoming())
+        && incoming().refCode == existing().refCode
+        && incoming().prefix == existing().prefix
+        && incoming().yymm == existing().yymm
+        && incoming().department == existing().department
+        && incoming().createdAt == existing().createdAt
+        && incoming().createdBy == existing().createdBy
+        && incoming().createdByEmail == existing().createdByEmail
+        && incoming().createdByName == existing().createdByName
+        && incoming().updatedBy == request.auth.uid
+        && incoming().updatedAt == request.time;
+      allow delete: if isVerifiedUser() && isValidRecordId(recordId) && isAccountingOrAdmin();
     }
   }
 }

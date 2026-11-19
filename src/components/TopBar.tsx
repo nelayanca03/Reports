@@ -17,6 +17,7 @@ interface TopBarProps {
 }
 
 const VIEW_TITLES: Record<AppView, string> = {
+  calendar: 'Kalender',
   input: 'Input Harian',
   rekap: 'Rekap & Ranking',
   kunj: 'Kunjungan Outlet',
@@ -70,7 +71,7 @@ export function TopBar({
       </div>
 
       <div className="flex shrink-0 items-center gap-2.5">
-        {!isAdminView && (
+        {!isAdminView && activeView !== 'calendar' && (
           <div className="inline-flex h-10 items-center gap-1.5 rounded-lg border border-slate-200 bg-slate-50 px-2.5 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
             <CalendarDays className="h-3.5 w-3.5 shrink-0 text-blue-700 dark:text-blue-400" />
             <label htmlFor="topbar-month-select" className="sr-only">
@@ -120,7 +121,7 @@ export function TopBar({
           {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
         </button>
 
-        {isAdmin && !isAdminView && (
+        {isAdmin && !isAdminView && activeView !== 'calendar' && (
           <button
             type="button"
             onClick={onQuickExportCsv}

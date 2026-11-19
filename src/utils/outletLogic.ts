@@ -1,6 +1,8 @@
 import {
+  AccountProfile,
   AccountRole,
   CalculatedTask,
+  CalendarEvent,
   EntryItem,
   FormulaType,
   InputLogEntry,
@@ -8,8 +10,11 @@ import {
   OutletAssignment,
   OutletRecap,
   OutletStoreState,
+  RecordDepartment,
+  RecordPrefix,
   ResolvedEntry,
   RoleConfig,
+  SavedRecord,
   TaskDefinition,
   TaskInputType,
   VisitEntry,
@@ -1114,5 +1119,182 @@ export function formatStorageBytes(bytes: number): string {
   if (mb < 1024) return `${mb.toFixed(1).replace('.', ',')} MB`;
   const gb = mb / 1024;
   return `${gb.toFixed(2).replace('.', ',')} GB`;
+}
+
+export const CALENDAR_TIME_SLOTS: string[] = [
+  '08:00',
+  '08:30',
+  '09:00',
+  '09:30',
+  '10:00',
+  '10:30',
+  '11:00',
+  '11:30',
+  '12:00',
+  '12:30',
+  '13:00',
+  '13:30',
+  '14:00',
+  '14:30',
+  '15:00',
+  '15:30',
+  '16:00',
+  '16:30',
+  '17:00',
+  '17:30',
+  '18:00',
+  '18:30',
+  '19:00',
+];
+
+export function isValidCalendarStartTime(time: string): boolean {
+  return CALENDAR_TIME_SLOTS.includes(time);
+}
+
+export function normalizeCalendarVisibleTo(roles: OperationalRoleId[]): OperationalRoleId[] {
+  const allowed: OperationalRoleId[] = ['stock_accounting', 'gl', 'accounting'];
+  const unique = Array.from(new Set(roles)).filter((r): r is OperationalRoleId =>
+    allowed.includes(r)
+  );
+  return unique;
+}
+
+export function canUserViewCalendarEvent(
+  event: Pick<CalendarEvent, 'visibleTo'>,
+  accountRole: AccountRole
+): boolean {
+  if (accountRole === 'admin' || accountRole === 'accounting') return true;
+  return event.visibleTo.includes(accountRole);
+}
+
+export function formatCalendarVisibleLabel(visibleTo: OperationalRoleId[]): string {
+  const normalized = normalizeCalendarVisibleTo(visibleTo);
+  if (normalized.length === 3) return 'Semua Departemen';
+  return normalized.map((r) => ROLE_LABELS[r] || r).join(', ');
+}
+
+export function resolveAuthorizedRecordPrefix(
+  account: Pick<AccountProfile, 'role' | 'refPrefix'> | null,
+  activeRoleId: OperationalRoleId
+): { prefix: RecordPrefix; department: RecordDepartment } {
+  if (account?.role === 'gl') {
+    return { prefix: 'GL', department: 'gl' };
+  }
+  if (account?.role === 'stock_accounting') {
+    return { prefix: 'SA', department: 'stock_accounting' };
+  }
+  if (account?.role === 'accounting') {
+    const prefix: RecordPrefix = account.refPrefix === 'GL' ? 'GL' : 'SA';
+    return { prefix, department: prefix === 'GL' ? 'gl' : 'stock_accounting' };
+  }
+  const prefix: RecordPrefix = activeRoleId === 'gl' ? 'GL' : 'SA';
+  return { prefix, department: prefix === 'GL' ? 'gl' : 'stock_accounting' };
+}
+
+export function formatYymmFromIsoDate(isoDate: string): string {
+  const match = /^(\d{4})-(\d{2})-\d{2}$/.exec(isoDate.trim());
+  if (!match) {
+    throw new Error('Format tanggal record tidak valid (harus YYYY-MM-DD).');
+  }
+  return `${match[1].slice(2, 4)}${match[2]}`;
+}
+
+export function formatReferenceCode(prefix: RecordPrefix, yymm: string, seq: number): string {
+  const safeSeq = Math.max(1, Math.floor(seq));
+  return `${prefix}${yymm}${String(safeSeq).padStart(4, '0')}`;
+}
+
+export function fmtDateSlash(isoStr: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec((isoStr || '').trim());
+  if (!match) return isoStr || '—';
+  return `${match[3]}/${match[2]}/${match[1]}`;
+}
+
+export interface MasterOutletOption {
+  code: string;
+  person: string;
+  roles: OperationalRoleId[];
+}
+
+export function getMasterOutletOptions(
+  roleConfigs: Record<OperationalRoleId, RoleConfig>
+): MasterOutletOption[] {
+  const byCode = new Map<string, MasterOutletOption>();
+  const roleOrder: OperationalRoleId[] = ['stock_accounting', 'gl', 'accounting'];
+  for (const rId of roleOrder) {
+    const list = roleConfigs[rId]?.outlets || [];
+    for (const item of list) {
+      const code = (item.code || '').trim();
+      const person = (item.person || '').trim();
+      if (!code) continue;
+      const existing = byCode.get(code);
+      if (!existing) {
+        byCode.set(code, { code, person, roles: [rId] });
+      } else {
+        if (!existing.person && person) existing.person = person;
+        if (!existing.roles.includes(rId)) existing.roles.push(rId);
+      }
+    }
+  }
+  return Array.from(byCode.values()).sort((a, b) => a.code.localeCompare(b.code));
+}
+
+export type SavedRecordSortKey = 'date' | 'pic' | 'refCode' | 'outlet';
+
+export interface SavedRecordFilterState {
+  search?: string;
+  dateExact?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  pic?: string;
+  refCode?: string;
+  outlet?: string;
+  sortKey?: SavedRecordSortKey;
+  sortDir?: 'asc' | 'desc';
+}
+
+export function filterAndSortSavedRecords(
+  records: SavedRecord[],
+  filters: SavedRecordFilterState
+): SavedRecord[] {
+  const q = (filters.search || '').trim().toLowerCase();
+  const refQ = (filters.refCode || '').trim().toLowerCase();
+  const dateExact = (filters.dateExact || '').trim();
+  const dateFrom = (filters.dateFrom || '').trim();
+  const dateTo = (filters.dateTo || '').trim();
+  const pic = filters.pic && filters.pic !== 'ALL' ? filters.pic : '';
+  const outlet = filters.outlet && filters.outlet !== 'ALL' ? filters.outlet : '';
+  const sortKey: SavedRecordSortKey = filters.sortKey || 'date';
+  const sortDir: 'asc' | 'desc' = filters.sortDir || 'desc';
+
+  const filtered = records.filter((rec) => {
+    if (dateExact && rec.date !== dateExact) return false;
+    if (dateFrom && rec.date < dateFrom) return false;
+    if (dateTo && rec.date > dateTo) return false;
+    if (pic && rec.pic.toUpperCase() !== pic.toUpperCase()) return false;
+    if (outlet && rec.outlet.toUpperCase() !== outlet.toUpperCase()) return false;
+    if (refQ && !rec.refCode.toLowerCase().includes(refQ)) return false;
+    if (q) {
+      const haystack = `${rec.refCode} ${rec.pic} ${rec.outlet} ${rec.date} ${rec.summary} ${rec.notes}`.toLowerCase();
+      if (!haystack.includes(q)) return false;
+    }
+    return true;
+  });
+
+  const dir = sortDir === 'asc' ? 1 : -1;
+  return [...filtered].sort((a, b) => {
+    let cmp = 0;
+    if (sortKey === 'date') {
+      cmp = a.date.localeCompare(b.date);
+    } else if (sortKey === 'pic') {
+      cmp = a.pic.localeCompare(b.pic);
+    } else if (sortKey === 'refCode') {
+      cmp = a.refCode.localeCompare(b.refCode);
+    } else if (sortKey === 'outlet') {
+      cmp = a.outlet.localeCompare(b.outlet);
+    }
+    if (cmp !== 0) return cmp * dir;
+    return b.refCode.localeCompare(a.refCode);
+  });
 }
 

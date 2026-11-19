@@ -4,6 +4,7 @@ import { AdminLogsView } from './components/AdminLogsView';
 import { AdminTasksOutletsView } from './components/AdminTasksOutletsView';
 import { DataEksporView } from './components/DataEksporView';
 import { InputHarianView } from './components/InputHarianView';
+import { KalenderView } from './components/KalenderView';
 import { KunjunganView } from './components/KunjunganView';
 import { LoginView } from './components/LoginView';
 import { RekapRankingView } from './components/RekapRankingView';
@@ -43,6 +44,8 @@ export default function App() {
     allWorkspaces,
     managedAccounts,
     inputLogs,
+    calendarEvents,
+    savedRecords,
     firebaseStorage,
     theme,
     toggleTheme,
@@ -57,9 +60,15 @@ export default function App() {
     deleteAccount,
     importWorkspaceData,
     resetRoleWorkspace,
+    createCalendarEvent,
+    updateCalendarEvent,
+    deleteCalendarEvent,
+    createSavedRecord,
+    updateSavedRecord,
+    deleteSavedRecord,
   } = useAuthAndRoleData();
 
-  const [activeView, setActiveView] = useState<AppView>('input');
+  const [activeView, setActiveView] = useState<AppView>('calendar');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const [selectedPerson, setSelectedPerson] = useState<string>('');
@@ -136,17 +145,24 @@ export default function App() {
     }
   }, [days, selectedDay, activeMonth, recapDate]);
 
+  // Reset to Kalender when user logs in
+  const accountId = currentAccount?.id || '';
+  useEffect(() => {
+    if (authStatus === 'ready' && accountId) {
+      setActiveView('calendar');
+    }
+  }, [authStatus, accountId]);
+
   useEffect(() => {
     if (
       currentAccount &&
       currentAccount.role !== 'admin' &&
       (activeView === 'rekap' ||
-        activeView === 'data' ||
         activeView === 'admin_tasks' ||
         activeView === 'admin_accounts' ||
         activeView === 'admin_logs')
     ) {
-      setActiveView('input');
+      setActiveView('calendar');
     }
   }, [currentAccount, activeView]);
 
@@ -243,6 +259,16 @@ export default function App() {
         />
 
         <main className="mx-auto w-full max-w-[1200px] flex-1 p-4 sm:p-6">
+          {activeView === 'calendar' && (
+            <KalenderView
+              account={currentAccount}
+              events={calendarEvents}
+              onCreateEvent={createCalendarEvent}
+              onUpdateEvent={updateCalendarEvent}
+              onDeleteEvent={deleteCalendarEvent}
+            />
+          )}
+
           {activeView === 'input' && (
             <InputHarianView
               config={activeConfig}
@@ -284,18 +310,24 @@ export default function App() {
             />
           )}
 
-          {activeView === 'data' && isAdmin && (
+          {activeView === 'data' && (
             <DataEksporView
+              account={currentAccount}
+              activeRoleId={activeRoleId}
               config={activeConfig}
               roleConfigs={roleConfigs}
               store={store}
               allWorkspaces={allWorkspaces}
               inputLogs={inputLogs}
+              savedRecords={savedRecords}
               days={days}
               activeMonth={activeMonth}
               selectableMonths={selectableMonths}
               isAdmin={isAdmin}
               selectedDay={selectedDay}
+              onCreateSavedRecord={createSavedRecord}
+              onUpdateSavedRecord={updateSavedRecord}
+              onDeleteSavedRecord={deleteSavedRecord}
               onImportStore={importWorkspaceData}
               onResetAllData={resetRoleWorkspace}
             />

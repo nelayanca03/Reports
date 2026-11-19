@@ -11,10 +11,12 @@ import {
 } from 'lucide-react';
 import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AccountProfile,
   InputLogEntry,
   OperationalRoleId,
   OutletStoreState,
   RoleConfig,
+  SavedRecord,
 } from '../types/outlet';
 import {
   EXPORT_REPORT_OPTIONS,
@@ -40,18 +42,40 @@ import {
   yesterdayIso,
 } from '../utils/outletLogic';
 import { ConfirmModal } from './ConfirmModal';
+import { SavedRecordsSection } from './SavedRecordsSection';
 
 interface DataEksporViewProps {
+  account: AccountProfile;
+  activeRoleId: OperationalRoleId;
   config: RoleConfig;
   roleConfigs: Record<OperationalRoleId, RoleConfig>;
   store: OutletStoreState;
   allWorkspaces: Record<OperationalRoleId, OutletStoreState>;
   inputLogs: InputLogEntry[];
+  savedRecords: SavedRecord[];
   days: string[];
   activeMonth: string;
   selectableMonths: string[];
   isAdmin: boolean;
   selectedDay: string;
+  onCreateSavedRecord: (input: {
+    date: string;
+    pic: string;
+    outlet: string;
+    summary?: string;
+    notes?: string;
+  }) => Promise<string>;
+  onUpdateSavedRecord: (
+    recordId: string,
+    input: {
+      date: string;
+      pic: string;
+      outlet: string;
+      summary?: string;
+      notes?: string;
+    }
+  ) => Promise<void>;
+  onDeleteSavedRecord: (recordId: string) => Promise<void>;
   onImportStore: (incoming: OutletStoreState) => Promise<void>;
   onResetAllData: () => Promise<void>;
 }
@@ -59,16 +83,22 @@ interface DataEksporViewProps {
 const PREVIEW_PAGE_SIZE = 15;
 
 export function DataEksporView({
+  account,
+  activeRoleId,
   config,
   roleConfigs,
   store,
   allWorkspaces,
   inputLogs,
+  savedRecords,
   days,
   activeMonth,
   selectableMonths,
   isAdmin,
   selectedDay,
+  onCreateSavedRecord,
+  onUpdateSavedRecord,
+  onDeleteSavedRecord,
   onImportStore,
   onResetAllData,
 }: DataEksporViewProps) {
@@ -330,6 +360,18 @@ export function DataEksporView({
 
   return (
     <div className="space-y-5">
+      <SavedRecordsSection
+        account={account}
+        activeRoleId={activeRoleId}
+        roleConfigs={roleConfigs}
+        records={savedRecords}
+        onCreateRecord={onCreateSavedRecord}
+        onUpdateRecord={onUpdateSavedRecord}
+        onDeleteRecord={onDeleteSavedRecord}
+      />
+
+      {isAdmin && (
+        <>
       {feedback && (
         <div
           role="status"
@@ -824,6 +866,8 @@ export function DataEksporView({
           });
         }}
       />
+        </>
+      )}
     </div>
   );
 }

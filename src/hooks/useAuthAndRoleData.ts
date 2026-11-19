@@ -1,6 +1,7 @@
 import { User, onAuthStateChanged, signInWithPopup, signOut } from 'firebase/auth';
 import {
   FieldPath,
+  Timestamp,
   collection,
   deleteDoc,
   deleteField,
@@ -15,6 +16,7 @@ import {
   serverTimestamp,
   setDoc,
   updateDoc,
+  where,
 } from 'firebase/firestore';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -29,13 +31,17 @@ import {
 import {
   AccountProfile,
   AccountRole,
+  CalendarEvent,
   EntryItem,
   FirebaseStorageStats,
   InputLogActionType,
   InputLogEntry,
   OperationalRoleId,
   OutletStoreState,
+  RecordDepartment,
+  RecordPrefix,
   RoleConfig,
+  SavedRecord,
   VisitItem,
 } from '../types/outlet';
 import {
@@ -49,12 +55,17 @@ import {
   estimateFirestoreDocBytes,
   fmtDateLong,
   fmtMonth,
+  formatReferenceCode,
+  formatYymmFromIsoDate,
   getEntry,
   getSelectableMonths,
   getTaskInputType,
   getVisitEntries,
   isSunday,
+  isValidCalendarStartTime,
   mergeWorkspaceStates,
+  normalizeCalendarVisibleTo,
+  resolveAuthorizedRecordPrefix,
   shiftMonthKey,
   todayIso,
 } from '../utils/outletLogic';
@@ -128,6 +139,8 @@ export function useAuthAndRoleData() {
 
   const [managedAccounts, setManagedAccounts] = useState<AccountProfile[]>([]);
   const [inputLogs, setInputLogs] = useState<InputLogEntry[]>([]);
+  const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
+  const [savedRecords, setSavedRecords] = useState<SavedRecord[]>([]);
   const [adminWorkspaceBytes, setAdminWorkspaceBytes] = useState<Record<string, number>>({});
   const [adminLegacySlices, setAdminLegacySlices] = useState<
     Record<OperationalRoleId, WorkspaceSlice>
@@ -345,6 +358,9 @@ export function useAuthAndRoleData() {
           name: String(data.name || user.displayName || email),
           role: (data.role as AccountRole) || 'stock_accounting',
           picName: String(data.picName || ''),
+          ...(data.refPrefix === 'SA' || data.refPrefix === 'GL'
+            ? { refPrefix: data.refPrefix as RecordPrefix }
+            : {}),
           active: Boolean(data.active),
         };
 
@@ -445,6 +461,154 @@ export function useAuthAndRoleData() {
       unsubMonths.forEach((u) => u());
     };
   }, [authStatus, currentAccount, activeRoleId, activeMonth]);
+
+  // Listen to all roleConfigs (for centralized Outlet master list), calendarEvents, and savedRecords
+  useEffect(() => {
+    if (authStatus !== 'ready' || !currentAccount) return;
+
+    const unsubs: Array<() => void> = [];
+    const roleIds: OperationalRoleId[] = ['stock_accounting', 'gl', 'accounting'];
+
+    for (const rId of roleIds) {
+      const cfgPath = `roleConfigs/${rId}`;
+      unsubs.push(
+        onSnapshot(
+          doc(db, 'roleConfigs', rId),
+          (snap) => {
+            if (snap.exists()) {
+              const d = snap.data();
+              const unlockedPastMonths = parseUnlockedPastMonths(d.unlockedPastMonths);
+              setRoleConfigs((prev) => ({
+                ...prev,
+                [rId]: {
+                  roleId: rId,
+                  label: String(d.label || DEFAULT_ROLE_CONFIGS[rId].label),
+                  start: String(d.start || DEFAULT_START),
+                  ndays: Number(d.ndays || 25),
+                  ...(typeof d.openUntilMonth === 'string' && /^\d{4}-\d{2}$/.test(d.openUntilMonth)
+                    ? { openUntilMonth: d.openUntilMonth }
+                    : {}),
+                  ...(unlockedPastMonths.length > 0 ? { unlockedPastMonths } : {}),
+                  tasks: Array.isArray(d.tasks) ? d.tasks : [],
+                  outlets: Array.isArray(d.outlets) ? d.outlets : [],
+                },
+              }));
+            }
+          },
+          (error) => handleFirestoreError(error, OperationType.GET, cfgPath)
+        )
+      );
+    }
+
+    const canAccessAllRecordsAndEvents =
+      currentAccount.role === 'admin' || currentAccount.role === 'accounting';
+
+    const eventsQuery = canAccessAllRecordsAndEvents
+      ? query(collection(db, 'calendarEvents'), orderBy('date', 'asc'))
+      : query(
+          collection(db, 'calendarEvents'),
+          where('visibleTo', 'array-contains', currentAccount.role)
+        );
+
+    unsubs.push(
+      onSnapshot(
+        eventsQuery,
+        (snap) => {
+          const list: CalendarEvent[] = snap.docs
+            .map((docSnap) => {
+              const d = docSnap.data();
+              const createdAtIso =
+                d.createdAt instanceof Timestamp
+                  ? d.createdAt.toDate().toISOString()
+                  : undefined;
+              const updatedAtIso =
+                d.updatedAt instanceof Timestamp
+                  ? d.updatedAt.toDate().toISOString()
+                  : undefined;
+              return {
+                id: docSnap.id,
+                title: String(d.title || ''),
+                date: String(d.date || ''),
+                startTime: String(d.startTime || '08:00'),
+                visibleTo: normalizeCalendarVisibleTo(
+                  Array.isArray(d.visibleTo) ? (d.visibleTo as OperationalRoleId[]) : []
+                ),
+                notes: String(d.notes || ''),
+                createdBy: String(d.createdBy || ''),
+                updatedBy: String(d.updatedBy || ''),
+                createdByEmail: String(d.createdByEmail || ''),
+                createdByName: String(d.createdByName || ''),
+                createdAtIso,
+                updatedAtIso,
+              };
+            })
+            .sort(
+              (a, b) =>
+                a.date.localeCompare(b.date) ||
+                a.startTime.localeCompare(b.startTime) ||
+                a.title.localeCompare(b.title)
+            );
+          setCalendarEvents(list);
+        },
+        (error) => handleFirestoreError(error, OperationType.LIST, 'calendarEvents')
+      )
+    );
+
+    const recordsQuery = canAccessAllRecordsAndEvents
+      ? query(collection(db, 'savedRecords'), orderBy('date', 'desc'), limit(500))
+      : query(
+          collection(db, 'savedRecords'),
+          where('department', '==', currentAccount.role)
+        );
+
+    unsubs.push(
+      onSnapshot(
+        recordsQuery,
+        (snap) => {
+          const list: SavedRecord[] = snap.docs
+            .map((docSnap) => {
+              const d = docSnap.data();
+              const createdAtIso =
+                d.createdAt instanceof Timestamp
+                  ? d.createdAt.toDate().toISOString()
+                  : undefined;
+              const updatedAtIso =
+                d.updatedAt instanceof Timestamp
+                  ? d.updatedAt.toDate().toISOString()
+                  : undefined;
+              return {
+                id: docSnap.id,
+                refCode: String(d.refCode || docSnap.id),
+                prefix: (d.prefix === 'GL' ? 'GL' : 'SA') as RecordPrefix,
+                yymm: String(d.yymm || ''),
+                department: (d.department === 'gl' ? 'gl' : 'stock_accounting') as RecordDepartment,
+                date: String(d.date || ''),
+                pic: String(d.pic || ''),
+                outlet: String(d.outlet || ''),
+                summary: String(d.summary || ''),
+                notes: String(d.notes || ''),
+                createdBy: String(d.createdBy || ''),
+                updatedBy: String(d.updatedBy || ''),
+                createdByEmail: String(d.createdByEmail || ''),
+                createdByName: String(d.createdByName || ''),
+                createdAtIso,
+                updatedAtIso,
+              };
+            })
+            .sort(
+              (a, b) =>
+                b.date.localeCompare(a.date) || b.refCode.localeCompare(a.refCode)
+            );
+          setSavedRecords(list);
+        },
+        (error) => handleFirestoreError(error, OperationType.LIST, 'savedRecords')
+      )
+    );
+
+    return () => {
+      unsubs.forEach((u) => u());
+    };
+  }, [authStatus, currentAccount]);
 
   // Admin-only listeners: all 3 roleConfigs + all legacy/monthly workspaces + adminRegistry + inputLogs
   useEffect(() => {
@@ -549,6 +713,9 @@ export function useAuthAndRoleData() {
                 name: String(val.name || ''),
                 role: (val.role as AccountRole) || 'stock_accounting',
                 picName: String(val.picName || ''),
+                ...(val.refPrefix === 'SA' || val.refPrefix === 'GL'
+                  ? { refPrefix: val.refPrefix as RecordPrefix }
+                  : {}),
                 active: Boolean(val.active),
               }))
               .sort((a, b) => a.role.localeCompare(b.role) || a.name.localeCompare(b.name));
@@ -699,6 +866,16 @@ export function useAuthAndRoleData() {
       totalDocs += effectiveLogCount;
     }
 
+    for (const evt of calendarEvents) {
+      usedBytes += estimateFirestoreDocBytes(`calendarEvents/${evt.id}`, evt);
+      totalDocs += 1;
+    }
+
+    for (const rec of savedRecords) {
+      usedBytes += estimateFirestoreDocBytes(`savedRecords/${rec.id}`, rec);
+      totalDocs += 1;
+    }
+
     const limitBytes = FIRESTORE_SPARK_LIMIT_BYTES;
     const remainingBytes = Math.max(0, limitBytes - usedBytes);
     const usedPercent = Math.min(100, (usedBytes / limitBytes) * 100);
@@ -717,6 +894,8 @@ export function useAuthAndRoleData() {
     managedAccounts,
     inputLogs,
     totalInputLogCount,
+    calendarEvents,
+    savedRecords,
   ]);
 
   const signInWithGoogle = useCallback(async () => {
@@ -1291,6 +1470,7 @@ export function useAuthAndRoleData() {
       name: string;
       role: AccountRole;
       picName: string;
+      refPrefix?: RecordPrefix;
       active: boolean;
     }) => {
       const uid = auth.currentUser?.uid;
@@ -1304,12 +1484,17 @@ export function useAuthAndRoleData() {
         const existingSnap = await getDoc(accRef);
         const cleanName = input.name.trim().slice(0, 80);
         const cleanPic = input.picName.trim().slice(0, 60);
+        const validRefPrefix =
+          input.role === 'accounting' && (input.refPrefix === 'SA' || input.refPrefix === 'GL')
+            ? input.refPrefix
+            : undefined;
 
         if (existingSnap.exists()) {
           await updateDoc(accRef, {
             name: cleanName,
             role: input.role,
             picName: cleanPic,
+            refPrefix: validRefPrefix ? validRefPrefix : deleteField(),
             active: input.active,
             updatedAt: serverTimestamp(),
           });
@@ -1319,6 +1504,7 @@ export function useAuthAndRoleData() {
             name: cleanName,
             role: input.role,
             picName: cleanPic,
+            ...(validRefPrefix ? { refPrefix: validRefPrefix } : {}),
             active: input.active,
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
@@ -1338,6 +1524,7 @@ export function useAuthAndRoleData() {
               name: cleanName,
               role: input.role,
               picName: cleanPic,
+              ...(validRefPrefix ? { refPrefix: validRefPrefix } : {}),
               active: input.active,
             },
           },
@@ -1501,6 +1688,285 @@ export function useAuthAndRoleData() {
     }
   }, [effectiveRoleId, activeMonth]);
 
+  const createCalendarEvent = useCallback(
+    async (input: {
+      title: string;
+      date: string;
+      startTime: string;
+      visibleTo: OperationalRoleId[];
+      notes: string;
+    }) => {
+      const uid = auth.currentUser?.uid;
+      const email = (currentAccount?.email || auth.currentUser?.email || '').trim().toLowerCase();
+      if (!uid || !email || !currentAccount) {
+        throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
+      }
+      if (currentAccount.role !== 'admin' && currentAccount.role !== 'accounting') {
+        throw new Error('Hanya Accounting atau Admin yang dapat membuat event kalender.');
+      }
+      const cleanTitle = input.title.trim().slice(0, 120);
+      if (!cleanTitle) {
+        throw new Error('Judul event wajib diisi.');
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) {
+        throw new Error('Tanggal event tidak valid.');
+      }
+      if (!isValidCalendarStartTime(input.startTime)) {
+        throw new Error('Jam mulai hanya diperbolehkan antara 08:00 hingga 19:00 (kelipatan 30 menit).');
+      }
+      const visibleTo = normalizeCalendarVisibleTo(input.visibleTo);
+      if (visibleTo.length === 0) {
+        throw new Error('Pilih minimal satu departemen penerima tampilan event.');
+      }
+
+      const eventId = `evt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const evtPath = `calendarEvents/${eventId}`;
+      try {
+        await setDoc(doc(db, 'calendarEvents', eventId), {
+          title: cleanTitle,
+          date: input.date,
+          startTime: input.startTime,
+          visibleTo,
+          notes: (input.notes || '').trim().slice(0, 500),
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          createdBy: uid,
+          updatedBy: uid,
+          createdByEmail: email.slice(0, 120),
+          createdByName: (currentAccount.name || email).slice(0, 80),
+        });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.CREATE, evtPath);
+      }
+      return eventId;
+    },
+    [currentAccount]
+  );
+
+  const updateCalendarEvent = useCallback(
+    async (
+      eventId: string,
+      input: {
+        title: string;
+        date: string;
+        startTime: string;
+        visibleTo: OperationalRoleId[];
+        notes: string;
+      }
+    ) => {
+      const uid = auth.currentUser?.uid;
+      if (!uid || !currentAccount) {
+        throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
+      }
+      if (currentAccount.role !== 'admin' && currentAccount.role !== 'accounting') {
+        throw new Error('Hanya Accounting atau Admin yang dapat mengubah event kalender.');
+      }
+      const cleanTitle = input.title.trim().slice(0, 120);
+      if (!cleanTitle) {
+        throw new Error('Judul event wajib diisi.');
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) {
+        throw new Error('Tanggal event tidak valid.');
+      }
+      if (!isValidCalendarStartTime(input.startTime)) {
+        throw new Error('Jam mulai hanya diperbolehkan antara 08:00 hingga 19:00 (kelipatan 30 menit).');
+      }
+      const visibleTo = normalizeCalendarVisibleTo(input.visibleTo);
+      if (visibleTo.length === 0) {
+        throw new Error('Pilih minimal satu departemen penerima tampilan event.');
+      }
+
+      const evtPath = `calendarEvents/${eventId}`;
+      try {
+        await updateDoc(doc(db, 'calendarEvents', eventId), {
+          title: cleanTitle,
+          date: input.date,
+          startTime: input.startTime,
+          visibleTo,
+          notes: (input.notes || '').trim().slice(0, 500),
+          updatedAt: serverTimestamp(),
+          updatedBy: uid,
+        });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, evtPath);
+      }
+    },
+    [currentAccount]
+  );
+
+  const deleteCalendarEvent = useCallback(
+    async (eventId: string) => {
+      const uid = auth.currentUser?.uid;
+      if (!uid || !currentAccount) {
+        throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
+      }
+      if (currentAccount.role !== 'admin' && currentAccount.role !== 'accounting') {
+        throw new Error('Hanya Accounting atau Admin yang dapat menghapus event kalender.');
+      }
+      const evtPath = `calendarEvents/${eventId}`;
+      try {
+        await deleteDoc(doc(db, 'calendarEvents', eventId));
+      } catch (error) {
+        handleFirestoreError(error, OperationType.DELETE, evtPath);
+      }
+    },
+    [currentAccount]
+  );
+
+  const createSavedRecord = useCallback(
+    async (input: {
+      date: string;
+      pic: string;
+      outlet: string;
+      summary?: string;
+      notes?: string;
+    }) => {
+      const uid = auth.currentUser?.uid;
+      const email = (currentAccount?.email || auth.currentUser?.email || '').trim().toLowerCase();
+      if (!uid || !email || !currentAccount) {
+        throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
+      }
+      if (currentAccount.role !== 'admin' && currentAccount.role !== 'accounting') {
+        throw new Error('Hanya Accounting atau Admin yang dapat menambahkan data tersimpan.');
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) {
+        throw new Error('Tanggal wajib diisi dengan format yang valid.');
+      }
+      const cleanPic = input.pic.trim().slice(0, 60);
+      const cleanOutlet = input.outlet.trim().slice(0, 40);
+      if (!cleanPic) {
+        throw new Error('Nama PIC wajib diisi.');
+      }
+      if (!cleanOutlet) {
+        throw new Error('Outlet wajib dipilih dari daftar.');
+      }
+
+      const { prefix, department } = resolveAuthorizedRecordPrefix(currentAccount, effectiveRoleId);
+      const yymm = formatYymmFromIsoDate(input.date);
+      const counterId = `${prefix}_${yymm}`;
+      const counterRef = doc(db, 'recordCounters', counterId);
+
+      let generatedRefCode = '';
+      const path = `savedRecords/${prefix}${yymm}XXXX`;
+      try {
+        await runTransaction(db, async (tx) => {
+          const counterSnap = await tx.get(counterRef);
+          const nextSeq = counterSnap.exists()
+            ? Number(counterSnap.data().seq || 0) + 1
+            : 1;
+          generatedRefCode = formatReferenceCode(prefix, yymm, nextSeq);
+          const recordRef = doc(db, 'savedRecords', generatedRefCode);
+
+          if (!counterSnap.exists()) {
+            tx.set(counterRef, {
+              prefix,
+              yymm,
+              seq: nextSeq,
+              updatedAt: serverTimestamp(),
+              updatedBy: uid,
+            });
+          } else {
+            tx.update(counterRef, {
+              seq: nextSeq,
+              updatedAt: serverTimestamp(),
+              updatedBy: uid,
+            });
+          }
+
+          tx.set(recordRef, {
+            refCode: generatedRefCode,
+            prefix,
+            yymm,
+            department,
+            date: input.date,
+            pic: cleanPic,
+            outlet: cleanOutlet,
+            summary: (input.summary || '').trim().slice(0, 200),
+            notes: (input.notes || '').trim().slice(0, 1000),
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+            createdBy: uid,
+            updatedBy: uid,
+            createdByEmail: email.slice(0, 120),
+            createdByName: (currentAccount.name || email).slice(0, 80),
+          });
+        });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.CREATE, path);
+      }
+
+      return generatedRefCode;
+    },
+    [currentAccount, effectiveRoleId]
+  );
+
+  const updateSavedRecord = useCallback(
+    async (
+      recordId: string,
+      input: {
+        date: string;
+        pic: string;
+        outlet: string;
+        summary?: string;
+        notes?: string;
+      }
+    ) => {
+      const uid = auth.currentUser?.uid;
+      if (!uid || !currentAccount) {
+        throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
+      }
+      if (currentAccount.role !== 'admin' && currentAccount.role !== 'accounting') {
+        throw new Error('Hanya Accounting atau Admin yang dapat mengubah data tersimpan.');
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) {
+        throw new Error('Tanggal wajib diisi dengan format yang valid.');
+      }
+      const cleanPic = input.pic.trim().slice(0, 60);
+      const cleanOutlet = input.outlet.trim().slice(0, 40);
+      if (!cleanPic) {
+        throw new Error('Nama PIC wajib diisi.');
+      }
+      if (!cleanOutlet) {
+        throw new Error('Outlet wajib dipilih dari daftar.');
+      }
+
+      const recPath = `savedRecords/${recordId}`;
+      try {
+        await updateDoc(doc(db, 'savedRecords', recordId), {
+          date: input.date,
+          pic: cleanPic,
+          outlet: cleanOutlet,
+          summary: (input.summary || '').trim().slice(0, 200),
+          notes: (input.notes || '').trim().slice(0, 1000),
+          updatedAt: serverTimestamp(),
+          updatedBy: uid,
+        });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, recPath);
+      }
+    },
+    [currentAccount]
+  );
+
+  const deleteSavedRecord = useCallback(
+    async (recordId: string) => {
+      const uid = auth.currentUser?.uid;
+      if (!uid || !currentAccount) {
+        throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
+      }
+      if (currentAccount.role !== 'admin' && currentAccount.role !== 'accounting') {
+        throw new Error('Hanya Accounting atau Admin yang dapat menghapus data tersimpan.');
+      }
+      const recPath = `savedRecords/${recordId}`;
+      try {
+        await deleteDoc(doc(db, 'savedRecords', recordId));
+      } catch (error) {
+        handleFirestoreError(error, OperationType.DELETE, recPath);
+      }
+    },
+    [currentAccount]
+  );
+
   return {
     firebaseUser,
     authStatus,
@@ -1518,6 +1984,8 @@ export function useAuthAndRoleData() {
     allWorkspaces: adminAllWorkspaces,
     managedAccounts,
     inputLogs,
+    calendarEvents,
+    savedRecords,
     firebaseStorage,
     theme,
     toggleTheme,
@@ -1535,5 +2003,11 @@ export function useAuthAndRoleData() {
     deleteAccount,
     importWorkspaceData,
     resetRoleWorkspace,
+    createCalendarEvent,
+    updateCalendarEvent,
+    deleteCalendarEvent,
+    createSavedRecord,
+    updateSavedRecord,
+    deleteSavedRecord,
   };
 }

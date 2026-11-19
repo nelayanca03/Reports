@@ -1,7 +1,7 @@
 import { CheckCircle2, Edit3, Plus, Trash2, XCircle } from 'lucide-react';
 import { FormEvent, useState } from 'react';
 import { BOOTSTRAPPED_ADMIN_EMAIL } from '../firebase';
-import { AccountProfile, AccountRole, OperationalRoleId, RoleConfig } from '../types/outlet';
+import { AccountProfile, AccountRole, OperationalRoleId, RecordPrefix, RoleConfig } from '../types/outlet';
 import { ROLE_LABELS, getPersonList } from '../utils/outletLogic';
 import { ConfirmModal } from './ConfirmModal';
 
@@ -14,6 +14,7 @@ interface AdminAccountsViewProps {
     name: string;
     role: AccountRole;
     picName: string;
+    refPrefix?: RecordPrefix;
     active: boolean;
   }) => Promise<void>;
   onDeleteAccount: (accountId: string) => Promise<void>;
@@ -30,6 +31,7 @@ export function AdminAccountsView({
   const [name, setName] = useState('');
   const [role, setRole] = useState<AccountRole>('stock_accounting');
   const [picName, setPicName] = useState('');
+  const [refPrefix, setRefPrefix] = useState<RecordPrefix>('SA');
   const [active, setActive] = useState(true);
   const [editingEmail, setEditingEmail] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -41,6 +43,7 @@ export function AdminAccountsView({
     setName('');
     setRole('stock_accounting');
     setPicName('');
+    setRefPrefix('SA');
     setActive(true);
     setEditingEmail(null);
   };
@@ -58,6 +61,7 @@ export function AdminAccountsView({
         name: name.trim(),
         role,
         picName: picName.trim().toUpperCase(),
+        ...(role === 'accounting' ? { refPrefix } : {}),
         active,
       });
       setFeedback(
@@ -78,6 +82,7 @@ export function AdminAccountsView({
     setName(acc.name);
     setRole(acc.role);
     setPicName(acc.picName);
+    setRefPrefix(acc.refPrefix || 'SA');
     setActive(acc.active);
     setFeedback(null);
   };
@@ -92,6 +97,7 @@ export function AdminAccountsView({
         name: acc.name,
         role: acc.role,
         picName: acc.picName,
+        ...(acc.role === 'accounting' && acc.refPrefix ? { refPrefix: acc.refPrefix } : {}),
         active: !acc.active,
       });
       setFeedback(
@@ -113,6 +119,7 @@ export function AdminAccountsView({
         name: acc.name,
         role: nextRole,
         picName: acc.picName,
+        ...(nextRole === 'accounting' ? { refPrefix: acc.refPrefix || 'SA' } : {}),
         active: acc.active,
       });
       setFeedback(`Role akun ${acc.email} diubah menjadi ${ROLE_LABELS[nextRole]}.`);
@@ -222,7 +229,7 @@ export function AdminAccountsView({
             </select>
           </div>
 
-          <div className="lg:col-span-2">
+          <div className={role === 'accounting' ? 'lg:col-span-2' : 'lg:col-span-2'}>
             <label
               htmlFor="acc-pic"
               className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
@@ -251,6 +258,26 @@ export function AdminAccountsView({
               ))}
             </datalist>
           </div>
+
+          {role === 'accounting' && (
+            <div className="lg:col-span-2">
+              <label
+                htmlFor="acc-prefix"
+                className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
+              >
+                Prefix Kode Ref
+              </label>
+              <select
+                id="acc-prefix"
+                value={refPrefix}
+                onChange={(e) => setRefPrefix(e.target.value as RecordPrefix)}
+                className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+              >
+                <option value="SA">SA (Stock Accounting)</option>
+                <option value="GL">GL (General Ledger)</option>
+              </select>
+            </div>
+          )}
 
           <div className="flex items-end lg:col-span-2">
             <button

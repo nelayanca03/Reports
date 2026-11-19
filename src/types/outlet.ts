@@ -1,5 +1,7 @@
 export type AccountRole = 'admin' | 'stock_accounting' | 'gl' | 'accounting';
 export type OperationalRoleId = 'stock_accounting' | 'gl' | 'accounting';
+export type RecordPrefix = 'SA' | 'GL';
+export type RecordDepartment = 'stock_accounting' | 'gl';
 export type FormulaType = 'daily_plus_1' | 'memo_month' | 'ref_task';
 export type TaskInputType = 'date' | 'month';
 export type InputLogActionType = 'input_harian' | 'kunjungan';
@@ -38,6 +40,7 @@ export interface AccountProfile {
   name: string;
   role: AccountRole;
   picName: string;
+  refPrefix?: RecordPrefix;
   active: boolean;
 }
 
@@ -138,7 +141,42 @@ export interface FirebaseStorageStats {
   totalDocs: number;
 }
 
+export interface CalendarEvent {
+  id: string;
+  title: string;
+  date: string;
+  startTime: string;
+  visibleTo: OperationalRoleId[];
+  notes: string;
+  createdBy: string;
+  updatedBy: string;
+  createdByEmail: string;
+  createdByName: string;
+  createdAtIso?: string;
+  updatedAtIso?: string;
+}
+
+export interface SavedRecord {
+  id: string;
+  refCode: string;
+  prefix: RecordPrefix;
+  yymm: string;
+  department: RecordDepartment;
+  date: string;
+  pic: string;
+  outlet: string;
+  summary: string;
+  notes: string;
+  createdBy: string;
+  updatedBy: string;
+  createdByEmail: string;
+  createdByName: string;
+  createdAtIso?: string;
+  updatedAtIso?: string;
+}
+
 export type AppView =
+  | 'calendar'
   | 'input'
   | 'rekap'
   | 'kunj'

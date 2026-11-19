@@ -28,6 +28,11 @@
           "maxLength": 60,
           "description": "Optional default PIC identifier assigned to this account"
         },
+        "refPrefix": {
+          "type": "string",
+          "enum": ["SA", "GL"],
+          "description": "Optional department reference prefix authorization for accounting accounts"
+        },
         "active": {
           "type": "boolean",
           "description": "Whether this account is allowed to access the application"
@@ -300,6 +305,205 @@
         "clientTs",
         "createdAt"
       ]
+    },
+    "CalendarEvent": {
+      "title": "CalendarEvent",
+      "description": "Department-scoped calendar event managed by Accounting and Admin",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Event title displayed on calendar grid"
+        },
+        "date": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "maxLength": 10,
+          "description": "Event date in YYYY-MM-DD format"
+        },
+        "startTime": {
+          "type": "string",
+          "pattern": "^(0[89]|1[0-8]):(00|30)|19:00$",
+          "maxLength": 5,
+          "description": "Starting time between 08:00 and 19:00 in 30-minute intervals"
+        },
+        "visibleTo": {
+          "type": "array",
+          "description": "Authorized operational departments allowed to view this event"
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Optional notes and participant list hidden from overview"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "createdBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "updatedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "createdByEmail": {
+          "type": "string",
+          "format": "email",
+          "minLength": 5,
+          "maxLength": 120
+        },
+        "createdByName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        }
+      },
+      "required": [
+        "title",
+        "date",
+        "startTime",
+        "visibleTo",
+        "notes",
+        "createdAt",
+        "updatedAt",
+        "createdBy",
+        "updatedBy",
+        "createdByEmail",
+        "createdByName"
+      ]
+    },
+    "RecordCounter": {
+      "title": "RecordCounter",
+      "description": "Atomic per-department per-month sequence counter for reference code generation",
+      "type": "object",
+      "properties": {
+        "prefix": {
+          "type": "string",
+          "enum": ["SA", "GL"]
+        },
+        "yymm": {
+          "type": "string",
+          "pattern": "^[0-9]{4}$",
+          "maxLength": 4
+        },
+        "seq": {
+          "type": "integer"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": ["prefix", "yymm", "seq", "updatedAt", "updatedBy"]
+    },
+    "SavedRecord": {
+      "title": "SavedRecord",
+      "description": "Saved outlet record with permanent automatic SA/GL reference code",
+      "type": "object",
+      "properties": {
+        "refCode": {
+          "type": "string",
+          "pattern": "^(SA|GL)[0-9]{8,}$",
+          "maxLength": 16
+        },
+        "prefix": {
+          "type": "string",
+          "enum": ["SA", "GL"]
+        },
+        "yymm": {
+          "type": "string",
+          "pattern": "^[0-9]{4}$",
+          "maxLength": 4
+        },
+        "department": {
+          "type": "string",
+          "enum": ["stock_accounting", "gl"]
+        },
+        "date": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "maxLength": 10
+        },
+        "pic": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 60
+        },
+        "outlet": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 40
+        },
+        "summary": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "createdBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "updatedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "createdByEmail": {
+          "type": "string",
+          "format": "email",
+          "minLength": 5,
+          "maxLength": 120
+        },
+        "createdByName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        }
+      },
+      "required": [
+        "refCode",
+        "prefix",
+        "yymm",
+        "department",
+        "date",
+        "pic",
+        "outlet",
+        "summary",
+        "notes",
+        "createdAt",
+        "updatedAt",
+        "createdBy",
+        "updatedBy",
+        "createdByEmail",
+        "createdByName"
+      ]
     }
   },
   "firestore": {
@@ -326,6 +530,18 @@
     "/inputLogs/{logId}": {
       "schema": { "$ref": "#/entities/InputLog" },
       "description": "Immutable history logs of all user daily input and visit submissions, readable only by Admin"
+    },
+    "/calendarEvents/{eventId}": {
+      "schema": { "$ref": "#/entities/CalendarEvent" },
+      "description": "Calendar events created by Accounting/Admin with per-department visibility"
+    },
+    "/recordCounters/{counterId}": {
+      "schema": { "$ref": "#/entities/RecordCounter" },
+      "description": "Atomic sequence counters indexed by SA_YYMM or GL_YYMM"
+    },
+    "/savedRecords/{recordId}": {
+      "schema": { "$ref": "#/entities/SavedRecord" },
+      "description": "Saved outlet records indexed by permanent SA/GL reference code"
     }
   }
 }
