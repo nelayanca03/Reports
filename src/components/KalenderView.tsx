@@ -123,7 +123,7 @@ export function KalenderView({
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(null);
   const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
 
-  // Day overflow popup (> 3 events in a single day)
+  // Day overflow popup (> 4 events in a single day)
   const [dayPopup, setDayPopup] = useState<{
     date: string;
     top: number;
@@ -303,8 +303,11 @@ export function KalenderView({
 
   const activeMonthPrefix = cursorDate.slice(0, 7);
 
+  const monthWeekRowClass =
+    monthGridDays.length > 35 ? 'grid-rows-6' : 'grid-rows-5';
+
   return (
-    <div className="space-y-4">
+    <div className="flex min-h-[calc(100vh-5.5rem)] flex-1 flex-col gap-3">
       {feedback && (
         <div
           role="status"
@@ -412,8 +415,8 @@ export function KalenderView({
 
       {/* MONTHLY VIEW */}
       {viewMode === 'month' && (
-        <section className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-          <div className="grid grid-cols-7 border-b border-slate-200 bg-slate-50/90 dark:border-slate-800 dark:bg-slate-800/60">
+        <section className="flex flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+          <div className="grid shrink-0 grid-cols-7 border-b border-slate-200 bg-slate-50/90 dark:border-slate-800 dark:bg-slate-800/60">
             {WEEKDAY_SHORT.map((dayName, idx) => (
               <div
                 key={dayName}
@@ -428,13 +431,15 @@ export function KalenderView({
             ))}
           </div>
 
-          <div className="grid grid-cols-7 divide-x divide-y divide-slate-200 dark:divide-slate-800">
+          <div
+            className={`grid flex-1 grid-cols-7 ${monthWeekRowClass} divide-x divide-y divide-slate-200 dark:divide-slate-800`}
+          >
             {monthGridDays.map((dayIso) => {
               const isCurrentMonth = dayIso.slice(0, 7) === activeMonthPrefix;
               const isToday = dayIso === today;
               const dayNum = Number(dayIso.slice(8, 10));
               const dayEvents = eventsByDate.get(dayIso) || [];
-              const maxShow = 3;
+              const maxShow = 4;
               const shownEvents = dayEvents.slice(0, maxShow);
               const extraCount = Math.max(0, dayEvents.length - maxShow);
 
@@ -445,13 +450,13 @@ export function KalenderView({
                   onClick={() => {
                     if (canManage) openCreateModal(dayIso);
                   }}
-                  className={`min-h-[104px] p-1.5 transition-colors sm:min-h-[120px] sm:p-2 ${
+                  className={`flex min-h-[144px] flex-col p-1.5 transition-colors sm:p-2 ${
                     isCurrentMonth
                       ? 'bg-white dark:bg-slate-900'
                       : 'bg-slate-50/70 dark:bg-slate-950/60'
                   } ${canManage ? 'cursor-pointer hover:bg-slate-50/80 dark:hover:bg-slate-800/30' : ''}`}
                 >
-                  <div className="flex items-center justify-between">
+                  <div className="flex shrink-0 items-center justify-between">
                     <span
                       className={`inline-flex h-6 w-6 items-center justify-center rounded-full font-mono text-xs font-semibold tabular-nums ${
                         isToday
@@ -465,7 +470,7 @@ export function KalenderView({
                     </span>
                   </div>
 
-                  <div className="mt-1.5 space-y-1">
+                  <div className="mt-1 space-y-0.5">
                     {shownEvents.map((evt) => (
                       <button
                         key={evt.id}
@@ -474,7 +479,7 @@ export function KalenderView({
                           e.stopPropagation();
                           setSelectedEvent(evt);
                         }}
-                        className="flex w-full items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50/90 px-1.5 py-1 text-left text-[11px] leading-tight text-slate-900 transition-colors hover:border-blue-400 hover:bg-blue-100/80 dark:border-blue-800/70 dark:bg-blue-950/50 dark:text-slate-100 dark:hover:bg-blue-900/60"
+                        className="flex w-full items-center gap-1.5 rounded-md border border-blue-200 bg-blue-50/90 px-1.5 py-[3px] text-left text-[11px] leading-tight text-slate-900 transition-colors hover:border-blue-400 hover:bg-blue-100/80 dark:border-blue-800/70 dark:bg-blue-950/50 dark:text-slate-100 dark:hover:bg-blue-900/60"
                       >
                         <span className="shrink-0 font-mono text-[10px] font-semibold text-blue-800 tabular-nums dark:text-blue-400">
                           {evt.startTime}
@@ -502,8 +507,8 @@ export function KalenderView({
 
       {/* WEEKLY VIEW (08:00 - 19:00) */}
       {viewMode === 'week' && (
-        <section className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-          <div className="overflow-x-auto">
+        <section className="flex flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+          <div className="flex-1 overflow-auto">
             <div className="min-w-[780px]">
               {/* Day Headers */}
               <div className="grid grid-cols-[72px_repeat(7,minmax(0,1fr))] border-b border-slate-200 bg-slate-50/90 dark:border-slate-800 dark:bg-slate-800/60">
@@ -612,8 +617,8 @@ export function KalenderView({
 
       {/* DAILY VIEW (08:00 - 19:00) */}
       {viewMode === 'day' && (
-        <section className="overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-          <div className="flex items-center justify-between border-b border-slate-200 bg-slate-50/90 px-4 py-3 dark:border-slate-800 dark:bg-slate-800/60">
+        <section className="flex flex-1 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
+          <div className="flex shrink-0 items-center justify-between border-b border-slate-200 bg-slate-50/90 px-4 py-3 dark:border-slate-800 dark:bg-slate-800/60">
             <div className="flex items-center gap-2">
               <CalendarIcon className="h-4 w-4 text-blue-700 dark:text-blue-400" />
               <span className="text-sm font-semibold text-slate-900 dark:text-slate-100">
@@ -630,7 +635,7 @@ export function KalenderView({
             </span>
           </div>
 
-          <div className="divide-y divide-slate-100 dark:divide-slate-800">
+          <div className="flex-1 divide-y divide-slate-100 overflow-y-auto dark:divide-slate-800">
             {CALENDAR_TIME_SLOTS.map((slot) => {
               const slotEvents = (eventsByDate.get(cursorDate) || []).filter(
                 (evt) => evt.startTime === slot
@@ -681,7 +686,7 @@ export function KalenderView({
         </section>
       )}
 
-      {/* DAY EVENTS OVERFLOW POP-UP (> 3 events) */}
+      {/* DAY EVENTS OVERFLOW POP-UP (> 4 events) */}
       {dayPopup && (() => {
         const popupEvents = eventsByDate.get(dayPopup.date) || [];
         const parsedDay = parseUtcDate(dayPopup.date);
@@ -824,15 +829,17 @@ export function KalenderView({
                 </div>
               </div>
 
-              <div className="flex items-center gap-3 text-slate-700 dark:text-slate-200">
-                <Users className="h-4 w-4 shrink-0 text-blue-700 dark:text-blue-400" />
-                <div>
-                  <span className="text-xs text-slate-500 dark:text-slate-400">Tampil Untuk: </span>
-                  <span className="font-semibold">
-                    {formatCalendarVisibleLabel(selectedEvent.visibleTo)}
-                  </span>
+              {canManage && (
+                <div className="flex items-center gap-3 text-slate-700 dark:text-slate-200">
+                  <Users className="h-4 w-4 shrink-0 text-blue-700 dark:text-blue-400" />
+                  <div>
+                    <span className="text-xs text-slate-500 dark:text-slate-400">Tampil Untuk: </span>
+                    <span className="font-semibold">
+                      {formatCalendarVisibleLabel(selectedEvent.visibleTo)}
+                    </span>
+                  </div>
                 </div>
-              </div>
+              )}
 
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3.5 dark:border-slate-800 dark:bg-slate-800/50">
                 <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">

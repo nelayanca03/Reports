@@ -1,8 +1,15 @@
 import { ArrowUpRight, Check, Lock, Minus, Plus, Save, Trash2 } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
-import { OutletStoreState, RoleConfig, VisitEntry, VisitItem } from '../types/outlet';
+import {
+  AccountProfile,
+  OutletStoreState,
+  RoleConfig,
+  VisitEntry,
+  VisitItem,
+} from '../types/outlet';
 import {
   calcVisitLeaderboard,
+  canAccountEditPic,
   fmtDate,
   fmtDateFull,
   fmtDateLong,
@@ -12,10 +19,13 @@ import {
   getVisitEntries,
   isSunday,
   nearestWorkingDay,
+  resolveAccountPic,
   todayIso,
 } from '../utils/outletLogic';
 
 interface KunjunganViewProps {
+  account: AccountProfile;
+  isAdmin: boolean;
   config: RoleConfig;
   store: OutletStoreState;
   days: string[];
@@ -76,6 +86,8 @@ function makeVisitRowId(): string {
 }
 
 export function KunjunganView({
+  account,
+  isAdmin,
   config,
   store,
   days,
@@ -87,9 +99,14 @@ export function KunjunganView({
   const personList = getPersonList(config.outlets);
   const peopleMap = getPeopleMap(config.outlets);
   const allOutlets = Array.from(new Set(config.outlets.map((o) => o.code)));
+  const ownPic = resolveAccountPic(account, config.outlets);
 
   const [visitPerson, setVisitPerson] = useState<string>(() =>
-    selectedPerson && personList.includes(selectedPerson) ? selectedPerson : personList[0] || ''
+    ownPic && personList.includes(ownPic)
+      ? ownPic
+      : selectedPerson && personList.includes(selectedPerson)
+        ? selectedPerson
+        : personList[0] || ''
   );
   const [visitDay, setVisitDay] = useState<string>(() => nearestWorkingDay(days, today));
 
@@ -107,13 +124,30 @@ export function KunjunganView({
   isDirtyRef.current = isDirty;
   savingRef.current = saving;
 
+  const lastAccountIdRef = useRef<string>(account.id);
   useEffect(() => {
+    if (lastAccountIdRef.current !== account.id) {
+      lastAccountIdRef.current = account.id;
+      const nextOwn = resolveAccountPic(account, config.outlets);
+      if (nextOwn && personList.includes(nextOwn)) {
+        setVisitPerson(nextOwn);
+      } else if (selectedPerson && personList.includes(selectedPerson)) {
+        setVisitPerson(selectedPerson);
+      } else if (personList.length > 0) {
+        setVisitPerson(personList[0]);
+      }
+      return;
+    }
     if (personList.length > 0 && !personList.includes(visitPerson)) {
       setVisitPerson(
-        selectedPerson && personList.includes(selectedPerson) ? selectedPerson : personList[0]
+        ownPic && personList.includes(ownPic)
+          ? ownPic
+          : selectedPerson && personList.includes(selectedPerson)
+            ? selectedPerson
+            : personList[0]
       );
     }
-  }, [personList, selectedPerson, visitPerson]);
+  }, [account, config.outlets, ownPic, personList, selectedPerson, visitPerson]);
 
   useEffect(() => {
     if (days.length > 0 && !days.includes(visitDay)) {
@@ -184,8 +218,9 @@ export function KunjunganView({
 
   const todayIsSunday = isSunday(today);
   const isTodayWorkingDay = days.includes(today) && !todayIsSunday;
+  const isPicOwner = isAdmin || canAccountEditPic(account, config.outlets, activePerson);
   const canEditSelectedCell =
-    !isSunday(activeDay) && activeDay === today && isTodayWorkingDay;
+    isPicOwner && !isSunday(activeDay) && activeDay === today && isTodayWorkingDay;
 
   const incompleteRows = draftOk
     ? draftEntries.filter((e) => !e.outlet.trim() || !e.f.trim() || !e.t.trim())
@@ -411,6 +446,7 @@ export function KunjunganView({
               value={activePerson}
               onChange={(e) => {
                 setSavedNotice(null);
+                setSaveError(null);
                 setVisitPerson(e.target.value);
               }}
               className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
@@ -424,7 +460,37 @@ export function KunjunganView({
           </div>
         </div>
 
-        {!canEditSelectedCell && (
+        {!isPicOwner && (
+          <div
+            role="status"
+            className="mb-4 flex flex-wrap items-center justify-between gap-2.5 rounded-lg border border-amber-200 bg-amber-50/80 px-3.5 py-2.5 text-xs text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/35 dark:text-amber-200"
+          >
+            <div className="flex items-center gap-2">
+              <Lock className="h-3.5 w-3.5 shrink-0 text-amber-700 dark:text-amber-400" />
+              <span>
+                <span className="font-semibold">Akses Terkunci — Kunjungan {activePerson}</span> ·{' '}
+                {ownPic && personList.includes(ownPic)
+                  ? `Akun Anda (${account.name} · ${ownPic}) hanya dapat mengisi kunjungan atas nama ${ownPic}.`
+                  : `Akun Anda belum dipasangkan ke nama PIC pada ${config.label}, sehingga pengisian kunjungan dikunci.`}
+              </span>
+            </div>
+            {ownPic && personList.includes(ownPic) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setSavedNotice(null);
+                  setSaveError(null);
+                  setVisitPerson(ownPic);
+                }}
+                className="min-h-[32px] shrink-0 whitespace-nowrap rounded-lg bg-amber-700 px-3 py-1 text-xs font-semibold text-white transition-colors hover:bg-amber-800 dark:bg-amber-600 dark:hover:bg-amber-500"
+              >
+                Buka Kunjungan {ownPic}
+              </button>
+            )}
+          </div>
+        )}
+
+        {isPicOwner && !canEditSelectedCell && (
           <div className="mb-4 flex items-center gap-2 rounded-lg border border-slate-300 bg-slate-100 px-3 py-2 text-xs text-slate-700 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-300">
             <Lock className="h-3.5 w-3.5 shrink-0 text-slate-500 dark:text-slate-400" />
             <span>

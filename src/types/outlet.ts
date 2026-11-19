@@ -180,7 +180,6 @@ export type AppView =
   | 'input'
   | 'rekap'
   | 'kunj'
-  | 'data'
   | 'admin_tasks'
   | 'admin_accounts'
   | 'admin_logs';

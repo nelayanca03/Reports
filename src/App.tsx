@@ -1,8 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AdminAccountsView } from './components/AdminAccountsView';
 import { AdminLogsView } from './components/AdminLogsView';
 import { AdminTasksOutletsView } from './components/AdminTasksOutletsView';
-import { DataEksporView } from './components/DataEksporView';
 import { InputHarianView } from './components/InputHarianView';
 import { KalenderView } from './components/KalenderView';
 import { KunjunganView } from './components/KunjunganView';
@@ -22,6 +21,7 @@ import {
   getPeopleMap,
   getPersonList,
   nearestWorkingDay,
+  resolveAccountPic,
   todayIso,
   yesterdayIso,
 } from './utils/outletLogic';
@@ -80,37 +80,49 @@ export default function App() {
   const [selectedTask, setSelectedTask] = useState<string>('memo');
   const [recapDate, setRecapDate] = useState<string>(() => todayIso());
 
+  const accountId = currentAccount?.id || '';
+  const lastSyncedAccountIdRef = useRef<string>('');
+
   // Sync valid person/outlet/task/day when role config or account changes
   useEffect(() => {
     const personList = getPersonList(activeConfig.outlets);
     const peopleMap = getPeopleMap(activeConfig.outlets);
 
+    if (!accountId) {
+      lastSyncedAccountIdRef.current = '';
+    }
+    const accountChanged = Boolean(accountId && lastSyncedAccountIdRef.current !== accountId);
+    if (accountChanged) {
+      lastSyncedAccountIdRef.current = accountId;
+    }
+
     if (personList.length > 0) {
+      const ownPic = resolveAccountPic(currentAccount, activeConfig.outlets);
       let nextPerson = selectedPerson;
-      if (!nextPerson || !personList.includes(nextPerson)) {
-        const matchedByPic = currentAccount?.picName
-          ? personList.find(
-              (p) => p.toUpperCase() === currentAccount.picName.trim().toUpperCase()
-            )
-          : undefined;
-        const matchedByName = currentAccount?.name
-          ? personList.find(
-              (p) => p.toUpperCase() === currentAccount.name.trim().toUpperCase()
-            )
-          : undefined;
-        nextPerson = matchedByPic || matchedByName || personList[0];
-        setSelectedPerson(nextPerson);
+      if (accountChanged || !nextPerson || !personList.includes(nextPerson)) {
+        nextPerson =
+          ownPic && personList.includes(ownPic)
+            ? ownPic
+            : personList[0];
+        if (nextPerson !== selectedPerson) {
+          setSelectedPerson(nextPerson);
+        }
       }
 
       const outletsForPerson = peopleMap[nextPerson] || [];
-      if (outletsForPerson.length > 0 && !outletsForPerson.includes(selectedOutlet)) {
-        setSelectedOutlet(outletsForPerson[0]);
+      if (
+        outletsForPerson.length > 0 &&
+        (accountChanged || !outletsForPerson.includes(selectedOutlet))
+      ) {
+        if (outletsForPerson[0] !== selectedOutlet) {
+          setSelectedOutlet(outletsForPerson[0]);
+        }
       }
     } else {
-      setSelectedPerson('');
-      setSelectedOutlet('');
+      if (selectedPerson) setSelectedPerson('');
+      if (selectedOutlet) setSelectedOutlet('');
     }
-  }, [activeConfig.outlets, currentAccount?.name, currentAccount?.picName, selectedPerson, selectedOutlet]);
+  }, [accountId, activeConfig.outlets, currentAccount, selectedPerson, selectedOutlet]);
 
   useEffect(() => {
     if (
@@ -146,7 +158,6 @@ export default function App() {
   }, [days, selectedDay, activeMonth, recapDate]);
 
   // Reset to Kalender when user logs in
-  const accountId = currentAccount?.id || '';
   useEffect(() => {
     if (authStatus === 'ready' && accountId) {
       setActiveView('calendar');
@@ -258,7 +269,13 @@ export default function App() {
           onQuickExportCsv={handleQuickExportCsv}
         />
 
-        <main className="mx-auto w-full max-w-[1200px] flex-1 p-4 sm:p-6">
+        <main
+          className={
+            activeView === 'calendar'
+              ? 'flex w-full flex-1 flex-col p-3 sm:p-4'
+              : 'mx-auto w-full max-w-[1200px] flex-1 p-4 sm:p-6'
+          }
+        >
           {activeView === 'calendar' && (
             <KalenderView
               account={currentAccount}
@@ -271,9 +288,17 @@ export default function App() {
 
           {activeView === 'input' && (
             <InputHarianView
+              account={currentAccount}
+              activeRoleId={activeRoleId}
               config={activeConfig}
+              roleConfigs={roleConfigs}
               store={store}
+              allWorkspaces={allWorkspaces}
+              inputLogs={inputLogs}
+              savedRecords={savedRecords}
               days={days}
+              activeMonth={activeMonth}
+              selectableMonths={selectableMonths}
               isAdmin={isAdmin}
               selectedPerson={selectedPerson}
               selectedOutlet={selectedOutlet}
@@ -282,6 +307,11 @@ export default function App() {
               onChangeOutlet={setSelectedOutlet}
               onChangeDay={setSelectedDay}
               onSaveOutletDay={saveOutletDayEntries}
+              onCreateSavedRecord={createSavedRecord}
+              onUpdateSavedRecord={updateSavedRecord}
+              onDeleteSavedRecord={deleteSavedRecord}
+              onImportStore={importWorkspaceData}
+              onResetAllData={resetRoleWorkspace}
               onOpenAdminConfig={() => setActiveView('admin_tasks')}
             />
           )}
@@ -301,35 +331,14 @@ export default function App() {
 
           {activeView === 'kunj' && (
             <KunjunganView
+              account={currentAccount}
+              isAdmin={isAdmin}
               config={activeConfig}
               store={store}
               days={days}
               selectedPerson={selectedPerson}
               onSaveVisitDay={saveVisitDay}
               onJumpToInput={handleJumpToInput}
-            />
-          )}
-
-          {activeView === 'data' && (
-            <DataEksporView
-              account={currentAccount}
-              activeRoleId={activeRoleId}
-              config={activeConfig}
-              roleConfigs={roleConfigs}
-              store={store}
-              allWorkspaces={allWorkspaces}
-              inputLogs={inputLogs}
-              savedRecords={savedRecords}
-              days={days}
-              activeMonth={activeMonth}
-              selectableMonths={selectableMonths}
-              isAdmin={isAdmin}
-              selectedDay={selectedDay}
-              onCreateSavedRecord={createSavedRecord}
-              onUpdateSavedRecord={updateSavedRecord}
-              onDeleteSavedRecord={deleteSavedRecord}
-              onImportStore={importWorkspaceData}
-              onResetAllData={resetRoleWorkspace}
             />
           )}
 

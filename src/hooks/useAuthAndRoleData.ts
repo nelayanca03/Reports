@@ -50,6 +50,8 @@ import {
   FIRESTORE_SPARK_LIMIT_BYTES,
   LEGACY_STORAGE_KEY,
   buildMonthWorkingDays,
+  buildOutletsByPicMap,
+  canAccountEditPic,
   canEditOutletDay,
   currentMonthKey,
   estimateFirestoreDocBytes,
@@ -287,7 +289,17 @@ export function useAuthAndRoleData() {
           const base = DEFAULT_ROLE_CONFIGS[rId];
           await setDoc(cfgRef, {
             ...base,
+            outletsByPic: buildOutletsByPicMap(base.outlets),
             start: rId === 'stock_accounting' && legacy?.start ? legacy.start : base.start,
+            updatedAt: serverTimestamp(),
+            updatedBy: user.uid,
+          });
+        } else if (!cfgSnap.data().outletsByPic) {
+          const existingOutlets = Array.isArray(cfgSnap.data().outlets)
+            ? cfgSnap.data().outlets
+            : [];
+          await updateDoc(cfgRef, {
+            outletsByPic: buildOutletsByPicMap(existingOutlets),
             updatedAt: serverTimestamp(),
             updatedBy: user.uid,
           });
@@ -626,6 +638,14 @@ export function useAuthAndRoleData() {
             if (snap.exists()) {
               const d = snap.data();
               const unlockedPastMonths = parseUnlockedPastMonths(d.unlockedPastMonths);
+              const parsedOutlets = Array.isArray(d.outlets) ? d.outlets : [];
+              if (!d.outletsByPic && auth.currentUser?.uid) {
+                void updateDoc(doc(db, 'roleConfigs', rId), {
+                  outletsByPic: buildOutletsByPicMap(parsedOutlets),
+                  updatedAt: serverTimestamp(),
+                  updatedBy: auth.currentUser.uid,
+                }).catch(() => {});
+              }
               setRoleConfigs((prev) => ({
                 ...prev,
                 [rId]: {
@@ -638,7 +658,7 @@ export function useAuthAndRoleData() {
                     : {}),
                   ...(unlockedPastMonths.length > 0 ? { unlockedPastMonths } : {}),
                   tasks: Array.isArray(d.tasks) ? d.tasks : [],
-                  outlets: Array.isArray(d.outlets) ? d.outlets : [],
+                  outlets: parsedOutlets,
                 },
               }));
             }
@@ -944,6 +964,12 @@ export function useAuthAndRoleData() {
       if (!uid) {
         throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
       }
+      const outletOwner = activeConfig.outlets.find((o) => o.code === outlet)?.person || '';
+      if (!canAccountEditPic(currentAccount, activeConfig.outlets, outletOwner)) {
+        throw new Error(
+          `Akses ditolak: Anda hanya dapat menginput tugas untuk outlet milik PIC Anda sendiri (bukan milik ${outletOwner || 'PIC lain'}).`
+        );
+      }
       const today = todayIso();
       if (
         !canEditOutletDay(
@@ -1029,11 +1055,13 @@ export function useAuthAndRoleData() {
       }
     },
     [
+      currentAccount,
       effectiveRoleId,
       isAdminAccount,
       workspaceData,
       days,
       activeConfig.tasks,
+      activeConfig.outlets,
       canAccessMonthForWrite,
     ]
   );
@@ -1086,6 +1114,12 @@ export function useAuthAndRoleData() {
       const uid = auth.currentUser?.uid;
       if (!uid) {
         throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
+      }
+      const outletOwner = activeConfig.outlets.find((o) => o.code === outlet)?.person || '';
+      if (!canAccountEditPic(currentAccount, activeConfig.outlets, outletOwner)) {
+        throw new Error(
+          `Akses ditolak: Anda hanya dapat menginput tugas untuk outlet milik PIC Anda sendiri (bukan milik ${outletOwner || 'PIC lain'}).`
+        );
       }
       const today = todayIso();
       if (
@@ -1216,6 +1250,7 @@ export function useAuthAndRoleData() {
       }
     },
     [
+      currentAccount,
       effectiveRoleId,
       isAdminAccount,
       workspaceData,
@@ -1232,6 +1267,12 @@ export function useAuthAndRoleData() {
       const uid = auth.currentUser?.uid;
       if (!uid) {
         throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
+      }
+      const outletOwner = activeConfig.outlets.find((o) => o.code === outlet)?.person || '';
+      if (!canAccountEditPic(currentAccount, activeConfig.outlets, outletOwner)) {
+        throw new Error(
+          `Akses ditolak: Anda hanya dapat mengubah data untuk outlet milik PIC Anda sendiri.`
+        );
       }
       if (
         !canEditOutletDay(
@@ -1273,10 +1314,12 @@ export function useAuthAndRoleData() {
       }
     },
     [
+      currentAccount,
       effectiveRoleId,
       isAdminAccount,
       workspaceData,
       activeConfig.tasks,
+      activeConfig.outlets,
       days,
       canAccessMonthForWrite,
     ]
@@ -1287,6 +1330,11 @@ export function useAuthAndRoleData() {
       const uid = auth.currentUser?.uid;
       if (!uid) {
         throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
+      }
+      if (!canAccountEditPic(currentAccount, activeConfig.outlets, person)) {
+        throw new Error(
+          `Akses ditolak: Anda hanya dapat mengisi atau mengubah kunjungan atas nama PIC Anda sendiri (bukan ${person}).`
+        );
       }
       if (isSunday(day) || day !== todayIso()) {
         throw new Error('Kunjungan hanya dapat disimpan pada Hari H (bukan hari Minggu).');
@@ -1382,7 +1430,7 @@ export function useAuthAndRoleData() {
         console.error('Gagal mencatat log kunjungan (data kunjungan tetap tersimpan):', logError);
       }
     },
-    [effectiveRoleId, canAccessMonthForWrite, recordInputLog]
+    [currentAccount, activeConfig.outlets, effectiveRoleId, canAccessMonthForWrite, recordInputLog]
   );
 
   const updateVisit = useCallback(
@@ -1407,6 +1455,7 @@ export function useAuthAndRoleData() {
       (m) => m < curMonth
     );
     try {
+      const boundedOutlets = nextConfig.outlets.slice(0, 100);
       await setDoc(doc(db, 'roleConfigs', roleId), {
         roleId,
         label: nextConfig.label.slice(0, 60),
@@ -1415,7 +1464,8 @@ export function useAuthAndRoleData() {
         ...(validOpenMonth ? { openUntilMonth: validOpenMonth } : {}),
         ...(validUnlockedPast.length > 0 ? { unlockedPastMonths: validUnlockedPast } : {}),
         tasks: nextConfig.tasks.slice(0, 30),
-        outlets: nextConfig.outlets.slice(0, 100),
+        outlets: boundedOutlets,
+        outletsByPic: buildOutletsByPicMap(boundedOutlets),
         updatedAt: serverTimestamp(),
         updatedBy: uid,
       });

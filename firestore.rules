@@ -116,7 +116,7 @@ service cloud.firestore {
 
     function isValidRoleConfig(data) {
       return data.keys().hasAll(['roleId', 'label', 'start', 'ndays', 'tasks', 'outlets', 'updatedAt', 'updatedBy'])
-        && data.keys().hasOnly(['roleId', 'label', 'start', 'ndays', 'openUntilMonth', 'unlockedPastMonths', 'tasks', 'outlets', 'updatedAt', 'updatedBy'])
+        && data.keys().hasOnly(['roleId', 'label', 'start', 'ndays', 'openUntilMonth', 'unlockedPastMonths', 'tasks', 'outlets', 'outletsByPic', 'updatedAt', 'updatedBy'])
         && data.roleId is string && isOperationalRole(data.roleId)
         && data.label is string && data.label.size() >= 2 && data.label.size() <= 60
         && data.start is string && data.start.size() == 10 && data.start.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
@@ -126,6 +126,10 @@ service cloud.firestore {
           data.unlockedPastMonths is list
           && data.unlockedPastMonths.size() <= 24
           && (data.unlockedPastMonths.size() == 0 || isValidMonthKey(data.unlockedPastMonths[0]))
+        ))
+        && (!('outletsByPic' in data) || (
+          data.outletsByPic is map
+          && data.outletsByPic.size() <= 100
         ))
         && data.tasks is list && data.tasks.size() <= 30
         && (data.tasks.size() == 0 || (
@@ -201,6 +205,74 @@ service cloud.firestore {
 
     function canWriteMonth(roleId, monthKey) {
       return isAdmin() || monthKey >= currentWibMonthKey() || isMonthUnlockedForRole(roleId, monthKey);
+    }
+
+    function pad2(n) {
+      return n < 10 ? '0' + string(n) : string(n);
+    }
+
+    function dateKeyFromShiftedTs(ts) {
+      return string(ts.year()) + '-' + pad2(ts.month()) + '-' + pad2(ts.day());
+    }
+
+    function currentWibDateKey() {
+      return dateKeyFromShiftedTs(request.time + duration.value(7, 'h'));
+    }
+
+    function yesterdayWibDateKey() {
+      return dateKeyFromShiftedTs(request.time + duration.value(7, 'h') - duration.value(1, 'd'));
+    }
+
+    function tomorrowWibDateKey() {
+      return dateKeyFromShiftedTs(request.time + duration.value(7, 'h') + duration.value(1, 'd'));
+    }
+
+    function accountPicUpper() {
+      return hasActiveAccount()
+        ? (
+          accountData().picName.trim().size() > 0
+            ? accountData().picName.trim().upper()
+            : accountData().name.trim().upper()
+        )
+        : '';
+    }
+
+    function roleOutletsForPic(roleId) {
+      return accountPicUpper() != ''
+        && exists(/databases/$(database)/documents/roleConfigs/$(roleId))
+        && 'outletsByPic' in get(/databases/$(database)/documents/roleConfigs/$(roleId)).data
+        && get(/databases/$(database)/documents/roleConfigs/$(roleId)).data.outletsByPic is map
+        && accountPicUpper() in get(/databases/$(database)/documents/roleConfigs/$(roleId)).data.outletsByPic
+        && get(/databases/$(database)/documents/roleConfigs/$(roleId)).data.outletsByPic[accountPicUpper()] is list
+        ? get(/databases/$(database)/documents/roleConfigs/$(roleId)).data.outletsByPic[accountPicUpper()]
+        : [];
+    }
+
+    function canWriteEntOutlets(roleId, changedOutlets) {
+      return isAdmin()
+        || changedOutlets.size() == 0
+        || (accountPicUpper() != '' && changedOutlets.hasOnly(roleOutletsForPic(roleId)));
+    }
+
+    function canWriteVisitKeys(changedVisitKeys) {
+      return isAdmin()
+        || changedVisitKeys.size() == 0
+        || (
+          accountPicUpper() != ''
+          && changedVisitKeys.hasOnly([
+            accountPicUpper() + '|' + yesterdayWibDateKey(),
+            accountPicUpper() + '|' + currentWibDateKey(),
+            accountPicUpper() + '|' + tomorrowWibDateKey()
+          ])
+        );
+    }
+
+    function canWriteInputLogPic(pic) {
+      return isAdmin() || (
+        accountPicUpper() != ''
+        && pic is string
+        && pic.trim().upper() == accountPicUpper()
+      );
     }
 
     function isValidInputLog(data) {
@@ -299,7 +371,7 @@ service cloud.firestore {
         && isAdmin()
         && incoming().roleId == existing().roleId
         && incoming().updatedAt == request.time
-        && incoming().diff(existing()).affectedKeys().hasOnly(['label', 'start', 'ndays', 'openUntilMonth', 'unlockedPastMonths', 'tasks', 'outlets', 'updatedAt', 'updatedBy']);
+        && incoming().diff(existing()).affectedKeys().hasOnly(['label', 'start', 'ndays', 'openUntilMonth', 'unlockedPastMonths', 'tasks', 'outlets', 'outletsByPic', 'updatedAt', 'updatedBy']);
       allow delete: if false;
     }
 
@@ -311,6 +383,8 @@ service cloud.firestore {
         && isOperationalRole(roleId)
         && isValidRoleWorkspace(incoming())
         && hasRoleAccess(roleId)
+        && canWriteEntOutlets(incoming().roleId, incoming().ent.keys())
+        && canWriteVisitKeys(incoming().visit.keys())
         && incoming().roleId == roleId
         && incoming().updatedAt == request.time;
       allow update: if isVerifiedUser()
@@ -318,6 +392,8 @@ service cloud.firestore {
         && isOperationalRole(roleId)
         && isValidRoleWorkspace(incoming())
         && hasRoleAccess(roleId)
+        && canWriteEntOutlets(existing().roleId, incoming().ent.diff(existing().ent).affectedKeys())
+        && canWriteVisitKeys(incoming().visit.diff(existing().visit).affectedKeys())
         && incoming().roleId == existing().roleId
         && incoming().updatedAt == request.time
         && incoming().diff(existing()).affectedKeys().hasOnly(['ent', 'visit', 'updatedAt', 'updatedBy']);
@@ -332,6 +408,8 @@ service cloud.firestore {
         && isValidRoleMonthlyWorkspace(incoming())
         && hasRoleAccess(incoming().roleId)
         && canWriteMonth(incoming().roleId, incoming().monthKey)
+        && canWriteEntOutlets(incoming().roleId, incoming().ent.keys())
+        && canWriteVisitKeys(incoming().visit.keys())
         && workspaceMonthId == (incoming().roleId + '_' + incoming().monthKey)
         && incoming().updatedAt == request.time;
       allow update: if isVerifiedUser()
@@ -339,6 +417,8 @@ service cloud.firestore {
         && isValidRoleMonthlyWorkspace(incoming())
         && hasRoleAccess(existing().roleId)
         && canWriteMonth(existing().roleId, existing().monthKey)
+        && canWriteEntOutlets(existing().roleId, incoming().ent.diff(existing().ent).affectedKeys())
+        && canWriteVisitKeys(incoming().visit.diff(existing().visit).affectedKeys())
         && incoming().roleId == existing().roleId
         && incoming().monthKey == existing().monthKey
         && workspaceMonthId == (existing().roleId + '_' + existing().monthKey)
@@ -354,6 +434,7 @@ service cloud.firestore {
         && isValidId(logId)
         && isValidInputLog(incoming())
         && hasRoleAccess(incoming().roleId)
+        && canWriteInputLogPic(incoming().pic)
         && incoming().createdAt == request.time;
       allow update, delete: if false;
     }

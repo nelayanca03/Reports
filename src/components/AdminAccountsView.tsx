@@ -2,7 +2,7 @@ import { CheckCircle2, Edit3, Plus, Trash2, XCircle } from 'lucide-react';
 import { FormEvent, useState } from 'react';
 import { BOOTSTRAPPED_ADMIN_EMAIL } from '../firebase';
 import { AccountProfile, AccountRole, OperationalRoleId, RecordPrefix, RoleConfig } from '../types/outlet';
-import { ROLE_LABELS, getPersonList } from '../utils/outletLogic';
+import { ROLE_LABELS, getPeopleMap, getPersonList } from '../utils/outletLogic';
 import { ConfirmModal } from './ConfirmModal';
 
 interface AdminAccountsViewProps {
@@ -31,6 +31,7 @@ export function AdminAccountsView({
   const [name, setName] = useState('');
   const [role, setRole] = useState<AccountRole>('stock_accounting');
   const [picName, setPicName] = useState('');
+  const [customPicMode, setCustomPicMode] = useState(false);
   const [refPrefix, setRefPrefix] = useState<RecordPrefix>('SA');
   const [active, setActive] = useState(true);
   const [editingEmail, setEditingEmail] = useState<string | null>(null);
@@ -38,11 +39,16 @@ export function AdminAccountsView({
   const [feedback, setFeedback] = useState<string | null>(null);
   const [pendingDelete, setPendingDelete] = useState<AccountProfile | null>(null);
 
+  const selectedRoleOutlets = role === 'admin' ? [] : roleConfigs[role]?.outlets || [];
+  const selectedRolePics = getPersonList(selectedRoleOutlets);
+  const selectedRolePeopleMap = getPeopleMap(selectedRoleOutlets);
+
   const resetForm = () => {
     setEmail('');
     setName('');
     setRole('stock_accounting');
     setPicName('');
+    setCustomPicMode(false);
     setRefPrefix('SA');
     setActive(true);
     setEditingEmail(null);
@@ -77,11 +83,15 @@ export function AdminAccountsView({
 
   const handleStartEdit = (acc: AccountProfile) => {
     if (!isPrimaryAdmin && acc.role === 'admin') return;
+    const rolePics =
+      acc.role === 'admin' ? [] : getPersonList(roleConfigs[acc.role]?.outlets || []);
+    const upperPic = (acc.picName || '').trim().toUpperCase();
     setEditingEmail(acc.email);
     setEmail(acc.email);
     setName(acc.name);
     setRole(acc.role);
     setPicName(acc.picName);
+    setCustomPicMode(Boolean(upperPic && rolePics.length > 0 && !rolePics.includes(upperPic)));
     setRefPrefix(acc.refPrefix || 'SA');
     setActive(acc.active);
     setFeedback(null);
@@ -219,7 +229,19 @@ export function AdminAccountsView({
               id="acc-role"
               value={role}
               disabled={editingEmail?.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL}
-              onChange={(e) => setRole(e.target.value as AccountRole)}
+              onChange={(e) => {
+                const nextRole = e.target.value as AccountRole;
+                setRole(nextRole);
+                setCustomPicMode(false);
+                if (nextRole === 'admin') {
+                  setPicName('');
+                } else {
+                  const nextPics = getPersonList(roleConfigs[nextRole]?.outlets || []);
+                  if (picName && !nextPics.includes(picName.trim().toUpperCase())) {
+                    setPicName('');
+                  }
+                }
+              }}
               className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-900 disabled:opacity-60 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
             >
               <option value="stock_accounting">Stock Accounting</option>
@@ -229,34 +251,70 @@ export function AdminAccountsView({
             </select>
           </div>
 
-          <div className={role === 'accounting' ? 'lg:col-span-2' : 'lg:col-span-2'}>
-            <label
-              htmlFor="acc-pic"
-              className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
-            >
-              PIC Default (Sesuai Tugas & Outlet)
-            </label>
-            <input
-              id="acc-pic"
-              type="text"
-              list="account-pic-suggestions"
-              value={picName}
-              onChange={(e) => setPicName(e.target.value)}
-              placeholder="PETER / MELVIN"
-              className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-            />
-            <datalist id="account-pic-suggestions">
-              {(role === 'admin'
-                ? Array.from(
-                    new Set(
-                      Object.values(roleConfigs).flatMap((cfg) => getPersonList(cfg.outlets))
-                    )
-                  )
-                : getPersonList(roleConfigs[role]?.outlets || [])
-              ).map((p) => (
-                <option key={p} value={p} />
-              ))}
-            </datalist>
+          <div className="lg:col-span-2">
+            <div className="mb-1.5 flex items-center justify-between gap-2">
+              <label
+                htmlFor="acc-pic"
+                className="block text-xs font-medium text-slate-500 dark:text-slate-400"
+              >
+                Tugas Untuk (Nama PIC)
+              </label>
+              {role !== 'admin' && customPicMode && selectedRolePics.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCustomPicMode(false);
+                    if (picName && !selectedRolePics.includes(picName.trim().toUpperCase())) {
+                      setPicName('');
+                    }
+                  }}
+                  className="text-[11px] font-medium text-blue-700 hover:underline dark:text-blue-400"
+                >
+                  Pilih daftar
+                </button>
+              )}
+            </div>
+            {role === 'admin' ? (
+              <input
+                id="acc-pic"
+                type="text"
+                disabled
+                value="Semua PIC (Admin)"
+                className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-100 px-3 py-2 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-400"
+              />
+            ) : !customPicMode && selectedRolePics.length > 0 ? (
+              <select
+                id="acc-pic"
+                value={picName ? picName.trim().toUpperCase() : ''}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === '__custom__') {
+                    setCustomPicMode(true);
+                    setPicName('');
+                  } else {
+                    setPicName(val);
+                  }
+                }}
+                className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+              >
+                <option value="">— Pilih Nama PIC —</option>
+                {selectedRolePics.map((p) => (
+                  <option key={p} value={p}>
+                    {p} ({(selectedRolePeopleMap[p] || []).length} outlet)
+                  </option>
+                ))}
+                <option value="__custom__">+ Ketik nama PIC lain...</option>
+              </select>
+            ) : (
+              <input
+                id="acc-pic"
+                type="text"
+                value={picName}
+                onChange={(e) => setPicName(e.target.value)}
+                placeholder="Contoh: PETER / MELVIN"
+                className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+              />
+            )}
           </div>
 
           {role === 'accounting' && (
@@ -317,7 +375,7 @@ export function AdminAccountsView({
                   <th className="px-5 py-3">Nama</th>
                   <th className="px-4 py-3">Email Google</th>
                   <th className="px-4 py-3">Role</th>
-                  <th className="px-4 py-3">PIC Default</th>
+                  <th className="px-4 py-3">Tugas PIC</th>
                   <th className="px-4 py-3">Status</th>
                   <th className="px-5 py-3 text-right">Aksi</th>
                 </tr>
@@ -362,7 +420,7 @@ export function AdminAccountsView({
                         )}
                       </td>
                       <td className="px-4 py-3.5 text-xs text-slate-500 dark:text-slate-400">
-                        {acc.picName || '—'}
+                        {acc.role === 'admin' ? 'Semua PIC' : acc.picName || '—'}
                       </td>
                       <td className="px-4 py-3.5">
                         <button

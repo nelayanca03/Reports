@@ -1298,3 +1298,51 @@ export function filterAndSortSavedRecords(
   });
 }
 
+export function resolveAccountPic(
+  account: Pick<AccountProfile, 'role' | 'picName' | 'name'> | null,
+  outlets: OutletAssignment[]
+): string | null {
+  if (!account) return '';
+  if (account.role === 'admin') return null;
+  const personList = getPersonList(outlets);
+  const rawPic = (account.picName || '').trim().toUpperCase();
+  if (rawPic) {
+    const matched = personList.find((p) => p.toUpperCase() === rawPic);
+    return matched || rawPic;
+  }
+  const rawName = (account.name || '').trim().toUpperCase();
+  if (rawName) {
+    const matched = personList.find((p) => p.toUpperCase() === rawName);
+    if (matched) return matched;
+  }
+  return '';
+}
+
+export function canAccountEditPic(
+  account: Pick<AccountProfile, 'role' | 'picName' | 'name'> | null,
+  outlets: OutletAssignment[],
+  targetPic: string
+): boolean {
+  if (!account) return false;
+  if (account.role === 'admin') return true;
+  const ownPic = resolveAccountPic(account, outlets);
+  if (!ownPic || !targetPic) return false;
+  return ownPic.trim().toUpperCase() === targetPic.trim().toUpperCase();
+}
+
+export function buildOutletsByPicMap(
+  outlets: OutletAssignment[]
+): Record<string, string[]> {
+  const map: Record<string, string[]> = {};
+  for (const item of outlets) {
+    const code = (item.code || '').trim();
+    const pic = (item.person || '').trim().toUpperCase();
+    if (!code || !pic) continue;
+    if (!map[pic]) {
+      map[pic] = [code];
+    } else if (!map[pic].includes(code)) {
+      map[pic].push(code);
+    }
+  }
+  return map;
+}

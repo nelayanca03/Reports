@@ -3,7 +3,6 @@ import {
   Calendar,
   CalendarCheck,
   ClipboardEdit,
-  Database,
   HardDrive,
   History,
   LogOut,
@@ -44,7 +43,6 @@ const OPERATIONAL_NAV: Array<{
   { id: 'input', label: 'Input Harian', icon: ClipboardEdit },
   { id: 'rekap', label: 'Rekap & Ranking', icon: BarChart3 },
   { id: 'kunj', label: 'Kunjungan', icon: CalendarCheck },
-  { id: 'data', label: 'Data & Ekspor', icon: Database },
 ];
 
 const ADMIN_NAV: Array<{

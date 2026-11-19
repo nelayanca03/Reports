@@ -123,6 +123,10 @@
           "type": "array",
           "description": "List of outlets and PIC mappings assigned to this role"
         },
+        "outletsByPic": {
+          "type": "object",
+          "description": "Map of uppercase PIC name to list of assigned outlet codes for rule enforcement"
+        },
         "updatedAt": {
           "type": "string",
           "format": "date-time",

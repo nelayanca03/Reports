@@ -21,7 +21,6 @@ const VIEW_TITLES: Record<AppView, string> = {
   input: 'Input Harian',
   rekap: 'Rekap & Ranking',
   kunj: 'Kunjungan Outlet',
-  data: 'Data & Ekspor',
   admin_tasks: 'Kelola Tugas & Outlet',
   admin_accounts: 'Kelola Akun',
   admin_logs: 'Log History Penginputan',
