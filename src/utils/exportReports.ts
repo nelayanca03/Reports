@@ -248,6 +248,9 @@ export interface BuildExportReportParams {
   availableDays?: string[];
   today: string;
   targetDay: string;
+  dateMode?: 'single' | 'range';
+  rangeFrom?: string;
+  rangeTo?: string;
   weekOption?: WeekRangeOption;
   monthOption?: MonthRangeOption;
   picFilter: string;
@@ -291,6 +294,9 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
     availableDays,
     today,
     targetDay,
+    dateMode = 'single',
+    rangeFrom,
+    rangeTo,
     weekOption,
     monthOption,
     picFilter,
@@ -307,6 +313,22 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
   const targetRoleIds = getRoleTargetIds(roleFilter);
   const roleSlug = roleFilter === 'ALL' ? 'semua-role' : roleFilter;
 
+  const hasCustomRange = dateMode === 'range' && Boolean(rangeFrom || rangeTo);
+  const rawFrom = (rangeFrom || rangeTo || targetDay).trim();
+  const rawTo = (rangeTo || rangeFrom || targetDay).trim();
+  const effRangeFrom = rawFrom <= rawTo ? rawFrom : rawTo;
+  const effRangeTo = rawFrom <= rawTo ? rawTo : rawFrom;
+
+  const harianDays = hasCustomRange
+    ? calendarDays.filter((d) => !isSunday(d) && d >= effRangeFrom && d <= effRangeTo)
+    : targetDay
+      ? [targetDay]
+      : [];
+  const harianLabel = hasCustomRange
+    ? `${fmtDate(effRangeFrom)} – ${fmtDateLong(effRangeTo)}`
+    : fmtDateLong(targetDay);
+  const harianFileSlug = hasCustomRange ? `${effRangeFrom}_sd_${effRangeTo}` : targetDay;
+
   let columns: string[] = [];
   let rawRows: PreviewRow[] = [];
   let filename = `${reportId}-${roleSlug}-${today}.csv`;
@@ -317,74 +339,76 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
     columns = onlyPending
       ? ['Role', 'Tanggal Kerja', 'PIC', 'Outlet', 'Tugas Belum Update', 'Tgl Update Terakhir', 'Selisih (+/-)', 'Keterangan']
       : ['Role', 'Tanggal Kerja', 'PIC', 'Outlet', 'Tugas', 'Tgl Update', 'Sumber', 'Rumus', '+/-', 'Status', 'Keterangan'];
-    subtitle = `Tanggal Kerja: ${fmtDateLong(targetDay)}`;
-    filename = `${onlyPending ? 'pending-harian' : 'detail-harian'}-${roleSlug}-${targetDay}.csv`;
+    subtitle = `Tanggal Kerja: ${harianLabel}`;
+    filename = `${onlyPending ? 'pending-harian' : 'detail-harian'}-${roleSlug}-${harianFileSlug}.csv`;
 
-    for (const rId of targetRoleIds) {
-      const cfg = roleConfigs[rId];
-      const ws = allWorkspaces[rId];
-      const rDays = calendarDays;
-      if (!rDays.includes(targetDay)) continue;
+    for (const dayItem of harianDays) {
+      for (const rId of targetRoleIds) {
+        const cfg = roleConfigs[rId];
+        const ws = allWorkspaces[rId];
+        const rDays = calendarDays;
+        if (!rDays.includes(dayItem)) continue;
 
-      for (const { code: outlet, person } of cfg.outlets) {
-        if (picFilter !== 'ALL' && person !== picFilter) continue;
-        if (outletFilter !== 'ALL' && outlet !== outletFilter) continue;
+        for (const { code: outlet, person } of cfg.outlets) {
+          if (picFilter !== 'ALL' && person !== picFilter) continue;
+          if (outletFilter !== 'ALL' && outlet !== outletFilter) continue;
 
-        for (const t of cfg.tasks) {
-          const c = calcTask(ws, rDays, cfg.tasks, outlet, targetDay, t.key, today);
-          if (onlyPending && !c.pend) continue;
+          for (const t of cfg.tasks) {
+            const c = calcTask(ws, rDays, cfg.tasks, outlet, dayItem, t.key, today);
+            if (onlyPending && !c.pend) continue;
 
-          const isMonthly = getTaskInputType(t) === 'month';
-          const displayD = c.d ? (isMonthly ? fmtMonth(c.d) : fmtDateLong(c.d)) : 'Belum diinput';
-          const signedPm = !c.d ? '—' : c.pm > 0 ? `+${c.pm}` : `${c.pm}`;
+            const isMonthly = getTaskInputType(t) === 'month';
+            const displayD = c.d ? (isMonthly ? fmtMonth(c.d) : fmtDateLong(c.d)) : 'Belum diinput';
+            const signedPm = !c.d ? '—' : c.pm > 0 ? `+${c.pm}` : `${c.pm}`;
 
-          if (onlyPending) {
-            rawRows.push({
-              key: `${rId}|${outlet}|${t.key}`,
-              status: 'PENDING',
-              cells: [
-                cfg.label,
-                fmtDateLong(targetDay),
-                person,
-                outlet,
-                t.label,
-                displayD,
-                signedPm,
-                c.n || '-',
-              ],
-            });
-          } else {
-            const tsFormatted = c.ts ? fmtDateTimeWithSeconds(c.ts) : '';
-            const sourceLabel =
-              c.source === 'own'
-                ? tsFormatted
-                  ? `Diinput (${tsFormatted})`
-                  : 'Diinput'
-                : c.source === 'inherited' && c.sourceDay
-                  ? `Ikut ${fmtDate(c.sourceDay)}${tsFormatted ? ` (${tsFormatted})` : ''}`
-                  : 'Belum diinput';
-            const rumusLabel = isMonthly
-              ? fmtMonth(c.rumus)
-              : c.rumus
-                ? fmtDateLong(c.rumus)
-                : '—';
-            rawRows.push({
-              key: `${rId}|${outlet}|${t.key}`,
-              status: c.pend ? 'PENDING' : 'UPDATE',
-              cells: [
-                cfg.label,
-                fmtDateLong(targetDay),
-                person,
-                outlet,
-                t.label,
-                displayD,
-                sourceLabel,
-                rumusLabel,
-                signedPm,
-                c.pend ? 'PENDING' : 'UPDATE',
-                c.n || '-',
-              ],
-            });
+            if (onlyPending) {
+              rawRows.push({
+                key: `${dayItem}|${rId}|${outlet}|${t.key}`,
+                status: 'PENDING',
+                cells: [
+                  cfg.label,
+                  fmtDateLong(dayItem),
+                  person,
+                  outlet,
+                  t.label,
+                  displayD,
+                  signedPm,
+                  c.n || '-',
+                ],
+              });
+            } else {
+              const tsFormatted = c.ts ? fmtDateTimeWithSeconds(c.ts) : '';
+              const sourceLabel =
+                c.source === 'own'
+                  ? tsFormatted
+                    ? `Diinput (${tsFormatted})`
+                    : 'Diinput'
+                  : c.source === 'inherited' && c.sourceDay
+                    ? `Ikut ${fmtDate(c.sourceDay)}${tsFormatted ? ` (${tsFormatted})` : ''}`
+                    : 'Belum diinput';
+              const rumusLabel = isMonthly
+                ? fmtMonth(c.rumus)
+                : c.rumus
+                  ? fmtDateLong(c.rumus)
+                  : '—';
+              rawRows.push({
+                key: `${dayItem}|${rId}|${outlet}|${t.key}`,
+                status: c.pend ? 'PENDING' : 'UPDATE',
+                cells: [
+                  cfg.label,
+                  fmtDateLong(dayItem),
+                  person,
+                  outlet,
+                  t.label,
+                  displayD,
+                  sourceLabel,
+                  rumusLabel,
+                  signedPm,
+                  c.pend ? 'PENDING' : 'UPDATE',
+                  c.n || '-',
+                ],
+              });
+            }
           }
         }
       }
@@ -402,65 +426,67 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
       'Kunjungan Hari Ini',
       'Outlet Dikunjungi',
     ];
-    subtitle = `Ringkasan PIC · ${fmtDateLong(targetDay)}`;
-    filename = `ringkasan-pic-harian-${roleSlug}-${targetDay}.csv`;
+    subtitle = `Ringkasan PIC · ${harianLabel}`;
+    filename = `ringkasan-pic-harian-${roleSlug}-${harianFileSlug}.csv`;
 
-    for (const rId of targetRoleIds) {
-      const cfg = roleConfigs[rId];
-      const ws = allWorkspaces[rId];
-      const rDays = calendarDays;
-      if (!rDays.includes(targetDay)) continue;
-      const peopleMap = getPeopleMap(cfg.outlets);
-      const personList = getPersonList(cfg.outlets);
+    for (const dayItem of harianDays) {
+      for (const rId of targetRoleIds) {
+        const cfg = roleConfigs[rId];
+        const ws = allWorkspaces[rId];
+        const rDays = calendarDays;
+        if (!rDays.includes(dayItem)) continue;
+        const peopleMap = getPeopleMap(cfg.outlets);
+        const personList = getPersonList(cfg.outlets);
 
-      for (const person of personList) {
-        if (picFilter !== 'ALL' && person !== picFilter) continue;
-        const outlets = (peopleMap[person] || []).filter(
-          (o) => outletFilter === 'ALL' || o === outletFilter
-        );
-        if (outlets.length === 0) continue;
+        for (const person of personList) {
+          if (picFilter !== 'ALL' && person !== picFilter) continue;
+          const outlets = (peopleMap[person] || []).filter(
+            (o) => outletFilter === 'ALL' || o === outletFilter
+          );
+          if (outlets.length === 0) continue;
 
-        let completeOutlets = 0;
-        let updatedTasks = 0;
-        let pendingTasks = 0;
-        for (const outlet of outlets) {
-          let outletPend = 0;
-          for (const t of cfg.tasks) {
-            const c = calcTask(ws, rDays, cfg.tasks, outlet, targetDay, t.key, today);
-            if (c.pend) {
-              pendingTasks++;
-              outletPend++;
-            } else {
-              updatedTasks++;
+          let completeOutlets = 0;
+          let updatedTasks = 0;
+          let pendingTasks = 0;
+          for (const outlet of outlets) {
+            let outletPend = 0;
+            for (const t of cfg.tasks) {
+              const c = calcTask(ws, rDays, cfg.tasks, outlet, dayItem, t.key, today);
+              if (c.pend) {
+                pendingTasks++;
+                outletPend++;
+              } else {
+                updatedTasks++;
+              }
             }
+            if (cfg.tasks.length > 0 && outletPend === 0) completeOutlets++;
           }
-          if (cfg.tasks.length > 0 && outletPend === 0) completeOutlets++;
+          const totalTasks = updatedTasks + pendingTasks;
+          const pct = totalTasks > 0 ? Math.round((updatedTasks / totalTasks) * 100) : 0;
+
+          const v = ws.visit[`${person}|${dayItem}`];
+          const visitEntries = v?.ok ? getVisitEntries(v) : [];
+          const visitedOutlets = Array.from(
+            new Set(visitEntries.map((e) => e.outlet).filter(Boolean))
+          ).join(', ');
+
+          rawRows.push({
+            key: `${dayItem}|${rId}|${person}`,
+            status: pendingTasks > 0 ? 'PENDING' : 'UPDATE',
+            cells: [
+              cfg.label,
+              fmtDateLong(dayItem),
+              person,
+              outlets.length,
+              completeOutlets,
+              updatedTasks,
+              pendingTasks,
+              `${pct}%`,
+              v?.ok ? `${Math.max(1, visitEntries.length)}x` : '0x',
+              visitedOutlets || '-',
+            ],
+          });
         }
-        const totalTasks = updatedTasks + pendingTasks;
-        const pct = totalTasks > 0 ? Math.round((updatedTasks / totalTasks) * 100) : 0;
-
-        const v = ws.visit[`${person}|${targetDay}`];
-        const visitEntries = v?.ok ? getVisitEntries(v) : [];
-        const visitedOutlets = Array.from(
-          new Set(visitEntries.map((e) => e.outlet).filter(Boolean))
-        ).join(', ');
-
-        rawRows.push({
-          key: `${rId}|${person}`,
-          status: pendingTasks > 0 ? 'PENDING' : 'UPDATE',
-          cells: [
-            cfg.label,
-            fmtDateLong(targetDay),
-            person,
-            outlets.length,
-            completeOutlets,
-            updatedTasks,
-            pendingTasks,
-            `${pct}%`,
-            v?.ok ? `${Math.max(1, visitEntries.length)}x` : '0x',
-            visitedOutlets || '-',
-          ],
-        });
       }
     }
   } else if (reportId === 'harian_audit_log') {
@@ -477,11 +503,15 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
       'Jumlah Item',
       'Detail Penginputan',
     ];
-    subtitle = `Log Aktivitas Tanggal Kerja ${fmtDateLong(targetDay)}`;
-    filename = `audit-log-harian-${roleSlug}-${targetDay}.csv`;
+    subtitle = `Log Aktivitas Tanggal Kerja ${harianLabel}`;
+    filename = `audit-log-harian-${roleSlug}-${harianFileSlug}.csv`;
 
     for (const log of inputLogs) {
-      if (log.day !== targetDay) continue;
+      if (hasCustomRange) {
+        if (log.day < effRangeFrom || log.day > effRangeTo) continue;
+      } else if (log.day !== targetDay) {
+        continue;
+      }
       if (roleFilter !== 'ALL' && log.roleId !== roleFilter) continue;
       if (picFilter !== 'ALL' && log.pic !== picFilter) continue;
       if (outletFilter !== 'ALL') {
@@ -689,8 +719,10 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
       return { key: item.key, cells };
     });
   } else if (reportId === 'bulanan_kpi') {
-    const mDays = monthOption?.days || [];
-    const periodLabel = monthOption?.label || '-';
+    const mDays = hasCustomRange
+      ? calendarDays.filter((d) => !isSunday(d) && d >= effRangeFrom && d <= effRangeTo)
+      : monthOption?.days || [];
+    const periodLabel = hasCustomRange ? harianLabel : monthOption?.label || '-';
     columns = [
       'Role',
       'Periode',
@@ -706,7 +738,7 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
       'Rincian Kategori Kunjungan',
     ];
     subtitle = `Periode: ${periodLabel}`;
-    filename = `kpi-bulanan-pic-${roleSlug}-${monthOption?.key || today}.csv`;
+    filename = `kpi-bulanan-pic-${roleSlug}-${hasCustomRange ? harianFileSlug : monthOption?.key || today}.csv`;
 
     for (const rId of targetRoleIds) {
       const cfg = roleConfigs[rId];
@@ -715,7 +747,14 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
       const evalDays = mDays.filter((d) => rDays.includes(d) && d <= today);
       const peopleMap = getPeopleMap(cfg.outlets);
       const personList = getPersonList(cfg.outlets);
-      const visitBoard = calcVisitLeaderboard(ws, mDays.length ? mDays : rDays, personList, today);
+      const visitBoard = calcVisitLeaderboard(
+        ws,
+        mDays.length ? mDays : rDays,
+        personList,
+        today,
+        hasCustomRange ? effRangeFrom : undefined,
+        hasCustomRange ? effRangeTo : undefined
+      );
 
       for (const person of personList) {
         if (picFilter !== 'ALL' && person !== picFilter) continue;
@@ -780,11 +819,16 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
       }
     }
   } else if (reportId === 'bulanan_all_tasks') {
-    const mDays = monthOption?.days || [];
-    const periodLabel = monthOption?.label || '-';
-    const uptoDay = mDays.filter((d) => d <= today).slice(-1)[0] || mDays[mDays.length - 1] || today;
+    const mDays = hasCustomRange
+      ? calendarDays.filter((d) => !isSunday(d) && d >= effRangeFrom && d <= effRangeTo)
+      : monthOption?.days || [];
+    const periodLabel = hasCustomRange ? harianLabel : monthOption?.label || '-';
+    const uptoDay =
+      (hasCustomRange ? (effRangeTo > today ? today : effRangeTo) : undefined) ||
+      mDays.filter((d) => d <= today).slice(-1)[0] ||
+      mDays[mDays.length - 1] ||
+      today;
 
-    // Collect unified task column labels across targetRoleIds
     const taskList: Array<{ key: string; shortLabel: string }> = [];
     for (const rId of targetRoleIds) {
       for (const t of roleConfigs[rId].tasks) {
@@ -803,8 +847,10 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
       'Total Hari Pending',
       'Rata-rata Keseluruhan',
     ];
-    subtitle = `Rekap Semua Tugas s.d. ${fmtDateLong(uptoDay)}`;
-    filename = `rekap-semua-tugas-${roleSlug}-${monthOption?.key || today}.csv`;
+    subtitle = hasCustomRange
+      ? `Rekap Semua Tugas · ${periodLabel}`
+      : `Rekap Semua Tugas s.d. ${fmtDateLong(uptoDay)}`;
+    filename = `rekap-semua-tugas-${roleSlug}-${hasCustomRange ? harianFileSlug : monthOption?.key || today}.csv`;
 
     for (const rId of targetRoleIds) {
       const cfg = roleConfigs[rId];
@@ -826,7 +872,17 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
         const taskCells = taskList.map((tCol) => {
           const matchingTask = cfg.tasks.find((t) => t.key === tCol.key);
           if (!matchingTask) return '—';
-          const recap = calcRecap(ws, daysToCalc, cfg.tasks, outlet, person, matchingTask.key, calcUpto, today);
+          const recap = calcRecap(
+            ws,
+            rDays,
+            cfg.tasks,
+            outlet,
+            person,
+            matchingTask.key,
+            calcUpto,
+            today,
+            hasCustomRange ? effRangeFrom : daysToCalc[0]
+          );
           totalPend += recap.pend;
           avgSum += recap.avg;
           taskCount++;
@@ -842,18 +898,20 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
       }
     }
   } else if (reportId === 'bulanan_visit_category') {
-    const mDays = monthOption?.days || [];
-    const periodLabel = monthOption?.label || '-';
+    const mDays = hasCustomRange
+      ? calendarDays.filter((d) => !isSunday(d) && d >= effRangeFrom && d <= effRangeTo)
+      : monthOption?.days || [];
+    const periodLabel = hasCustomRange ? harianLabel : monthOption?.label || '-';
     const buckets = [...VISIT_CATEGORY_LIST, 'Custom / Lainnya'];
     columns = ['Role', 'Periode', 'PIC', 'Outlet', ...buckets, 'Total Kunjungan'];
     subtitle = `Periode: ${periodLabel}`;
-    filename = `kunjungan-per-kategori-${roleSlug}-${monthOption?.key || today}.csv`;
+    filename = `kunjungan-per-kategori-${roleSlug}-${hasCustomRange ? harianFileSlug : monthOption?.key || today}.csv`;
 
     for (const rId of targetRoleIds) {
       const cfg = roleConfigs[rId];
       const ws = allWorkspaces[rId];
       const rDays = calendarDays;
-      const evalDays = mDays.length > 0 ? mDays : rDays;
+      const evalDays = hasCustomRange ? mDays : mDays.length > 0 ? mDays : rDays;
 
       for (const { code: outlet, person } of cfg.outlets) {
         if (picFilter !== 'ALL' && person !== picFilter) continue;

@@ -88,6 +88,8 @@ service cloud.firestore {
               : prefix == 'SA'
           )
         )
+        || (hasActiveAccount() && currentAccountRole() == 'stock_accounting' && prefix == 'SA')
+        || (hasActiveAccount() && currentAccountRole() == 'gl' && prefix == 'GL')
       );
     }
 
@@ -528,11 +530,15 @@ service cloud.firestore {
     }
 
     match /recordCounters/{counterId} {
-      allow get: if isVerifiedUser() && isValidCounterId(counterId) && isAccountingOrAdmin();
+      allow get: if isVerifiedUser() && isValidCounterId(counterId) && (
+        isAccountingOrAdmin()
+        || (hasActiveAccount() && currentAccountRole() == 'stock_accounting' && counterId.matches('^SA_[0-9]{4}$'))
+        || (hasActiveAccount() && currentAccountRole() == 'gl' && counterId.matches('^GL_[0-9]{4}$'))
+      );
       allow list, delete: if false;
       allow create: if isVerifiedUser()
         && isValidCounterId(counterId)
-        && isAccountingOrAdmin()
+        && (isAdmin() || hasActiveAccount())
         && isValidRecordCounter(incoming())
         && counterId == (incoming().prefix + '_' + incoming().yymm)
         && incoming().seq == 1
@@ -541,7 +547,7 @@ service cloud.firestore {
         && incoming().updatedAt == request.time;
       allow update: if isVerifiedUser()
         && isValidCounterId(counterId)
-        && isAccountingOrAdmin()
+        && (isAdmin() || hasActiveAccount())
         && isValidRecordCounter(incoming())
         && incoming().prefix == existing().prefix
         && incoming().yymm == existing().yymm
@@ -601,12 +607,20 @@ service cloud.firestore {
       allow list: if isVerifiedUser() && canViewSavedRecord(resource.data);
       allow create: if isVerifiedUser()
         && isValidRecordId(recordId)
-        && isAccountingOrAdmin()
+        && (isAdmin() || hasActiveAccount())
         && isValidSavedRecord(incoming())
         && recordId == incoming().refCode
         && incoming().yymm == (incoming().date[2:4] + incoming().date[5:7])
         && incoming().refCode.matches('^' + incoming().prefix + incoming().yymm + '[0-9]{4,}$')
         && isAuthorizedRecordPrefix(incoming().prefix)
+        && (
+          isAccountingOrAdmin()
+          || (
+            incoming().department == currentAccountRole()
+            && canWriteInputLogPic(incoming().pic)
+            && incoming().outlet in roleOutletsForPic(currentAccountRole())
+          )
+        )
         && existsAfter(/databases/$(database)/documents/recordCounters/$(incoming().prefix + '_' + incoming().yymm))
         && incoming().createdBy == request.auth.uid
         && incoming().updatedBy == request.auth.uid
@@ -615,8 +629,17 @@ service cloud.firestore {
         && incoming().updatedAt == request.time;
       allow update: if isVerifiedUser()
         && isValidRecordId(recordId)
-        && isAccountingOrAdmin()
+        && (isAdmin() || hasActiveAccount())
         && isValidSavedRecord(incoming())
+        && (
+          isAccountingOrAdmin()
+          || (
+            existing().department == currentAccountRole()
+            && existing().createdBy == request.auth.uid
+            && canWriteInputLogPic(incoming().pic)
+            && incoming().outlet in roleOutletsForPic(currentAccountRole())
+          )
+        )
         && incoming().refCode == existing().refCode
         && incoming().prefix == existing().prefix
         && incoming().yymm == existing().yymm
@@ -626,7 +649,8 @@ service cloud.firestore {
         && incoming().createdByEmail == existing().createdByEmail
         && incoming().createdByName == existing().createdByName
         && incoming().updatedBy == request.auth.uid
-        && incoming().updatedAt == request.time;
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly(['date', 'pic', 'outlet', 'summary', 'notes', 'updatedAt', 'updatedBy']);
       allow delete: if isVerifiedUser() && isValidRecordId(recordId) && isAccountingOrAdmin();
     }
   }

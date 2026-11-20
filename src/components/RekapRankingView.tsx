@@ -18,8 +18,14 @@ interface RekapRankingViewProps {
   days: string[];
   selectedTask: string;
   recapDate: string;
+  recapDateMode: 'single' | 'range';
+  rangeFrom: string;
+  rangeTo: string;
   onChangeTask: (taskKey: string) => void;
   onChangeRecapDate: (date: string) => void;
+  onChangeRecapDateMode: (mode: 'single' | 'range') => void;
+  onChangeRangeFrom: (date: string) => void;
+  onChangeRangeTo: (date: string) => void;
   onJumpToOutlet: (person: string, outlet: string, day: string) => void;
 }
 
@@ -29,8 +35,14 @@ export function RekapRankingView({
   days,
   selectedTask,
   recapDate,
+  recapDateMode,
+  rangeFrom,
+  rangeTo,
   onChangeTask,
   onChangeRecapDate,
+  onChangeRecapDateMode,
+  onChangeRangeFrom,
+  onChangeRangeTo,
   onJumpToOutlet,
 }: RekapRankingViewProps) {
   const [subMode, setSubMode] = useState<'ranking' | 'matrix'>('ranking');
@@ -72,11 +84,31 @@ export function RekapRankingView({
     return true;
   });
 
-  const effectiveRecapDate = recapDate > today ? today : recapDate;
+  const clampedSingleDate = recapDate > today ? today : recapDate;
+  const rawFrom = rangeFrom || days[0] || today;
+  const rawTo = rangeTo || recapDate || today;
+  const clampedFrom = rawFrom > today ? today : rawFrom;
+  const clampedTo = rawTo > today ? today : rawTo;
+  const effectiveRangeFrom = clampedFrom <= clampedTo ? clampedFrom : clampedTo;
+  const effectiveRangeTo = clampedFrom <= clampedTo ? clampedTo : clampedFrom;
+
+  const effectiveRecapDate =
+    recapDateMode === 'range' ? effectiveRangeTo : clampedSingleDate;
+  const effectiveFromDate = recapDateMode === 'range' ? effectiveRangeFrom : undefined;
 
   const rankingRows = filteredOutlets
     .map(({ code, person }) =>
-      calcRecap(store, days, config.tasks, code, person, activeTaskKey, effectiveRecapDate, today)
+      calcRecap(
+        store,
+        days,
+        config.tasks,
+        code,
+        person,
+        activeTaskKey,
+        effectiveRecapDate,
+        today,
+        effectiveFromDate
+      )
     )
     .sort((a, b) => Number(a.hasAnyInput) - Number(b.hasAnyInput) || a.avg - b.avg);
 
@@ -132,9 +164,9 @@ export function RekapRankingView({
           </div>
         </div>
 
-        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-12">
           {subMode === 'ranking' && (
-            <div>
+            <div className="sm:col-span-4">
               <label
                 htmlFor="rekap-item"
                 className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
@@ -156,27 +188,83 @@ export function RekapRankingView({
             </div>
           )}
 
-          <div>
-            <label
-              htmlFor="rekap-date"
-              className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
-            >
-              Per Tanggal
-            </label>
-            <input
-              id="rekap-date"
-              type="date"
-              max={today}
-              value={recapDate}
-              onChange={(e) => {
-                const val = e.target.value || today;
-                onChangeRecapDate(val > today ? today : val);
-              }}
-              className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-sm text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-            />
+          <div className={subMode === 'ranking' ? 'sm:col-span-5' : 'sm:col-span-7'}>
+            <div className="mb-1.5 flex items-center justify-between gap-2">
+              <label
+                htmlFor={recapDateMode === 'single' ? 'rekap-date' : 'rekap-date-from'}
+                className="text-xs font-medium text-slate-500 dark:text-slate-400"
+              >
+                {recapDateMode === 'single' ? 'Per Tanggal' : 'Range Tanggal'}
+              </label>
+              <div className="inline-flex rounded-md border border-slate-200 bg-slate-100 p-0.5 dark:border-slate-700 dark:bg-slate-800">
+                <button
+                  type="button"
+                  onClick={() => onChangeRecapDateMode('single')}
+                  className={`rounded px-2 py-0.5 text-[11px] font-semibold transition-colors ${
+                    recapDateMode === 'single'
+                      ? 'bg-white text-blue-700 shadow-xs dark:bg-slate-900 dark:text-blue-400'
+                      : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
+                  }`}
+                >
+                  Per Tanggal
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onChangeRecapDateMode('range')}
+                  className={`rounded px-2 py-0.5 text-[11px] font-semibold transition-colors ${
+                    recapDateMode === 'range'
+                      ? 'bg-white text-blue-700 shadow-xs dark:bg-slate-900 dark:text-blue-400'
+                      : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
+                  }`}
+                >
+                  Range Tanggal
+                </button>
+              </div>
+            </div>
+
+            {recapDateMode === 'single' ? (
+              <input
+                id="rekap-date"
+                type="date"
+                max={today}
+                value={recapDate}
+                onChange={(e) => {
+                  const val = e.target.value || today;
+                  onChangeRecapDate(val > today ? today : val);
+                }}
+                className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-sm text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+              />
+            ) : (
+              <div className="grid grid-cols-2 gap-2">
+                <input
+                  id="rekap-date-from"
+                  type="date"
+                  max={today}
+                  aria-label="Dari tanggal rekap"
+                  value={rangeFrom}
+                  onChange={(e) => {
+                    const val = e.target.value || days[0] || today;
+                    onChangeRangeFrom(val > today ? today : val);
+                  }}
+                  className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 font-mono text-xs sm:text-sm text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                />
+                <input
+                  id="rekap-date-to"
+                  type="date"
+                  max={today}
+                  aria-label="Sampai tanggal rekap"
+                  value={rangeTo}
+                  onChange={(e) => {
+                    const val = e.target.value || today;
+                    onChangeRangeTo(val > today ? today : val);
+                  }}
+                  className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 font-mono text-xs sm:text-sm text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                />
+              </div>
+            )}
           </div>
 
-          <div>
+          <div className={subMode === 'ranking' ? 'sm:col-span-3' : 'sm:col-span-5'}>
             <label
               htmlFor="rekap-pic"
               className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
@@ -247,8 +335,11 @@ export function RekapRankingView({
                 Ranking dari Paling Telat ke Paling Baik
               </h2>
               <span className="text-xs text-slate-500 dark:text-slate-400">
-                {config.label} · Per tanggal {fmtDate(effectiveRecapDate)}
-                {recapDate > today ? ` (dibatasi hari ini)` : ''}
+                {config.label} ·{' '}
+                {recapDateMode === 'range'
+                  ? `Periode ${fmtDate(effectiveRangeFrom)} – ${fmtDate(effectiveRangeTo)}`
+                  : `Per tanggal ${fmtDate(effectiveRecapDate)}`}
+                {recapDateMode === 'single' && recapDate > today ? ` (dibatasi hari ini)` : ''}
                 {neverInputOutlets > 0 ? ` · ${neverInputOutlets} belum pernah input` : ''}
               </span>
             </div>
@@ -353,7 +444,9 @@ export function RekapRankingView({
             )}
 
             <div className="border-t border-slate-100 px-5 py-3 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
-              Rata-rata telat = rata-rata nilai +/- hari kerja (Senin–Sabtu) sampai tanggal terpilih. Hari Minggu tidak masuk perhitungan maupun input harian.
+              {recapDateMode === 'range'
+                ? 'Rata-rata telat = rata-rata nilai +/- hari kerja (Senin–Sabtu) pada rentang tanggal terpilih. Hari Minggu tidak masuk perhitungan.'
+                : 'Rata-rata telat = rata-rata nilai +/- hari kerja (Senin–Sabtu) sampai tanggal terpilih. Hari Minggu tidak masuk perhitungan maupun input harian.'}
             </div>
           </section>
         </>
@@ -361,10 +454,14 @@ export function RekapRankingView({
         <section className="rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
           <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-5 py-4 dark:border-slate-800">
             <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
-              Matriks Seluruh Outlet · {fmtDate(activeDayForMatrix)}
+              {recapDateMode === 'range'
+                ? `Matriks Seluruh Outlet · ${fmtDate(effectiveRangeFrom)} – ${fmtDate(effectiveRangeTo)}`
+                : `Matriks Seluruh Outlet · ${fmtDate(activeDayForMatrix)}`}
             </h2>
             <span className="text-xs text-slate-500 dark:text-slate-400">
-              Klik outlet untuk membuka Input Harian
+              {recapDateMode === 'range'
+                ? 'Rata-rata (+/-) & jumlah hari pending pada rentang terpilih · Klik outlet untuk Input Harian'
+                : 'Klik outlet untuk membuka Input Harian'}
             </span>
           </div>
 
@@ -398,6 +495,36 @@ export function RekapRankingView({
                     </td>
                     <td className="px-3 py-3 text-slate-600 dark:text-slate-300">{person}</td>
                     {config.tasks.map((t) => {
+                      if (recapDateMode === 'range') {
+                        const r = calcRecap(
+                          store,
+                          days,
+                          config.tasks,
+                          code,
+                          person,
+                          t.key,
+                          effectiveRecapDate,
+                          today,
+                          effectiveFromDate
+                        );
+                        return (
+                          <td key={t.key} className="px-3 py-3 text-right font-mono tabular-nums">
+                            <div
+                              className={`font-semibold ${
+                                !r.hasAnyInput || r.avg < 0
+                                  ? 'text-red-600 dark:text-red-400'
+                                  : 'text-emerald-700 dark:text-emerald-400'
+                              }`}
+                            >
+                              {r.avg > 0 ? `+${r.avg.toFixed(1)}` : r.avg.toFixed(1)}
+                            </div>
+                            <div className="text-[11px] text-slate-400 dark:text-slate-500">
+                              {r.pend > 0 ? `${r.pend} pend` : 'Lengkap'}
+                            </div>
+                          </td>
+                        );
+                      }
+
                       const c = calcTask(
                         store,
                         days,

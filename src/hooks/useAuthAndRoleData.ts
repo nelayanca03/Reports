@@ -60,6 +60,7 @@ import {
   formatReferenceCode,
   formatYymmFromIsoDate,
   getEntry,
+  getPeopleMap,
   getSelectableMonths,
   getTaskInputType,
   getVisitEntries,
@@ -1876,9 +1877,6 @@ export function useAuthAndRoleData() {
       if (!uid || !email || !currentAccount) {
         throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
       }
-      if (currentAccount.role !== 'admin' && currentAccount.role !== 'accounting') {
-        throw new Error('Hanya Accounting atau Admin yang dapat menambahkan data tersimpan.');
-      }
       if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) {
         throw new Error('Tanggal wajib diisi dengan format yang valid.');
       }
@@ -1889,6 +1887,17 @@ export function useAuthAndRoleData() {
       }
       if (!cleanOutlet) {
         throw new Error('Outlet wajib dipilih dari daftar.');
+      }
+      const canManageAny =
+        currentAccount.role === 'admin' || currentAccount.role === 'accounting';
+      if (!canManageAny) {
+        const isOwnPic = canAccountEditPic(currentAccount, activeConfig.outlets, cleanPic);
+        const picOutlets = getPeopleMap(activeConfig.outlets)[cleanPic] || [];
+        if (!isOwnPic || !picOutlets.includes(cleanOutlet)) {
+          throw new Error(
+            'Anda hanya dapat menyimpan data update daily untuk outlet dan tugas milik Anda sendiri.'
+          );
+        }
       }
 
       const { prefix, department } = resolveAuthorizedRecordPrefix(currentAccount, effectiveRoleId);
@@ -1947,7 +1956,7 @@ export function useAuthAndRoleData() {
 
       return generatedRefCode;
     },
-    [currentAccount, effectiveRoleId]
+    [currentAccount, effectiveRoleId, activeConfig.outlets]
   );
 
   const updateSavedRecord = useCallback(
@@ -1965,9 +1974,6 @@ export function useAuthAndRoleData() {
       if (!uid || !currentAccount) {
         throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
       }
-      if (currentAccount.role !== 'admin' && currentAccount.role !== 'accounting') {
-        throw new Error('Hanya Accounting atau Admin yang dapat mengubah data tersimpan.');
-      }
       if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) {
         throw new Error('Tanggal wajib diisi dengan format yang valid.');
       }
@@ -1978,6 +1984,17 @@ export function useAuthAndRoleData() {
       }
       if (!cleanOutlet) {
         throw new Error('Outlet wajib dipilih dari daftar.');
+      }
+      const canManageAny =
+        currentAccount.role === 'admin' || currentAccount.role === 'accounting';
+      if (!canManageAny) {
+        const isOwnPic = canAccountEditPic(currentAccount, activeConfig.outlets, cleanPic);
+        const picOutlets = getPeopleMap(activeConfig.outlets)[cleanPic] || [];
+        if (!isOwnPic || !picOutlets.includes(cleanOutlet)) {
+          throw new Error(
+            'Anda hanya dapat memperbarui data update daily untuk outlet dan tugas milik Anda sendiri.'
+          );
+        }
       }
 
       const recPath = `savedRecords/${recordId}`;
@@ -1995,7 +2012,7 @@ export function useAuthAndRoleData() {
         handleFirestoreError(error, OperationType.UPDATE, recPath);
       }
     },
-    [currentAccount]
+    [currentAccount, activeConfig.outlets]
   );
 
   const deleteSavedRecord = useCallback(

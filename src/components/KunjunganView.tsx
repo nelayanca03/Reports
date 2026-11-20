@@ -118,6 +118,11 @@ export function KunjunganView({
   const [savedNotice, setSavedNotice] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
 
+  const [boardDateMode, setBoardDateMode] = useState<'all' | 'single' | 'range'>('all');
+  const [boardDateExact, setBoardDateExact] = useState<string>(today);
+  const [boardDateFrom, setBoardDateFrom] = useState<string>(days[0] || today);
+  const [boardDateTo, setBoardDateTo] = useState<string>(today);
+
   const lastContextKeyRef = useRef<string>('');
   const isDirtyRef = useRef<boolean>(false);
   const savingRef = useRef<boolean>(false);
@@ -209,12 +214,42 @@ export function KunjunganView({
     );
   }
 
+  const rawBoardFrom = boardDateFrom || days[0] || today;
+  const rawBoardTo = boardDateTo || today;
+  const effBoardFrom = rawBoardFrom <= rawBoardTo ? rawBoardFrom : rawBoardTo;
+  const effBoardTo = rawBoardFrom <= rawBoardTo ? rawBoardTo : rawBoardFrom;
+
+  const filterFrom =
+    boardDateMode === 'single'
+      ? boardDateExact || today
+      : boardDateMode === 'range'
+        ? effBoardFrom
+        : undefined;
+  const filterUpto =
+    boardDateMode === 'single'
+      ? boardDateExact || today
+      : boardDateMode === 'range'
+        ? effBoardTo
+        : undefined;
+
   const { elapsedDays, grandTotalVisits, rows } = calcVisitLeaderboard(
     store,
     days,
     personList,
-    today
+    today,
+    filterFrom,
+    filterUpto
   );
+
+  const filteredMatrixDays = days.filter((d) => {
+    if (boardDateMode === 'single') {
+      return boardDateExact ? d === boardDateExact : true;
+    }
+    if (boardDateMode === 'range') {
+      return (!effBoardFrom || d >= effBoardFrom) && (!effBoardTo || d <= effBoardTo);
+    }
+    return true;
+  });
 
   const todayIsSunday = isSunday(today);
   const isTodayWorkingDay = days.includes(today) && !todayIsSunday;
@@ -788,13 +823,82 @@ export function KunjunganView({
 
       {/* Leaderboard */}
       <section className="rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-        <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 px-5 py-4 dark:border-slate-800">
-          <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
-            Dashboard Kunjungan ke Outlet · {config.label}
-          </h2>
-          <span className="text-xs text-slate-500 tabular-nums dark:text-slate-400">
-            Total kunjungan: {grandTotalVisits}x · Hari berjalan: {elapsedDays} dari {days.length} hari kerja
-          </span>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+          <div>
+            <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
+              Dashboard Kunjungan ke Outlet · {config.label}
+            </h2>
+            <p className="mt-0.5 text-xs text-slate-500 tabular-nums dark:text-slate-400">
+              Total kunjungan: {grandTotalVisits}x · Hari berjalan: {elapsedDays} dari {filteredMatrixDays.length} hari kerja
+            </p>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 dark:border-slate-700 dark:bg-slate-800">
+              {(
+                [
+                  { id: 'all', label: 'Semua' },
+                  { id: 'single', label: 'Per Tanggal' },
+                  { id: 'range', label: 'Range Tanggal' },
+                ] as const
+              ).map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => setBoardDateMode(opt.id)}
+                  className={`min-h-[30px] rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                    boardDateMode === opt.id
+                      ? 'bg-blue-700 text-white dark:bg-blue-600'
+                      : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+
+            {boardDateMode === 'single' && (
+              <input
+                type="date"
+                max={today}
+                aria-label="Filter kunjungan per tanggal"
+                value={boardDateExact}
+                onChange={(e) => {
+                  const val = e.target.value || today;
+                  setBoardDateExact(val > today ? today : val);
+                }}
+                className="min-h-[34px] rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+              />
+            )}
+
+            {boardDateMode === 'range' && (
+              <div className="flex items-center gap-1.5">
+                <input
+                  type="date"
+                  max={today}
+                  aria-label="Filter kunjungan dari tanggal"
+                  value={boardDateFrom}
+                  onChange={(e) => {
+                    const val = e.target.value || days[0] || today;
+                    setBoardDateFrom(val > today ? today : val);
+                  }}
+                  className="min-h-[34px] rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                />
+                <span className="text-xs text-slate-400">–</span>
+                <input
+                  type="date"
+                  max={today}
+                  aria-label="Filter kunjungan sampai tanggal"
+                  value={boardDateTo}
+                  onChange={(e) => {
+                    const val = e.target.value || today;
+                    setBoardDateTo(val > today ? today : val);
+                  }}
+                  className="min-h-[34px] rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                />
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="overflow-x-auto">
@@ -870,7 +974,9 @@ export function KunjunganView({
             </p>
           </div>
           <span className="text-xs text-slate-500 dark:text-slate-400">
-            {fmtDate(days[0])} – {fmtDate(days[days.length - 1])}
+            {filteredMatrixDays.length > 0
+              ? `${fmtDate(filteredMatrixDays[0])} – ${fmtDate(filteredMatrixDays[filteredMatrixDays.length - 1])}`
+              : 'Tidak ada hari kerja di filter terpilih'}
           </span>
         </div>
 
@@ -881,7 +987,7 @@ export function KunjunganView({
                 <th className="sticky left-0 z-10 bg-slate-50 px-5 py-3 font-medium dark:bg-slate-800/90">
                   Nama PIC
                 </th>
-                {days.map((d) => {
+                {filteredMatrixDays.map((d) => {
                   const isToday = d === today;
                   return (
                     <th
@@ -903,7 +1009,7 @@ export function KunjunganView({
                   <td className="sticky left-0 z-10 bg-white px-5 py-2.5 font-semibold text-slate-900 dark:bg-slate-900 dark:text-slate-100">
                     {person}
                   </td>
-                  {days.map((d) => {
+                  {filteredMatrixDays.map((d) => {
                     const v = store.visit[`${person}|${d}`];
                     const isSelected = activePerson === person && activeDay === d;
                     const isToday = d === today;

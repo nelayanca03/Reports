@@ -7,11 +7,11 @@ import {
   RotateCcw,
   Save,
   SlidersHorizontal,
+  X,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   AccountProfile,
-  InputLogEntry,
   OperationalRoleId,
   OutletStoreState,
   RoleConfig,
@@ -40,7 +40,6 @@ import {
   todayIso,
   yesterdayIso,
 } from '../utils/outletLogic';
-import { AdminExportTools } from './AdminExportTools';
 import { SavedRecordsSection } from './SavedRecordsSection';
 
 interface DraftEntry {
@@ -55,16 +54,13 @@ interface InputHarianViewProps {
   config: RoleConfig;
   roleConfigs: Record<OperationalRoleId, RoleConfig>;
   store: OutletStoreState;
-  allWorkspaces: Record<OperationalRoleId, OutletStoreState>;
-  inputLogs: InputLogEntry[];
   savedRecords: SavedRecord[];
   days: string[];
-  activeMonth: string;
-  selectableMonths: string[];
   isAdmin: boolean;
   selectedPerson: string;
   selectedOutlet: string;
   selectedDay: string;
+  jumpTrigger?: number;
   onChangePerson: (person: string) => void;
   onChangeOutlet: (outlet: string) => void;
   onChangeDay: (day: string) => void;
@@ -91,8 +87,6 @@ interface InputHarianViewProps {
     }
   ) => Promise<void>;
   onDeleteSavedRecord: (recordId: string) => Promise<void>;
-  onImportStore: (incoming: OutletStoreState) => Promise<void>;
-  onResetAllData: () => Promise<void>;
   onOpenAdminConfig: () => void;
 }
 
@@ -102,16 +96,13 @@ export function InputHarianView({
   config,
   roleConfigs,
   store,
-  allWorkspaces,
-  inputLogs,
   savedRecords,
   days,
-  activeMonth,
-  selectableMonths,
   isAdmin,
   selectedPerson,
   selectedOutlet,
   selectedDay,
+  jumpTrigger = 0,
   onChangePerson,
   onChangeOutlet,
   onChangeDay,
@@ -119,14 +110,23 @@ export function InputHarianView({
   onCreateSavedRecord,
   onUpdateSavedRecord,
   onDeleteSavedRecord,
-  onImportStore,
-  onResetAllData,
   onOpenAdminConfig,
 }: InputHarianViewProps) {
   const [drafts, setDrafts] = useState<Record<string, Record<string, DraftEntry>>>({});
   const [saving, setSaving] = useState(false);
   const [savedNotice, setSavedNotice] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [dailyModalOpen, setDailyModalOpen] = useState(false);
+  const lastJumpTriggerRef = useRef<number>(jumpTrigger);
+
+  useEffect(() => {
+    if (jumpTrigger > 0 && jumpTrigger !== lastJumpTriggerRef.current) {
+      lastJumpTriggerRef.current = jumpTrigger;
+      setSavedNotice(null);
+      setSaveError(null);
+      setDailyModalOpen(true);
+    }
+  }, [jumpTrigger]);
 
   const canManageRecords = account.role === 'admin' || account.role === 'accounting';
   const today = todayIso();
@@ -272,56 +272,55 @@ export function InputHarianView({
     try {
       await onSaveOutletDay(activeOutlet, selectedDay, dirtyEntries);
 
-      // Automatically assign/update a permanent Reference Code in Saved Records for Accounting & Admin
+      // Automatically assign/update a permanent Reference Code in Update Daily
       let generatedOrKeptCode: string | null = null;
-      if (canManageRecords) {
-        const { department } = resolveAuthorizedRecordPrefix(account, activeRoleId);
-        const summaryItems: string[] = [];
-        const noteLines: string[] = [];
-        for (const item of calculatedTasks) {
-          const dVal = (item.isDirty && item.draft ? item.draft.d : item.calc.d).trim();
-          const nVal = (item.isDirty && item.draft ? item.draft.n : item.calc.n).trim();
-          const label = item.def.shortLabel || item.def.label;
-          const isMonthly = getTaskInputType(item.def) === 'month';
-          const dateFormatted = dVal
-            ? isMonthly
-              ? fmtMonth(dVal)
-              : fmtDate(dVal)
-            : 'Kosong';
-          summaryItems.push(`${label}: ${dateFormatted}`);
-          noteLines.push(
-            nVal ? `${item.def.label}: ${dateFormatted} (${nVal})` : `${item.def.label}: ${dateFormatted}`
-          );
-        }
-        const summary = `[Input Harian] ${summaryItems.join(' · ')}`.slice(0, 200);
-        const notes = noteLines.join('\n').slice(0, 1000);
-
-        const existingDailyRecord = savedRecords.find(
-          (r) =>
-            r.department === department &&
-            r.date === selectedDay &&
-            r.outlet.toUpperCase() === activeOutlet.toUpperCase() &&
-            r.summary.startsWith('[Input Harian]')
+      const { department } = resolveAuthorizedRecordPrefix(account, activeRoleId);
+      const summaryItems: string[] = [];
+      const noteLines: string[] = [];
+      for (const item of calculatedTasks) {
+        const dVal = (item.isDirty && item.draft ? item.draft.d : item.calc.d).trim();
+        const nVal = (item.isDirty && item.draft ? item.draft.n : item.calc.n).trim();
+        const label = item.def.shortLabel || item.def.label;
+        const isMonthly = getTaskInputType(item.def) === 'month';
+        const dateFormatted = dVal
+          ? isMonthly
+            ? fmtMonth(dVal)
+            : fmtDate(dVal)
+          : 'Kosong';
+        summaryItems.push(`${label}: ${dateFormatted}`);
+        noteLines.push(
+          nVal ? `${item.def.label}: ${dateFormatted} (${nVal})` : `${item.def.label}: ${dateFormatted}`
         );
+      }
+      const summary = `[Input Harian] ${summaryItems.join(' · ')}`.slice(0, 200);
+      const notes = noteLines.join('\n').slice(0, 1000);
 
-        if (existingDailyRecord) {
-          await onUpdateSavedRecord(existingDailyRecord.id, {
-            date: selectedDay,
-            pic: activePerson,
-            outlet: activeOutlet,
-            summary,
-            notes,
-          });
-          generatedOrKeptCode = existingDailyRecord.refCode;
-        } else {
-          generatedOrKeptCode = await onCreateSavedRecord({
-            date: selectedDay,
-            pic: activePerson,
-            outlet: activeOutlet,
-            summary,
-            notes,
-          });
-        }
+      const existingDailyRecord = savedRecords.find(
+        (r) =>
+          r.department === department &&
+          r.date === selectedDay &&
+          r.outlet.toUpperCase() === activeOutlet.toUpperCase() &&
+          r.summary.startsWith('[Input Harian]') &&
+          (canManageRecords || r.createdByEmail.toLowerCase() === account.email.toLowerCase())
+      );
+
+      if (existingDailyRecord) {
+        await onUpdateSavedRecord(existingDailyRecord.id, {
+          date: selectedDay,
+          pic: activePerson,
+          outlet: activeOutlet,
+          summary,
+          notes,
+        });
+        generatedOrKeptCode = existingDailyRecord.refCode;
+      } else {
+        generatedOrKeptCode = await onCreateSavedRecord({
+          date: selectedDay,
+          pic: activePerson,
+          outlet: activeOutlet,
+          summary,
+          notes,
+        });
       }
 
       setDrafts((prev) => {
@@ -352,25 +351,34 @@ export function InputHarianView({
 
   return (
     <div className="space-y-5">
-      {/* Integrated Saved Data, + Tambah & Multi-Filter Search Bar */}
+      {/* Update Daily Table, + Tambah Modal Trigger & Search Bar */}
       <SavedRecordsSection
         account={account}
         activeRoleId={activeRoleId}
         roleConfigs={roleConfigs}
         records={savedRecords}
+        onOpenAddDaily={
+          hasDailySetup
+            ? () => {
+                setSavedNotice(null);
+                setSaveError(null);
+                setDailyModalOpen(true);
+              }
+            : undefined
+        }
         onCreateRecord={onCreateSavedRecord}
         onUpdateRecord={onUpdateSavedRecord}
         onDeleteRecord={onDeleteSavedRecord}
       />
 
-      {!hasDailySetup ? (
+      {!hasDailySetup && (
         <section className="rounded-xl border border-slate-200 bg-white p-6 text-center dark:border-slate-800 dark:bg-slate-900">
           <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
             Belum Ada Tugas atau Outlet untuk {config.label}
           </h2>
           <p className="mx-auto mt-2 max-w-md text-sm text-slate-500 dark:text-slate-400">
             {personList.length === 0 && config.tasks.length === 0
-              ? `Admin belum menambahkan daftar tugas maupun outlet untuk role ${config.label}. Anda tetap dapat menggunakan tabel Data Tersimpan di atas.`
+              ? `Admin belum menambahkan daftar tugas maupun outlet untuk role ${config.label}.`
               : personList.length === 0
                 ? `Admin belum menambahkan outlet untuk role ${config.label}.`
                 : `Admin belum menambahkan daftar tugas untuk role ${config.label}.`}
@@ -386,8 +394,45 @@ export function InputHarianView({
             </button>
           )}
         </section>
-      ) : (
-        <>
+      )}
+
+      {/* + Tambah Daily Work Modal */}
+      {dailyModalOpen && hasDailySetup && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-3 sm:p-5"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="daily-input-modal-title"
+          onClick={() => !saving && setDailyModalOpen(false)}
+        >
+          <div
+            className="flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-xl border border-slate-200 bg-slate-50 shadow-xl dark:border-slate-800 dark:bg-slate-950"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-slate-200 bg-white px-5 py-4 dark:border-slate-800 dark:bg-slate-900">
+              <div>
+                <h2
+                  id="daily-input-modal-title"
+                  className="text-base font-semibold text-slate-900 dark:text-slate-100"
+                >
+                  Tambah Update Daily · {config.label}
+                </h2>
+                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                  {activeOutlet} · {formatPicTitle(activePerson)} · {fmtDateWeekdayLong(selectedDay)}
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={saving}
+                onClick={() => setDailyModalOpen(false)}
+                aria-label="Tutup form Update Daily"
+                className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 disabled:opacity-40 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-4 overflow-y-auto p-4 sm:p-5">
           {!isPicOwner && (
             <div
               role="status"
@@ -940,29 +985,13 @@ export function InputHarianView({
             </div>
 
             <div className="border-t border-slate-100 px-5 py-3 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
-              {isAdmin
-                ? 'Tekan tombol Save di sebelah kanan baris outlet untuk menyimpan perubahan dan menghasilkan kode referensi otomatis. Tanggal sebelumnya yang belum pernah diisi tetap terbuka hingga disimpan; nilai +/- negatif menandakan status PENDING.'
-                : 'Tekan tombol Save di sebelah kanan baris outlet untuk menyimpan perubahan. Tanggal sebelumnya yang belum pernah diisi tetap terbuka hingga disimpan.'}
+              Tekan tombol Save di sebelah kanan baris outlet untuk menyimpan perubahan dan menghasilkan kode referensi otomatis. Tanggal sebelumnya yang belum pernah diisi tetap terbuka hingga disimpan
+              {isAdmin ? '; nilai +/- negatif menandakan status PENDING.' : '.'}
             </div>
           </section>
-        </>
-      )}
-
-      {/* Admin Export, JSON Backup & Month Reset Tools */}
-      {isAdmin && (
-        <AdminExportTools
-          config={config}
-          roleConfigs={roleConfigs}
-          store={store}
-          allWorkspaces={allWorkspaces}
-          inputLogs={inputLogs}
-          days={days}
-          activeMonth={activeMonth}
-          selectableMonths={selectableMonths}
-          selectedDay={selectedDay}
-          onImportStore={onImportStore}
-          onResetAllData={onResetAllData}
-        />
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

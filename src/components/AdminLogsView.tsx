@@ -31,13 +31,25 @@ export function AdminLogsView({ logs, accounts, roleConfigs }: AdminLogsViewProp
   const [roleFilter, setRoleFilter] = useState<string>('ALL');
   const [actionFilter, setActionFilter] = useState<'ALL' | InputLogActionType>('ALL');
   const [outletFilter, setOutletFilter] = useState<string>('ALL');
+  const [dateMode, setDateMode] = useState<'single' | 'range'>('single');
+  const [dateExact, setDateExact] = useState<string>('');
   const [dateFrom, setDateFrom] = useState<string>('');
   const [dateTo, setDateTo] = useState<string>('');
   const [currentPage, setCurrentPage] = useState<number>(1);
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [searchQuery, userFilter, roleFilter, actionFilter, outletFilter, dateFrom, dateTo]);
+  }, [
+    searchQuery,
+    userFilter,
+    roleFilter,
+    actionFilter,
+    outletFilter,
+    dateMode,
+    dateExact,
+    dateFrom,
+    dateTo,
+  ]);
 
   const userOptions = useMemo(() => {
     const map = new Map<string, string>();
@@ -90,8 +102,12 @@ export function AdminLogsView({ logs, accounts, roleConfigs }: AdminLogsViewProp
           .filter(Boolean);
         if (!logOutlets.includes(outletFilter)) return false;
       }
-      if (dateFrom && log.day < dateFrom) return false;
-      if (dateTo && log.day > dateTo) return false;
+      if (dateMode === 'single') {
+        if (dateExact && log.day !== dateExact) return false;
+      } else {
+        if (dateFrom && log.day < dateFrom) return false;
+        if (dateTo && log.day > dateTo) return false;
+      }
 
       if (q) {
         const haystack = [
@@ -110,7 +126,18 @@ export function AdminLogsView({ logs, accounts, roleConfigs }: AdminLogsViewProp
 
       return true;
     });
-  }, [logs, searchQuery, userFilter, roleFilter, actionFilter, outletFilter, dateFrom, dateTo]);
+  }, [
+    logs,
+    searchQuery,
+    userFilter,
+    roleFilter,
+    actionFilter,
+    outletFilter,
+    dateMode,
+    dateExact,
+    dateFrom,
+    dateTo,
+  ]);
 
   const hasActiveFilter =
     Boolean(searchQuery.trim()) ||
@@ -118,8 +145,7 @@ export function AdminLogsView({ logs, accounts, roleConfigs }: AdminLogsViewProp
     roleFilter !== 'ALL' ||
     actionFilter !== 'ALL' ||
     outletFilter !== 'ALL' ||
-    Boolean(dateFrom) ||
-    Boolean(dateTo);
+    (dateMode === 'single' ? Boolean(dateExact) : Boolean(dateFrom) || Boolean(dateTo));
 
   const totalPages = Math.max(1, Math.ceil(filteredLogs.length / LOG_PAGE_SIZE));
   const safePage = Math.min(currentPage, totalPages);
@@ -136,6 +162,7 @@ export function AdminLogsView({ logs, accounts, roleConfigs }: AdminLogsViewProp
     setRoleFilter('ALL');
     setActionFilter('ALL');
     setOutletFilter('ALL');
+    setDateExact('');
     setDateFrom('');
     setDateTo('');
     setCurrentPage(1);
@@ -291,36 +318,68 @@ export function AdminLogsView({ logs, accounts, roleConfigs }: AdminLogsViewProp
             </select>
           </div>
 
-          <div className="lg:col-span-4">
-            <label
-              htmlFor="log-date-from"
-              className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
-            >
-              Tanggal Kerja Dari
-            </label>
-            <input
-              id="log-date-from"
-              type="date"
-              value={dateFrom}
-              onChange={(e) => setDateFrom(e.target.value)}
-              className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-            />
-          </div>
+          <div className="sm:col-span-2 lg:col-span-8">
+            <div className="mb-1.5 flex items-center justify-between gap-2">
+              <label
+                htmlFor={dateMode === 'single' ? 'log-date-exact' : 'log-date-from'}
+                className="text-xs font-medium text-slate-500 dark:text-slate-400"
+              >
+                {dateMode === 'single' ? 'Filter Tanggal Kerja (Per Tanggal)' : 'Filter Tanggal Kerja (Range Tanggal)'}
+              </label>
+              <div className="inline-flex rounded-md border border-slate-200 bg-slate-100 p-0.5 dark:border-slate-700 dark:bg-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setDateMode('single')}
+                  className={`rounded px-2 py-0.5 text-[11px] font-semibold transition-colors ${
+                    dateMode === 'single'
+                      ? 'bg-white text-blue-700 shadow-xs dark:bg-slate-900 dark:text-blue-400'
+                      : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
+                  }`}
+                >
+                  Per Tanggal
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDateMode('range')}
+                  className={`rounded px-2 py-0.5 text-[11px] font-semibold transition-colors ${
+                    dateMode === 'range'
+                      ? 'bg-white text-blue-700 shadow-xs dark:bg-slate-900 dark:text-blue-400'
+                      : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
+                  }`}
+                >
+                  Range Tanggal
+                </button>
+              </div>
+            </div>
 
-          <div className="lg:col-span-4">
-            <label
-              htmlFor="log-date-to"
-              className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
-            >
-              Tanggal Kerja Sampai
-            </label>
-            <input
-              id="log-date-to"
-              type="date"
-              value={dateTo}
-              onChange={(e) => setDateTo(e.target.value)}
-              className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-            />
+            {dateMode === 'single' ? (
+              <input
+                id="log-date-exact"
+                type="date"
+                value={dateExact}
+                onChange={(e) => setDateExact(e.target.value)}
+                className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+              />
+            ) : (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <input
+                  id="log-date-from"
+                  type="date"
+                  aria-label="Tanggal Kerja Dari"
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                />
+                <input
+                  id="log-date-to"
+                  type="date"
+                  aria-label="Tanggal Kerja Sampai"
+                  value={dateTo}
+                  onChange={(e) => setDateTo(e.target.value)}
+                  className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                />
+              </div>
+            )}
           </div>
         </div>
       </section>

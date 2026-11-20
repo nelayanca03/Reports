@@ -54,6 +54,7 @@ interface AdminExportToolsProps {
   activeMonth: string;
   selectableMonths: string[];
   selectedDay: string;
+  alwaysExpanded?: boolean;
   onImportStore: (incoming: OutletStoreState) => Promise<void>;
   onResetAllData: () => Promise<void>;
 }
@@ -70,11 +71,12 @@ export function AdminExportTools({
   activeMonth,
   selectableMonths,
   selectedDay,
+  alwaysExpanded = false,
   onImportStore,
   onResetAllData,
 }: AdminExportToolsProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(alwaysExpanded);
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; message: string } | null>(null);
 
@@ -84,7 +86,10 @@ export function AdminExportTools({
   const [period, setPeriod] = useState<ExportPeriod>('harian');
   const [reportId, setReportId] = useState<ExportReportId>('harian_pending');
   const [roleFilter, setRoleFilter] = useState<'ALL' | OperationalRoleId>(config.roleId);
+  const [dateMode, setDateMode] = useState<'single' | 'range'>('single');
   const [targetDay, setTargetDay] = useState<string>(selectedDay || defaultDay);
+  const [rangeFrom, setRangeFrom] = useState<string>(days[0] || today);
+  const [rangeTo, setRangeTo] = useState<string>(today);
   const [selectedWeekKey, setSelectedWeekKey] = useState<string>('');
   const [selectedMonthKey, setSelectedMonthKey] = useState<string>('');
   const [picFilter, setPicFilter] = useState<string>('ALL');
@@ -200,7 +205,10 @@ export function AdminExportTools({
     period,
     reportId,
     roleFilter,
+    dateMode,
     targetDay,
+    rangeFrom,
+    rangeTo,
     selectedWeekKey,
     selectedMonthKey,
     picFilter,
@@ -211,6 +219,8 @@ export function AdminExportTools({
 
   const activeReportMeta =
     EXPORT_REPORT_OPTIONS.find((o) => o.id === reportId) || periodReportOptions[0];
+
+  const effectiveDateMode = period === 'mingguan' ? 'single' : dateMode;
 
   const report = useMemo(
     () =>
@@ -223,6 +233,9 @@ export function AdminExportTools({
         availableDays: scopedDays,
         today,
         targetDay,
+        dateMode: effectiveDateMode,
+        rangeFrom,
+        rangeTo,
         weekOption: activeWeekOption,
         monthOption: activeMonthOption,
         picFilter,
@@ -239,6 +252,9 @@ export function AdminExportTools({
       scopedDays,
       today,
       targetDay,
+      effectiveDateMode,
+      rangeFrom,
+      rangeTo,
       activeWeekOption,
       activeMonthOption,
       picFilter,
@@ -328,30 +344,36 @@ export function AdminExportTools({
 
   return (
     <div className="rounded-xl border border-slate-200 bg-white dark:border-slate-800 dark:bg-slate-900">
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left transition-colors hover:bg-slate-50/70 dark:hover:bg-slate-800/30"
-      >
-        <div className="flex items-center gap-2.5">
-          <Database className="h-4 w-4 shrink-0 text-blue-700 dark:text-blue-400" />
-          <div>
-            <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-              Ekspor Laporan, Cadangan JSON & Reset Bulan (Khusus Admin)
-            </div>
-            <div className="text-xs text-slate-500 dark:text-slate-400">
-              {totalEntriesCount} entri harian · {totalVisitsCount} kunjungan tercatat · Periode {fmtDate(days[0])} – {fmtDateLong(days[days.length - 1])}
+      {!alwaysExpanded && (
+        <button
+          type="button"
+          onClick={() => setExpanded((v) => !v)}
+          className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left transition-colors hover:bg-slate-50/70 dark:hover:bg-slate-800/30"
+        >
+          <div className="flex items-center gap-2.5">
+            <Database className="h-4 w-4 shrink-0 text-blue-700 dark:text-blue-400" />
+            <div>
+              <div className="text-sm font-semibold text-slate-900 dark:text-slate-100">
+                Ekspor Laporan, Cadangan JSON & Reset Bulan (Khusus Admin)
+              </div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">
+                {totalEntriesCount} entri harian · {totalVisitsCount} kunjungan tercatat · Periode {fmtDate(days[0])} – {fmtDateLong(days[days.length - 1])}
+              </div>
             </div>
           </div>
-        </div>
-        <span className="inline-flex items-center gap-1 text-xs font-semibold text-blue-700 dark:text-blue-400">
-          <span>{expanded ? 'Tutup' : 'Buka Alat Ekspor'}</span>
-          {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-        </span>
-      </button>
+          <span className="inline-flex items-center gap-1 text-xs font-semibold text-blue-700 dark:text-blue-400">
+            <span>{expanded ? 'Tutup' : 'Buka Alat Ekspor'}</span>
+            {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+          </span>
+        </button>
+      )}
 
-      {expanded && (
-        <div className="space-y-5 border-t border-slate-200 p-5 dark:border-slate-800">
+      {(alwaysExpanded || expanded) && (
+        <div
+          className={`space-y-5 p-5 ${
+            alwaysExpanded ? '' : 'border-t border-slate-200 dark:border-slate-800'
+          }`}
+        >
           {feedback && (
             <div
               role="status"
@@ -446,21 +468,53 @@ export function AdminExportTools({
             <div className="mt-4 rounded-lg border border-slate-200/80 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-800/35">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
-                  Filter Preview & Ekspor
+                  Filter Preview & Ekspor ({totalEntriesCount} entri · {totalVisitsCount} kunjungan)
                 </span>
-                {hasSubFilters && (
-                  <button
-                    type="button"
-                    onClick={handleResetFilters}
-                    className="inline-flex items-center gap-1 text-xs font-medium text-blue-700 hover:underline dark:text-blue-400"
-                  >
-                    <RotateCcw className="h-3 w-3" />
-                    <span>Reset Filter</span>
-                  </button>
-                )}
+                <div className="flex flex-wrap items-center gap-3">
+                  {period !== 'mingguan' && (
+                    <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 dark:border-slate-700 dark:bg-slate-900">
+                      <button
+                        type="button"
+                        onClick={() => setDateMode('single')}
+                        className={`min-h-[28px] rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                          dateMode === 'single'
+                            ? 'bg-blue-700 text-white dark:bg-blue-600'
+                            : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100'
+                        }`}
+                      >
+                        {period === 'bulanan' ? 'Per Bulan' : 'Per Tanggal'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDateMode('range')}
+                        className={`min-h-[28px] rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                          dateMode === 'range'
+                            ? 'bg-blue-700 text-white dark:bg-blue-600'
+                            : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100'
+                        }`}
+                      >
+                        Range Tanggal
+                      </button>
+                    </div>
+                  )}
+                  {hasSubFilters && (
+                    <button
+                      type="button"
+                      onClick={handleResetFilters}
+                      className="inline-flex items-center gap-1 text-xs font-medium text-blue-700 hover:underline dark:text-blue-400"
+                    >
+                      <RotateCcw className="h-3 w-3" />
+                      <span>Reset Filter</span>
+                    </button>
+                  )}
+                </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-6">
+              <div
+                className={`grid grid-cols-1 gap-3 sm:grid-cols-2 ${
+                  effectiveDateMode === 'range' ? 'lg:grid-cols-7' : 'lg:grid-cols-6'
+                }`}
+              >
                 <div>
                   <label
                     htmlFor="export-role-filter"
@@ -485,60 +539,102 @@ export function AdminExportTools({
                   </select>
                 </div>
 
-                <div>
-                  <label
-                    htmlFor="export-time-filter"
-                    className="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400"
-                  >
-                    {period === 'harian'
-                      ? 'Tanggal Kerja'
-                      : period === 'mingguan'
-                        ? 'Pilih Minggu'
-                        : 'Pilih Bulan / Periode'}
-                  </label>
-                  {period === 'harian' && (
-                    <select
-                      id="export-time-filter"
-                      value={targetDay}
-                      onChange={(e) => setTargetDay(e.target.value)}
-                      className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                {effectiveDateMode === 'range' ? (
+                  <>
+                    <div>
+                      <label
+                        htmlFor="export-range-from"
+                        className="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400"
+                      >
+                        Dari Tanggal
+                      </label>
+                      <input
+                        id="export-range-from"
+                        type="date"
+                        max={today}
+                        value={rangeFrom}
+                        onChange={(e) => {
+                          const val = e.target.value || days[0] || today;
+                          setRangeFrom(val > today ? today : val);
+                        }}
+                        className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="export-range-to"
+                        className="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400"
+                      >
+                        Sampai Tanggal
+                      </label>
+                      <input
+                        id="export-range-to"
+                        type="date"
+                        max={today}
+                        value={rangeTo}
+                        onChange={(e) => {
+                          const val = e.target.value || today;
+                          setRangeTo(val > today ? today : val);
+                        }}
+                        className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                      />
+                    </div>
+                  </>
+                ) : (
+                  <div>
+                    <label
+                      htmlFor="export-time-filter"
+                      className="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400"
                     >
-                      {scopedDays.map((d) => (
-                        <option key={d} value={d}>
-                          {fmtDateLong(d)}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                  {period === 'mingguan' && (
-                    <select
-                      id="export-time-filter"
-                      value={selectedWeekKey}
-                      onChange={(e) => setSelectedWeekKey(e.target.value)}
-                      className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                    >
-                      {weekOptions.map((w) => (
-                        <option key={w.key} value={w.key}>
-                          {w.label}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                  {period === 'bulanan' && (
-                    <select
-                      id="export-time-filter"
-                      value={selectedMonthKey}
-                      onChange={(e) => setSelectedMonthKey(e.target.value)}
-                      className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                    >
-                      {monthOptions.map((m) => (
-                        <option key={m.key} value={m.key}>
-                          {m.label}
-                        </option>
-                      ))}
-                    </select>
-                  )}
-                </div>
+                      {period === 'harian'
+                        ? 'Per Tanggal'
+                        : period === 'mingguan'
+                          ? 'Pilih Minggu'
+                          : 'Pilih Bulan'}
+                    </label>
+                    {period === 'harian' && (
+                      <input
+                        id="export-time-filter"
+                        type="date"
+                        max={today}
+                        value={targetDay}
+                        onChange={(e) => {
+                          const val = e.target.value || defaultDay;
+                          setTargetDay(val > today ? today : val);
+                        }}
+                        className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                      />
+                    )}
+                    {period === 'mingguan' && (
+                      <select
+                        id="export-time-filter"
+                        value={selectedWeekKey}
+                        onChange={(e) => setSelectedWeekKey(e.target.value)}
+                        className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                      >
+                        {weekOptions.map((w) => (
+                          <option key={w.key} value={w.key}>
+                            {w.label}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                    {period === 'bulanan' && (
+                      <select
+                        id="export-time-filter"
+                        value={selectedMonthKey}
+                        onChange={(e) => setSelectedMonthKey(e.target.value)}
+                        className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                      >
+                        {monthOptions.map((m) => (
+                          <option key={m.key} value={m.key}>
+                            {m.label}
+                          </option>
+                        ))}
+                      </select>
+                    )}
+                  </div>
+                )}
 
                 <div>
                   <label

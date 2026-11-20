@@ -3,6 +3,7 @@ import {
   Calendar,
   CalendarCheck,
   ClipboardEdit,
+  Download,
   HardDrive,
   History,
   LogOut,
@@ -43,6 +44,7 @@ const OPERATIONAL_NAV: Array<{
   { id: 'input', label: 'Input Harian', icon: ClipboardEdit },
   { id: 'rekap', label: 'Rekap & Ranking', icon: BarChart3 },
   { id: 'kunj', label: 'Kunjungan', icon: CalendarCheck },
+  { id: 'export', label: 'Data & Ekspor', icon: Download },
 ];
 
 const ADMIN_NAV: Array<{
@@ -111,7 +113,7 @@ export function Sidebar({
 
         {/* Operational Navigation */}
         <nav className="space-y-1" aria-label="Navigasi operasional">
-          {OPERATIONAL_NAV.filter((item) => item.id !== 'rekap' || isAdmin).map((item) => {
+          {OPERATIONAL_NAV.filter((item) => (item.id !== 'rekap' && item.id !== 'export') || isAdmin).map((item) => {
             const Icon = item.icon;
             const isActive = activeView === item.id;
             return (

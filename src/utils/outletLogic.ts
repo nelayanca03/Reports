@@ -713,10 +713,15 @@ export function calcRecap(
   person: string,
   taskKey: string,
   upto: string,
-  today: string = todayIso()
+  today: string = todayIso(),
+  fromDate?: string
 ): OutletRecap {
   const effectiveUpto = upto && upto > today ? today : upto;
-  const ds = days.filter((d) => d <= effectiveUpto && !isSunday(d));
+  const effectiveFrom =
+    fromDate && effectiveUpto && fromDate > effectiveUpto ? effectiveUpto : fromDate || '';
+  const ds = days.filter(
+    (d) => (!effectiveFrom || d >= effectiveFrom) && d <= effectiveUpto && !isSunday(d)
+  );
   if (!ds.length) {
     const fallback = calcTask(state, days, tasks, outlet, days[0] || effectiveUpto, taskKey, today);
     return {
@@ -791,10 +796,21 @@ export function calcVisitLeaderboard(
   state: OutletStoreState,
   days: string[],
   personList: string[],
-  today: string = todayIso()
+  today: string = todayIso(),
+  fromDate?: string,
+  uptoDate?: string
 ): { elapsedDays: number; grandTotalVisits: number; rows: VisitPersonStats[] } {
-  const workingDays = days.filter((d) => !isSunday(d));
-  const elapsedDays = workingDays.filter((d) => d <= today).length;
+  const effectiveUpto = uptoDate ? (uptoDate > today ? today : uptoDate) : '';
+  const effectiveFrom =
+    fromDate && effectiveUpto && fromDate > effectiveUpto ? effectiveUpto : fromDate || '';
+  const workingDays = days.filter(
+    (d) =>
+      !isSunday(d) &&
+      (!effectiveFrom || d >= effectiveFrom) &&
+      (!effectiveUpto || d <= effectiveUpto)
+  );
+  const elapsedCap = effectiveUpto && effectiveUpto < today ? effectiveUpto : today;
+  const elapsedDays = workingDays.filter((d) => d <= elapsedCap).length;
   const rawRows = personList.map((person) => {
     let visitedCount = 0;
     let totalVisits = 0;
@@ -904,14 +920,15 @@ export function generateRecapCsv(
   config: RoleConfig,
   taskKey: string,
   upto: string,
-  today: string = todayIso()
+  today: string = todayIso(),
+  fromDate?: string
 ): string {
   const taskDef = config.tasks.find((t) => t.key === taskKey);
   const header = [
     'Ranking',
     'Role',
     'Item',
-    'Per Tanggal',
+    fromDate ? 'Periode Tanggal' : 'Per Tanggal',
     'Outlet',
     'PIC',
     'Tgl Update Terakhir',
@@ -921,9 +938,12 @@ export function generateRecapCsv(
     'Status Terakhir',
   ];
   const effectiveUpto = upto && upto > today ? today : upto;
+  const effectiveFrom =
+    fromDate && effectiveUpto && fromDate > effectiveUpto ? effectiveUpto : fromDate || '';
+  const periodLabel = effectiveFrom ? `${effectiveFrom} s/d ${effectiveUpto}` : effectiveUpto;
   const recaps = config.outlets
     .map(({ code: outlet, person }) =>
-      calcRecap(state, days, config.tasks, outlet, person, taskKey, effectiveUpto, today)
+      calcRecap(state, days, config.tasks, outlet, person, taskKey, effectiveUpto, today, effectiveFrom)
     )
     .sort((a, b) => Number(a.hasAnyInput) - Number(b.hasAnyInput) || a.avg - b.avg);
 
@@ -940,7 +960,7 @@ export function generateRecapCsv(
         idx + 1,
         config.label,
         taskDef?.label || taskKey,
-        effectiveUpto,
+        periodLabel,
         r.outlet,
         r.person,
         displayLatest,

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { AdminAccountsView } from './components/AdminAccountsView';
+import { AdminExportTools } from './components/AdminExportTools';
 import { AdminLogsView } from './components/AdminLogsView';
 import { AdminTasksOutletsView } from './components/AdminTasksOutletsView';
 import { InputHarianView } from './components/InputHarianView';
@@ -79,6 +80,10 @@ export default function App() {
 
   const [selectedTask, setSelectedTask] = useState<string>('memo');
   const [recapDate, setRecapDate] = useState<string>(() => todayIso());
+  const [rekapDateMode, setRekapDateMode] = useState<'single' | 'range'>('single');
+  const [rekapRangeFrom, setRekapRangeFrom] = useState<string>(() => days[0] || todayIso());
+  const [rekapRangeTo, setRekapRangeTo] = useState<string>(() => todayIso());
+  const [dailyModalJumpTrigger, setDailyModalJumpTrigger] = useState<number>(0);
 
   const accountId = currentAccount?.id || '';
   const lastSyncedAccountIdRef = useRef<string>('');
@@ -155,7 +160,19 @@ export default function App() {
             : days[0]
       );
     }
-  }, [days, selectedDay, activeMonth, recapDate]);
+    if (rekapRangeFrom.slice(0, 7) !== activeMonth) {
+      setRekapRangeFrom(days[0]);
+    }
+    if (rekapRangeTo.slice(0, 7) !== activeMonth) {
+      setRekapRangeTo(
+        activeMonth === curMonth
+          ? today
+          : activeMonth < curMonth
+            ? days[days.length - 1]
+            : days[0]
+      );
+    }
+  }, [days, selectedDay, activeMonth, recapDate, rekapRangeFrom, rekapRangeTo]);
 
   // Reset to Kalender when user logs in
   useEffect(() => {
@@ -169,6 +186,7 @@ export default function App() {
       currentAccount &&
       currentAccount.role !== 'admin' &&
       (activeView === 'rekap' ||
+        activeView === 'export' ||
         activeView === 'admin_tasks' ||
         activeView === 'admin_accounts' ||
         activeView === 'admin_logs')
@@ -206,6 +224,7 @@ export default function App() {
     setSelectedPerson(person);
     setSelectedOutlet(outlet);
     setSelectedDay(days.includes(day) ? day : nearestWorkingDay(days, day));
+    setDailyModalJumpTrigger((n) => n + 1);
     setActiveView('input');
   };
 
@@ -213,9 +232,22 @@ export default function App() {
     if (!isAdmin) return;
     const today = todayIso();
     if (activeView === 'rekap') {
+      const upto =
+        rekapDateMode === 'range'
+          ? rekapRangeTo > today
+            ? today
+            : rekapRangeTo
+          : recapDate;
+      const from =
+        rekapDateMode === 'range'
+          ? rekapRangeFrom > upto
+            ? upto
+            : rekapRangeFrom
+          : undefined;
+      const fileSlug = from ? `${from}_sd_${upto}` : upto;
       downloadTextFile(
-        `ranking-${activeConfig.roleId}-${selectedTask}-${recapDate}.csv`,
-        generateRecapCsv(store, days, activeConfig, selectedTask, recapDate, today),
+        `ranking-${activeConfig.roleId}-${selectedTask}-${fileSlug}.csv`,
+        generateRecapCsv(store, days, activeConfig, selectedTask, upto, today, from),
         'text/csv;charset=utf-8'
       );
       return;
@@ -293,16 +325,13 @@ export default function App() {
               config={activeConfig}
               roleConfigs={roleConfigs}
               store={store}
-              allWorkspaces={allWorkspaces}
-              inputLogs={inputLogs}
               savedRecords={savedRecords}
               days={days}
-              activeMonth={activeMonth}
-              selectableMonths={selectableMonths}
               isAdmin={isAdmin}
               selectedPerson={selectedPerson}
               selectedOutlet={selectedOutlet}
               selectedDay={selectedDay}
+              jumpTrigger={dailyModalJumpTrigger}
               onChangePerson={handleChangePerson}
               onChangeOutlet={setSelectedOutlet}
               onChangeDay={setSelectedDay}
@@ -310,8 +339,6 @@ export default function App() {
               onCreateSavedRecord={createSavedRecord}
               onUpdateSavedRecord={updateSavedRecord}
               onDeleteSavedRecord={deleteSavedRecord}
-              onImportStore={importWorkspaceData}
-              onResetAllData={resetRoleWorkspace}
               onOpenAdminConfig={() => setActiveView('admin_tasks')}
             />
           )}
@@ -323,8 +350,14 @@ export default function App() {
               days={days}
               selectedTask={selectedTask}
               recapDate={recapDate}
+              recapDateMode={rekapDateMode}
+              rangeFrom={rekapRangeFrom}
+              rangeTo={rekapRangeTo}
               onChangeTask={setSelectedTask}
               onChangeRecapDate={setRecapDate}
+              onChangeRecapDateMode={setRekapDateMode}
+              onChangeRangeFrom={setRekapRangeFrom}
+              onChangeRangeTo={setRekapRangeTo}
               onJumpToOutlet={handleJumpToInput}
             />
           )}
@@ -339,6 +372,23 @@ export default function App() {
               selectedPerson={selectedPerson}
               onSaveVisitDay={saveVisitDay}
               onJumpToInput={handleJumpToInput}
+            />
+          )}
+
+          {activeView === 'export' && isAdmin && (
+            <AdminExportTools
+              alwaysExpanded
+              config={activeConfig}
+              roleConfigs={roleConfigs}
+              store={store}
+              allWorkspaces={allWorkspaces}
+              inputLogs={inputLogs}
+              days={days}
+              activeMonth={activeMonth}
+              selectableMonths={selectableMonths}
+              selectedDay={selectedDay}
+              onImportStore={importWorkspaceData}
+              onResetAllData={resetRoleWorkspace}
             />
           )}
 

@@ -21,6 +21,7 @@ const VIEW_TITLES: Record<AppView, string> = {
   input: 'Input Harian',
   rekap: 'Rekap & Ranking',
   kunj: 'Kunjungan Outlet',
+  export: 'Data & Ekspor',
   admin_tasks: 'Kelola Tugas & Outlet',
   admin_accounts: 'Kelola Akun',
   admin_logs: 'Log History Penginputan',
@@ -120,7 +121,7 @@ export function TopBar({
           {theme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
         </button>
 
-        {isAdmin && !isAdminView && activeView !== 'calendar' && (
+        {isAdmin && !isAdminView && activeView !== 'calendar' && activeView !== 'export' && (
           <button
             type="button"
             onClick={onQuickExportCsv}
