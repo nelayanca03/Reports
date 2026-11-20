@@ -2,6 +2,7 @@ import {
   ArrowDown,
   ArrowUp,
   ArrowUpDown,
+  Calendar as CalendarIcon,
   ChevronLeft,
   ChevronRight,
   Edit3,
@@ -12,7 +13,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AccountProfile,
   OperationalRoleId,
@@ -28,7 +29,9 @@ import {
   formatReferenceCode,
   formatYymmFromIsoDate,
   getMasterOutletOptions,
+  parseUtcDate,
   resolveAuthorizedRecordPrefix,
+  shiftIsoDays,
   todayIso,
 } from '../utils/outletLogic';
 import { ConfirmModal } from './ConfirmModal';
@@ -60,6 +63,38 @@ interface SavedRecordsSectionProps {
 }
 
 const RECORDS_PAGE_SIZE = 10;
+const FILTER_WEEKDAYS = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
+
+function shiftFilterMonth(ym: string, delta: number): string {
+  const [y, m] = ym.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, m - 1 + delta, 1));
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, '0')}`;
+}
+
+function formatFilterMonthLabel(ym: string): string {
+  const d = parseUtcDate(`${ym}-01`);
+  return d.toLocaleDateString('id-ID', {
+    month: 'long',
+    year: 'numeric',
+    timeZone: 'UTC',
+  });
+}
+
+function buildFilterCalendarDays(ym: string): string[] {
+  const firstOfMonth = `${ym}-01`;
+  const firstDate = parseUtcDate(firstOfMonth);
+  const dow = firstDate.getUTCDay();
+  const diffToMon = dow === 0 ? -6 : 1 - dow;
+  const gridStart = shiftIsoDays(firstOfMonth, diffToMon);
+  const cells: string[] = [];
+  for (let i = 0; i < 42; i++) {
+    cells.push(shiftIsoDays(gridStart, i));
+  }
+  if (cells.slice(35).every((c) => c.slice(0, 7) !== ym)) {
+    return cells.slice(0, 35);
+  }
+  return cells;
+}
 
 export function SavedRecordsSection({
   account,
@@ -84,7 +119,6 @@ export function SavedRecordsSection({
   // Filters & Sorting
   const [searchQuery, setSearchQuery] = useState('');
   const [refCodeFilter, setRefCodeFilter] = useState('');
-  const [dateMode, setDateMode] = useState<'single' | 'range'>('single');
   const [dateExact, setDateExact] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
@@ -93,6 +127,13 @@ export function SavedRecordsSection({
   const [sortKey, setSortKey] = useState<SavedRecordSortKey>('date');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [page, setPage] = useState(1);
+
+  // Interactive Date Calendar Popover State
+  const [calendarOpen, setCalendarOpen] = useState(false);
+  const [calendarMonth, setCalendarMonth] = useState(today.slice(0, 7));
+  const [rangeAnchor, setRangeAnchor] = useState<string | null>(null);
+  const [hoverDate, setHoverDate] = useState<string | null>(null);
+  const calendarPopoverRef = useRef<HTMLDivElement | null>(null);
 
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; message: string } | null>(null);
 
@@ -109,6 +150,92 @@ export function SavedRecordsSection({
   const [formNotes, setFormNotes] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!calendarOpen) return;
+    const handlePointerDown = (e: MouseEvent) => {
+      if (
+        calendarPopoverRef.current &&
+        !calendarPopoverRef.current.contains(e.target as Node)
+      ) {
+        setCalendarOpen(false);
+        setRangeAnchor(null);
+        setHoverDate(null);
+      }
+    };
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setCalendarOpen(false);
+        setRangeAnchor(null);
+        setHoverDate(null);
+      }
+    };
+    document.addEventListener('mousedown', handlePointerDown);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [calendarOpen]);
+
+  const calendarGridDays = useMemo(
+    () => buildFilterCalendarDays(calendarMonth),
+    [calendarMonth]
+  );
+
+  const handleToggleDatePopover = () => {
+    if (calendarOpen) {
+      setCalendarOpen(false);
+      setRangeAnchor(null);
+      setHoverDate(null);
+    } else {
+      const targetMonth =
+        (dateExact || dateFrom || today).slice(0, 7) || today.slice(0, 7);
+      setCalendarMonth(targetMonth);
+      setRangeAnchor(null);
+      setHoverDate(null);
+      setCalendarOpen(true);
+    }
+  };
+
+  const handleCalendarDayClick = (isoDate: string) => {
+    if (!rangeAnchor) {
+      setRangeAnchor(isoDate);
+      return;
+    }
+    if (isoDate === rangeAnchor) {
+      // Double-click or second click on same day -> 1 tanggal
+      setDateExact(isoDate);
+      setDateFrom('');
+      setDateTo('');
+    } else {
+      // First click start + second click end -> Range tanggal
+      const start = rangeAnchor < isoDate ? rangeAnchor : isoDate;
+      const end = rangeAnchor < isoDate ? isoDate : rangeAnchor;
+      setDateExact('');
+      setDateFrom(start);
+      setDateTo(end);
+    }
+    setRangeAnchor(null);
+    setHoverDate(null);
+    setCalendarOpen(false);
+  };
+
+  const handleClearDateFilter = () => {
+    setDateExact('');
+    setDateFrom('');
+    setDateTo('');
+    setRangeAnchor(null);
+    setHoverDate(null);
+  };
+
+  const dateFilterDisplay = dateExact
+    ? fmtDateSlash(dateExact)
+    : dateFrom && dateTo
+      ? `${fmtDateSlash(dateFrom)} – ${fmtDateSlash(dateTo)}`
+      : 'Semua Tanggal';
+
+  const hasDateFilter = Boolean(dateExact || dateFrom || dateTo);
 
   const picOptions = useMemo(() => {
     const set = new Set<string>();
@@ -137,9 +264,9 @@ export function SavedRecordsSection({
       filterAndSortSavedRecords(records, {
         search: searchQuery,
         refCode: refCodeFilter,
-        dateExact: dateMode === 'single' ? dateExact : '',
-        dateFrom: dateMode === 'range' ? dateFrom : '',
-        dateTo: dateMode === 'range' ? dateTo : '',
+        dateExact,
+        dateFrom,
+        dateTo,
         pic: picFilter,
         outlet: outletFilter,
         sortKey,
@@ -149,7 +276,6 @@ export function SavedRecordsSection({
       records,
       searchQuery,
       refCodeFilter,
-      dateMode,
       dateExact,
       dateFrom,
       dateTo,
@@ -165,7 +291,6 @@ export function SavedRecordsSection({
   }, [
     searchQuery,
     refCodeFilter,
-    dateMode,
     dateExact,
     dateFrom,
     dateTo,
@@ -184,7 +309,7 @@ export function SavedRecordsSection({
   const hasActiveFilters =
     Boolean(searchQuery.trim()) ||
     Boolean(refCodeFilter.trim()) ||
-    (dateMode === 'single' ? Boolean(dateExact) : Boolean(dateFrom) || Boolean(dateTo)) ||
+    hasDateFilter ||
     picFilter !== 'ALL' ||
     outletFilter !== 'ALL';
 
@@ -194,6 +319,8 @@ export function SavedRecordsSection({
     setDateExact('');
     setDateFrom('');
     setDateTo('');
+    setRangeAnchor(null);
+    setHoverDate(null);
     setPicFilter('ALL');
     setOutletFilter('ALL');
     setSortKey('date');
@@ -373,37 +500,12 @@ export function SavedRecordsSection({
 
       {/* Search & Multi-Filters Bar */}
       <div className="mt-4 rounded-lg border border-slate-200/80 bg-slate-50/70 p-4 dark:border-slate-800 dark:bg-slate-800/35">
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2.5">
           <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
             Pencarian & Filter Data ({filteredRecords.length} dari {records.length} data)
           </span>
 
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 dark:border-slate-700 dark:bg-slate-900">
-              <button
-                type="button"
-                onClick={() => setDateMode('single')}
-                className={`min-h-[28px] rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
-                  dateMode === 'single'
-                    ? 'bg-blue-700 text-white dark:bg-blue-600'
-                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100'
-                }`}
-              >
-                Per Tanggal
-              </button>
-              <button
-                type="button"
-                onClick={() => setDateMode('range')}
-                className={`min-h-[28px] rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
-                  dateMode === 'range'
-                    ? 'bg-blue-700 text-white dark:bg-blue-600'
-                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100'
-                }`}
-              >
-                Range Tanggal
-              </button>
-            </div>
-
+          <div className="flex flex-wrap items-center gap-2.5">
             {hasActiveFilters && (
               <button
                 type="button"
@@ -414,108 +516,180 @@ export function SavedRecordsSection({
                 <span>Clear Filter</span>
               </button>
             )}
-          </div>
-        </div>
 
-        <div
-          className={`grid grid-cols-1 gap-3 sm:grid-cols-2 ${
-            dateMode === 'range' ? 'lg:grid-cols-6' : 'lg:grid-cols-5'
-          }`}
-        >
-          {/* Quick Search */}
-          <div>
-            <label
-              htmlFor="rec-quick-search"
-              className="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400"
-            >
-              Cari Cepat
-            </label>
-            <div className="relative">
+            {/* Quick Search (Top-Right) */}
+            <div className="relative w-full sm:w-56">
               <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
               <input
                 id="rec-quick-search"
                 type="text"
+                aria-label="Cari Cepat"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Kode, PIC, Outlet..."
-                className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white pr-2.5 pl-8 text-xs text-slate-900 placeholder:text-slate-400 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500"
+                placeholder="Cari cepat: Kode, PIC, Outlet..."
+                className="min-h-[34px] w-full rounded-lg border border-slate-200 bg-white pr-7 pl-8 text-xs text-slate-900 placeholder:text-slate-400 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500"
               />
+              {searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchQuery('')}
+                  aria-label="Hapus pencarian cepat"
+                  className="absolute top-1/2 right-2 -translate-y-1/2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
             </div>
           </div>
+        </div>
 
-          {/* Reference Code Filter */}
-          <div>
+        {/* Ordered Left-to-Right to Match Table Columns: Date | PIC | Reference Code | Outlet */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          {/* 1. Date (Interactive Calendar Popover: Double-click = 1 date, Click start + Click end = Range) */}
+          <div className="relative" ref={calendarPopoverRef}>
             <label
-              htmlFor="rec-ref-filter"
+              htmlFor="rec-date-trigger"
               className="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400"
             >
-              Reference Code
+              Date
             </label>
-            <input
-              id="rec-ref-filter"
-              type="text"
-              value={refCodeFilter}
-              onChange={(e) => setRefCodeFilter(e.target.value)}
-              placeholder="Contoh: SA2611..."
-              className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-xs text-slate-900 placeholder:text-slate-400 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500"
-            />
+            <div className="relative flex items-center">
+              <button
+                id="rec-date-trigger"
+                type="button"
+                aria-expanded={calendarOpen}
+                aria-haspopup="dialog"
+                onClick={handleToggleDatePopover}
+                className={`flex min-h-[38px] w-full items-center gap-2 rounded-lg border bg-white px-2.5 py-1.5 text-left text-xs transition-colors focus:border-blue-600 focus:outline-none dark:bg-slate-900 ${
+                  hasDateFilter
+                    ? 'border-blue-500/70 pr-7 font-mono font-semibold text-blue-800 tabular-nums dark:border-blue-500/60 dark:text-blue-300'
+                    : 'border-slate-200 font-medium text-slate-700 hover:border-slate-300 dark:border-slate-700 dark:text-slate-200 dark:hover:border-slate-600'
+                }`}
+              >
+                <CalendarIcon className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+                <span className="truncate">{dateFilterDisplay}</span>
+              </button>
+              {hasDateFilter && (
+                <button
+                  type="button"
+                  onClick={handleClearDateFilter}
+                  aria-label="Hapus filter tanggal"
+                  className="absolute right-2 flex h-5 w-5 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+
+            {calendarOpen && (
+              <div
+                role="dialog"
+                aria-label="Pilih tanggal atau range tanggal"
+                className="absolute top-full left-0 z-40 mt-1.5 w-[296px] rounded-xl border border-slate-200 bg-white p-3 shadow-xl dark:border-slate-700 dark:bg-slate-900"
+              >
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCalendarMonth((m) => shiftFilterMonth(m, -1))}
+                    aria-label="Bulan sebelumnya"
+                    className="flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                  </button>
+                  <span className="text-xs font-semibold text-slate-900 dark:text-slate-100">
+                    {formatFilterMonthLabel(calendarMonth)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setCalendarMonth((m) => shiftFilterMonth(m, 1))}
+                    aria-label="Bulan berikutnya"
+                    className="flex h-7 w-7 items-center justify-center rounded-md border border-slate-200 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+                  >
+                    <ChevronRight className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <div className="mb-1 grid grid-cols-7 gap-0.5 text-center text-[10px] font-semibold text-slate-400 dark:text-slate-500">
+                  {FILTER_WEEKDAYS.map((wd) => (
+                    <div key={wd} className="py-1">
+                      {wd}
+                    </div>
+                  ))}
+                </div>
+
+                <div
+                  className="grid grid-cols-7 gap-0.5"
+                  onMouseLeave={() => setHoverDate(null)}
+                >
+                  {calendarGridDays.map((dayIso) => {
+                    const inMonth = dayIso.slice(0, 7) === calendarMonth;
+                    const isToday = dayIso === today;
+
+                    const activeStart = rangeAnchor
+                      ? hoverDate && hoverDate < rangeAnchor
+                        ? hoverDate
+                        : rangeAnchor
+                      : dateFrom;
+                    const activeEnd = rangeAnchor
+                      ? hoverDate && hoverDate > rangeAnchor
+                        ? hoverDate
+                        : rangeAnchor
+                      : dateTo;
+
+                    const isEndpoint = rangeAnchor
+                      ? dayIso === rangeAnchor || (Boolean(hoverDate) && dayIso === hoverDate)
+                      : dayIso === dateExact || dayIso === dateFrom || dayIso === dateTo;
+                    const isInRange =
+                      Boolean(activeStart && activeEnd) &&
+                      dayIso > activeStart &&
+                      dayIso < activeEnd;
+
+                    return (
+                      <button
+                        key={dayIso}
+                        type="button"
+                        onMouseEnter={() => rangeAnchor && setHoverDate(dayIso)}
+                        onClick={() => handleCalendarDayClick(dayIso)}
+                        className={`flex h-8 items-center justify-center rounded-md font-mono text-[11px] tabular-nums transition-colors ${
+                          isEndpoint
+                            ? 'bg-blue-700 font-bold text-white dark:bg-blue-600'
+                            : isInRange
+                              ? 'bg-blue-100 font-semibold text-blue-900 dark:bg-blue-950/70 dark:text-blue-200'
+                              : inMonth
+                                ? 'text-slate-800 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800'
+                                : 'text-slate-300 hover:bg-slate-100 dark:text-slate-600 dark:hover:bg-slate-800/60'
+                        } ${isToday && !isEndpoint ? 'ring-1 ring-blue-500/70' : ''}`}
+                      >
+                        {Number(dayIso.slice(8, 10))}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-2.5 flex items-center justify-between gap-2 border-t border-slate-100 pt-2 text-[10px] text-slate-500 dark:border-slate-800 dark:text-slate-400">
+                  <span className="leading-tight">
+                    {rangeAnchor
+                      ? `Awal: ${fmtDateSlash(rangeAnchor)} · Klik lagi tgl ini (1 tgl) atau tgl akhir`
+                      : 'Double klik = 1 tgl · Klik awal lalu akhir = range'}
+                  </span>
+                  {(hasDateFilter || rangeAnchor) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        handleClearDateFilter();
+                        setCalendarOpen(false);
+                      }}
+                      className="shrink-0 font-semibold text-blue-700 hover:underline dark:text-blue-400"
+                    >
+                      Reset
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
-          {dateMode === 'single' ? (
-            <div>
-              <label
-                htmlFor="rec-date-exact"
-                className="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400"
-              >
-                Per Tanggal
-              </label>
-              <input
-                id="rec-date-exact"
-                type="date"
-                value={dateExact}
-                onChange={(e) => setDateExact(e.target.value)}
-                className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-xs text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-              />
-            </div>
-          ) : (
-            <>
-              {/* Date From */}
-              <div>
-                <label
-                  htmlFor="rec-date-from"
-                  className="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400"
-                >
-                  Dari Tanggal
-                </label>
-                <input
-                  id="rec-date-from"
-                  type="date"
-                  value={dateFrom}
-                  onChange={(e) => setDateFrom(e.target.value)}
-                  className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-xs text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                />
-              </div>
-
-              {/* Date To */}
-              <div>
-                <label
-                  htmlFor="rec-date-to"
-                  className="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400"
-                >
-                  Sampai Tanggal
-                </label>
-                <input
-                  id="rec-date-to"
-                  type="date"
-                  value={dateTo}
-                  onChange={(e) => setDateTo(e.target.value)}
-                  className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-xs text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                />
-              </div>
-            </>
-          )}
-
-          {/* PIC */}
+          {/* 2. PIC */}
           <div>
             <label
               htmlFor="rec-pic-filter"
@@ -538,7 +712,25 @@ export function SavedRecordsSection({
             </select>
           </div>
 
-          {/* Outlet */}
+          {/* 3. Reference Code */}
+          <div>
+            <label
+              htmlFor="rec-ref-filter"
+              className="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400"
+            >
+              Reference Code
+            </label>
+            <input
+              id="rec-ref-filter"
+              type="text"
+              value={refCodeFilter}
+              onChange={(e) => setRefCodeFilter(e.target.value)}
+              placeholder="Contoh: SA2611..."
+              className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-xs text-slate-900 placeholder:text-slate-400 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500"
+            />
+          </div>
+
+          {/* 4. Outlet */}
           <div>
             <label
               htmlFor="rec-outlet-filter"
@@ -683,7 +875,7 @@ export function SavedRecordsSection({
         )}
       </div>
 
-      {/* VIEW DETAIL MODAL */}
+      {/* VIEW DETAIL MODAL (Compact width, internally scrollable, Ringkasan removed) */}
       {viewingRecord && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4"
@@ -693,10 +885,10 @@ export function SavedRecordsSection({
           onClick={() => setViewingRecord(null)}
         >
           <div
-            className="w-full max-w-lg rounded-xl border border-slate-200 bg-white p-6 dark:border-slate-800 dark:bg-slate-900"
+            className="flex max-h-[85vh] w-full max-w-lg flex-col overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-4 dark:border-slate-800">
+            <div className="flex shrink-0 items-start justify-between gap-3 border-b border-slate-100 px-6 py-4 dark:border-slate-800">
               <div>
                 <div className="font-mono text-base font-bold text-blue-800 tabular-nums dark:text-blue-400">
                   {viewingRecord.refCode}
@@ -718,56 +910,47 @@ export function SavedRecordsSection({
               </button>
             </div>
 
-            <dl className="mt-4 grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
-              <div className="rounded-lg border border-slate-100 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-800/40">
-                <dt className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
-                  Date
-                </dt>
-                <dd className="mt-1 font-mono font-semibold text-slate-900 dark:text-slate-100">
-                  {fmtDateSlash(viewingRecord.date)}
-                </dd>
-                <dd className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                  {fmtDateWeekdayLong(viewingRecord.date)}
-                </dd>
-              </div>
-
-              <div className="rounded-lg border border-slate-100 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-800/40">
-                <dt className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
-                  Outlet
-                </dt>
-                <dd className="mt-1 font-semibold text-slate-900 dark:text-slate-100">
-                  {viewingRecord.outlet}
-                </dd>
-              </div>
-
-              <div className="rounded-lg border border-slate-100 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-800/40">
-                <dt className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
-                  PIC
-                </dt>
-                <dd className="mt-1 font-semibold text-slate-900 dark:text-slate-100">
-                  {formatPicTitle(viewingRecord.pic)}
-                </dd>
-              </div>
-
-              <div className="rounded-lg border border-slate-100 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-800/40">
-                <dt className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
-                  Reference Code
-                </dt>
-                <dd className="mt-1 font-mono font-bold text-blue-800 dark:text-blue-400">
-                  {viewingRecord.refCode}
-                </dd>
-              </div>
-            </dl>
-
-            <div className="mt-3 space-y-3">
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3.5 dark:border-slate-800 dark:bg-slate-800/40">
-                <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">
-                  Ringkasan
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-6 py-4">
+              <dl className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+                <div className="rounded-lg border border-slate-100 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-800/40">
+                  <dt className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                    Date
+                  </dt>
+                  <dd className="mt-1 font-mono font-semibold text-slate-900 tabular-nums dark:text-slate-100">
+                    {fmtDateSlash(viewingRecord.date)}
+                  </dd>
+                  <dd className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
+                    {fmtDateWeekdayLong(viewingRecord.date)}
+                  </dd>
                 </div>
-                <p className="mt-1 text-sm text-slate-900 dark:text-slate-100">
-                  {viewingRecord.summary || '—'}
-                </p>
-              </div>
+
+                <div className="rounded-lg border border-slate-100 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-800/40">
+                  <dt className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                    Outlet
+                  </dt>
+                  <dd className="mt-1 font-semibold text-slate-900 dark:text-slate-100">
+                    {viewingRecord.outlet}
+                  </dd>
+                </div>
+
+                <div className="rounded-lg border border-slate-100 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-800/40">
+                  <dt className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                    PIC
+                  </dt>
+                  <dd className="mt-1 font-semibold text-slate-900 dark:text-slate-100">
+                    {formatPicTitle(viewingRecord.pic)}
+                  </dd>
+                </div>
+
+                <div className="rounded-lg border border-slate-100 bg-slate-50/70 p-3 dark:border-slate-800 dark:bg-slate-800/40">
+                  <dt className="text-[11px] font-medium text-slate-500 dark:text-slate-400">
+                    Reference Code
+                  </dt>
+                  <dd className="mt-1 font-mono font-bold text-blue-800 tabular-nums dark:text-blue-400">
+                    {viewingRecord.refCode}
+                  </dd>
+                </div>
+              </dl>
 
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3.5 dark:border-slate-800 dark:bg-slate-800/40">
                 <div className="text-xs font-semibold text-slate-600 dark:text-slate-300">
@@ -783,7 +966,7 @@ export function SavedRecordsSection({
               </div>
             </div>
 
-            <div className="mt-6 flex flex-wrap items-center justify-end gap-2.5 border-t border-slate-100 pt-4 dark:border-slate-800">
+            <div className="flex shrink-0 flex-wrap items-center justify-end gap-2.5 border-t border-slate-100 px-6 py-4 dark:border-slate-800">
               {canManage && (
                 <>
                   <button

@@ -333,6 +333,7 @@ export function InputHarianView({
           ? `Data ${activeOutlet} (${fmtDateLong(selectedDay)}) tersimpan · Kode Referensi: ${generatedOrKeptCode}.`
           : `Data ${activeOutlet} (${fmtDateLong(selectedDay)}) tersimpan.`
       );
+      setDailyModalOpen(false);
     } catch (err) {
       let msg = 'Gagal menyimpan data harian. Periksa koneksi atau izin akses Anda.';
       if (err instanceof Error) {
@@ -351,6 +352,26 @@ export function InputHarianView({
 
   return (
     <div className="space-y-5">
+      {savedNotice && (
+        <div
+          role="status"
+          className="flex items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-medium text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-300"
+        >
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+            <span>{savedNotice}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSavedNotice(null)}
+            aria-label="Tutup notifikasi tersimpan"
+            className="shrink-0 underline hover:no-underline"
+          >
+            Tutup
+          </button>
+        </div>
+      )}
+
       {/* Update Daily Table, + Tambah Modal Trigger & Search Bar */}
       <SavedRecordsSection
         account={account}
@@ -675,11 +696,6 @@ export function InputHarianView({
               </div>
 
               <div className="flex shrink-0 items-center gap-2.5">
-                {savedNotice && !hasUnsavedChanges && (
-                  <span className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
-                    {savedNotice}
-                  </span>
-                )}
                 {hasUnsavedChanges && canEditDay && (
                   <span className="text-xs font-medium text-blue-700 dark:text-blue-400">
                     Belum disimpan
