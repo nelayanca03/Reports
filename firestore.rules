@@ -464,6 +464,7 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'title', 'date', 'startTime', 'visibleTo', 'notes',
+          'repeatFreq', 'repeatInterval', 'repeatUntil', 'repeatWeekdays', 'excludedDates',
           'createdAt', 'updatedAt', 'createdBy', 'updatedBy',
           'createdByEmail', 'createdByName'
         ])
@@ -472,6 +473,33 @@ service cloud.firestore {
         && isValidCalendarStartTime(data.startTime)
         && isValidVisibleToList(data.visibleTo)
         && data.notes is string && data.notes.size() <= 500
+        && (!('repeatFreq' in data) || (
+          data.repeatFreq is string
+          && data.repeatFreq in ['none', 'daily', 'weekly', 'monthly', 'yearly']
+        ))
+        && (!('repeatInterval' in data) || (
+          data.repeatInterval is int
+          && data.repeatInterval >= 1
+          && data.repeatInterval <= 12
+        ))
+        && (!('repeatUntil' in data) || (
+          data.repeatUntil is string
+          && (data.repeatUntil == '' || (data.repeatUntil.size() == 10 && data.repeatUntil.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')))
+        ))
+        && (!('repeatWeekdays' in data) || (
+          data.repeatWeekdays is list
+          && data.repeatWeekdays.size() <= 7
+          && data.repeatWeekdays.hasOnly([0, 1, 2, 3, 4, 5, 6])
+        ))
+        && (!('excludedDates' in data) || (
+          data.excludedDates is list
+          && data.excludedDates.size() <= 200
+          && (data.excludedDates.size() == 0 || (
+            data.excludedDates[0] is string
+            && data.excludedDates[0].size() == 10
+            && data.excludedDates[0].matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+          ))
+        ))
         && data.createdAt is timestamp
         && data.updatedAt is timestamp
         && data.createdBy is string && data.createdBy.size() >= 1 && data.createdBy.size() <= 128
@@ -511,7 +539,12 @@ service cloud.firestore {
         && incoming().createdByEmail == existing().createdByEmail
         && incoming().createdByName == existing().createdByName
         && incoming().updatedBy == request.auth.uid
-        && incoming().updatedAt == request.time;
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'title', 'date', 'startTime', 'visibleTo', 'notes',
+          'repeatFreq', 'repeatInterval', 'repeatUntil', 'repeatWeekdays', 'excludedDates',
+          'updatedAt', 'updatedBy'
+        ]);
       allow delete: if isVerifiedUser() && isValidId(eventId) && isAccountingOrAdmin();
     }
 

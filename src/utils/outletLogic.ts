@@ -3,6 +3,7 @@ import {
   AccountRole,
   CalculatedTask,
   CalendarEvent,
+  CalendarRecurrenceFreq,
   EntryItem,
   FormulaType,
   InputLogEntry,
@@ -1191,6 +1192,252 @@ export function formatCalendarVisibleLabel(visibleTo: OperationalRoleId[]): stri
   const normalized = normalizeCalendarVisibleTo(visibleTo);
   if (normalized.length === 3) return 'Semua Departemen';
   return normalized.map((r) => ROLE_LABELS[r] || r).join(', ');
+}
+
+export const CALENDAR_RECURRENCE_FREQS: CalendarRecurrenceFreq[] = [
+  'none',
+  'daily',
+  'weekly',
+  'monthly',
+  'yearly',
+];
+
+export function normalizeCalendarRecurrenceFreq(freq: unknown): CalendarRecurrenceFreq {
+  if (
+    freq === 'daily' ||
+    freq === 'weekly' ||
+    freq === 'monthly' ||
+    freq === 'yearly'
+  ) {
+    return freq;
+  }
+  return 'none';
+}
+
+export function normalizeCalendarInterval(interval: unknown): number {
+  const n = Number(interval);
+  if (!Number.isFinite(n)) return 1;
+  return Math.min(12, Math.max(1, Math.floor(n)));
+}
+
+export function normalizeCalendarWeekdays(days: unknown): number[] {
+  if (!Array.isArray(days)) return [];
+  const valid = days
+    .map((d) => Number(d))
+    .filter((d) => Number.isInteger(d) && d >= 0 && d <= 6);
+  // Display order Mon(1)..Sat(6), Sun(0)
+  const unique = Array.from(new Set(valid));
+  unique.sort((a, b) => (a === 0 ? 7 : a) - (b === 0 ? 7 : b));
+  return unique;
+}
+
+export function normalizeExcludedDates(dates: unknown): string[] {
+  if (!Array.isArray(dates)) return [];
+  const unique = Array.from(
+    new Set(
+      dates.filter(
+        (d): d is string => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d)
+      )
+    )
+  ).sort();
+  return unique.slice(0, 200);
+}
+
+function daysInUtcMonth(year: number, month1Based: number): number {
+  return new Date(Date.UTC(year, month1Based, 0)).getUTCDate();
+}
+
+function mondayIsoOfWeek(isoDate: string): string {
+  const dt = parseUtcDate(isoDate);
+  const dow = dt.getUTCDay();
+  const diffToMon = dow === 0 ? -6 : 1 - dow;
+  return shiftIsoDays(isoDate, diffToMon);
+}
+
+export interface ExpandedCalendarOccurrence {
+  event: CalendarEvent;
+  occurrenceDate: string;
+  isRecurring: boolean;
+}
+
+export function expandCalendarEventsForRange(
+  events: CalendarEvent[],
+  rangeStart: string,
+  rangeEnd: string
+): ExpandedCalendarOccurrence[] {
+  const out: ExpandedCalendarOccurrence[] = [];
+  if (!rangeStart || !rangeEnd || rangeStart > rangeEnd) return out;
+
+  for (const evt of events) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(evt.date)) continue;
+    const freq = normalizeCalendarRecurrenceFreq(evt.repeatFreq);
+    const interval = normalizeCalendarInterval(evt.repeatInterval);
+    const repeatUntil =
+      evt.repeatUntil && /^\d{4}-\d{2}-\d{2}$/.test(evt.repeatUntil)
+        ? evt.repeatUntil
+        : '';
+    const excluded = new Set(evt.excludedDates || []);
+
+    if (freq === 'none') {
+      if (
+        evt.date >= rangeStart &&
+        evt.date <= rangeEnd &&
+        !excluded.has(evt.date)
+      ) {
+        out.push({ event: evt, occurrenceDate: evt.date, isRecurring: false });
+      }
+      continue;
+    }
+
+    const effectiveStart = evt.date > rangeStart ? evt.date : rangeStart;
+    const effectiveEnd =
+      repeatUntil && repeatUntil < rangeEnd ? repeatUntil : rangeEnd;
+    if (effectiveStart > effectiveEnd) continue;
+
+    if (freq === 'daily') {
+      const startDiff = diffDays(effectiveStart, evt.date);
+      const rem = startDiff % interval;
+      let cursor =
+        rem === 0 ? effectiveStart : shiftIsoDays(effectiveStart, interval - rem);
+      while (cursor <= effectiveEnd) {
+        if (!excluded.has(cursor)) {
+          out.push({ event: evt, occurrenceDate: cursor, isRecurring: true });
+        }
+        cursor = shiftIsoDays(cursor, interval);
+      }
+      continue;
+    }
+
+    if (freq === 'weekly') {
+      const startDow = parseUtcDate(evt.date).getUTCDay();
+      const configuredWeekdays = normalizeCalendarWeekdays(evt.repeatWeekdays);
+      const weekdaySet = new Set(
+        configuredWeekdays.length > 0 ? configuredWeekdays : [startDow]
+      );
+      const anchorMonday = mondayIsoOfWeek(evt.date);
+
+      let cursor = effectiveStart;
+      while (cursor <= effectiveEnd) {
+        const dow = parseUtcDate(cursor).getUTCDay();
+        if (weekdaySet.has(dow)) {
+          const curMonday = mondayIsoOfWeek(cursor);
+          const weeksApart = Math.round(diffDays(curMonday, anchorMonday) / 7);
+          if (weeksApart >= 0 && weeksApart % interval === 0 && !excluded.has(cursor)) {
+            out.push({ event: evt, occurrenceDate: cursor, isRecurring: true });
+          }
+        }
+        cursor = shiftIsoDays(cursor, 1);
+      }
+      continue;
+    }
+
+    const startYear = Number(evt.date.slice(0, 4));
+    const startMonth = Number(evt.date.slice(5, 7));
+    const anchorDay = Number(evt.date.slice(8, 10));
+    const endYear = Number(effectiveEnd.slice(0, 4));
+    const endMonth = Number(effectiveEnd.slice(5, 7));
+
+    if (freq === 'monthly') {
+      let y = Number(effectiveStart.slice(0, 4));
+      let m = Number(effectiveStart.slice(5, 7));
+      while (y < endYear || (y === endYear && m <= endMonth)) {
+        const monthsDiff = (y - startYear) * 12 + (m - startMonth);
+        if (monthsDiff >= 0 && monthsDiff % interval === 0) {
+          const clampedDay = Math.min(anchorDay, daysInUtcMonth(y, m));
+          const candidate = `${String(y).padStart(4, '0')}-${String(m).padStart(2, '0')}-${String(clampedDay).padStart(2, '0')}`;
+          if (
+            candidate >= effectiveStart &&
+            candidate <= effectiveEnd &&
+            !excluded.has(candidate)
+          ) {
+            out.push({ event: evt, occurrenceDate: candidate, isRecurring: true });
+          }
+        }
+        m += 1;
+        if (m > 12) {
+          m = 1;
+          y += 1;
+        }
+      }
+      continue;
+    }
+
+    if (freq === 'yearly') {
+      const effStartYear = Number(effectiveStart.slice(0, 4));
+      for (let y = effStartYear; y <= endYear; y++) {
+        const yearsDiff = y - startYear;
+        if (yearsDiff >= 0 && yearsDiff % interval === 0) {
+          const clampedDay = Math.min(anchorDay, daysInUtcMonth(y, startMonth));
+          const candidate = `${String(y).padStart(4, '0')}-${String(startMonth).padStart(2, '0')}-${String(clampedDay).padStart(2, '0')}`;
+          if (
+            candidate >= effectiveStart &&
+            candidate <= effectiveEnd &&
+            !excluded.has(candidate)
+          ) {
+            out.push({ event: evt, occurrenceDate: candidate, isRecurring: true });
+          }
+        }
+      }
+    }
+  }
+
+  out.sort(
+    (a, b) =>
+      a.occurrenceDate.localeCompare(b.occurrenceDate) ||
+      a.event.startTime.localeCompare(b.event.startTime) ||
+      a.event.title.localeCompare(b.event.title)
+  );
+  return out;
+}
+
+const WEEKDAY_NAMES_ID: Record<number, string> = {
+  0: 'Min',
+  1: 'Sen',
+  2: 'Sel',
+  3: 'Rab',
+  4: 'Kam',
+  5: 'Jum',
+  6: 'Sab',
+};
+
+export function formatCalendarRecurrenceLabel(
+  event: Pick<
+    CalendarEvent,
+    'date' | 'repeatFreq' | 'repeatInterval' | 'repeatWeekdays' | 'repeatUntil'
+  >
+): string {
+  const freq = normalizeCalendarRecurrenceFreq(event.repeatFreq);
+  if (freq === 'none') return 'Tidak berulang';
+
+  const interval = normalizeCalendarInterval(event.repeatInterval);
+  let base = '';
+  if (freq === 'daily') {
+    base = interval === 1 ? 'Setiap hari' : `Setiap ${interval} hari`;
+  } else if (freq === 'weekly') {
+    const startDow = /^\d{4}-\d{2}-\d{2}$/.test(event.date)
+      ? parseUtcDate(event.date).getUTCDay()
+      : 1;
+    const days = normalizeCalendarWeekdays(event.repeatWeekdays);
+    const usedDays = days.length > 0 ? days : [startDow];
+    const dayStr = usedDays.map((d) => WEEKDAY_NAMES_ID[d] || '').join(', ');
+    base =
+      interval === 1
+        ? `Setiap minggu (${dayStr})`
+        : `Setiap ${interval} minggu (${dayStr})`;
+  } else if (freq === 'monthly') {
+    const dayNum = Number(event.date.slice(8, 10)) || 1;
+    base =
+      interval === 1
+        ? `Setiap bulan (tgl ${dayNum})`
+        : `Setiap ${interval} bulan (tgl ${dayNum})`;
+  } else {
+    base = interval === 1 ? 'Setiap tahun' : `Setiap ${interval} tahun`;
+  }
+
+  if (event.repeatUntil && /^\d{4}-\d{2}-\d{2}$/.test(event.repeatUntil)) {
+    return `${base} · sampai ${fmtDateSlash(event.repeatUntil)}`;
+  }
+  return base;
 }
 
 export function resolveAuthorizedRecordPrefix(

@@ -342,6 +342,29 @@
           "maxLength": 500,
           "description": "Optional notes and participant list hidden from overview"
         },
+        "repeatFreq": {
+          "type": "string",
+          "enum": ["none", "daily", "weekly", "monthly", "yearly"],
+          "description": "Recurrence frequency of the calendar event"
+        },
+        "repeatInterval": {
+          "type": "integer",
+          "description": "Interval between recurrences (1 to 12)"
+        },
+        "repeatUntil": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "maxLength": 10,
+          "description": "Optional inclusive recurrence end date (YYYY-MM-DD) or empty string"
+        },
+        "repeatWeekdays": {
+          "type": "array",
+          "description": "Days of week (0-6) for weekly repeating events"
+        },
+        "excludedDates": {
+          "type": "array",
+          "description": "Specific YYYY-MM-DD occurrence dates skipped from the recurring series"
+        },
         "createdAt": {
           "type": "string",
           "format": "date-time"

@@ -32,6 +32,7 @@ import {
   AccountProfile,
   AccountRole,
   CalendarEvent,
+  CalendarRecurrenceFreq,
   EntryItem,
   FirebaseStorageStats,
   InputLogActionType,
@@ -67,7 +68,11 @@ import {
   isSunday,
   isValidCalendarStartTime,
   mergeWorkspaceStates,
+  normalizeCalendarInterval,
+  normalizeCalendarRecurrenceFreq,
   normalizeCalendarVisibleTo,
+  normalizeCalendarWeekdays,
+  normalizeExcludedDates,
   resolveAuthorizedRecordPrefix,
   shiftMonthKey,
   todayIso,
@@ -538,6 +543,14 @@ export function useAuthAndRoleData() {
                 d.updatedAt instanceof Timestamp
                   ? d.updatedAt.toDate().toISOString()
                   : undefined;
+              const repeatFreq = normalizeCalendarRecurrenceFreq(d.repeatFreq);
+              const repeatInterval = normalizeCalendarInterval(d.repeatInterval);
+              const repeatUntil =
+                typeof d.repeatUntil === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.repeatUntil)
+                  ? d.repeatUntil
+                  : '';
+              const repeatWeekdays = normalizeCalendarWeekdays(d.repeatWeekdays);
+              const excludedDates = normalizeExcludedDates(d.excludedDates);
               return {
                 id: docSnap.id,
                 title: String(d.title || ''),
@@ -547,6 +560,11 @@ export function useAuthAndRoleData() {
                   Array.isArray(d.visibleTo) ? (d.visibleTo as OperationalRoleId[]) : []
                 ),
                 notes: String(d.notes || ''),
+                repeatFreq,
+                repeatInterval,
+                repeatUntil,
+                repeatWeekdays,
+                excludedDates,
                 createdBy: String(d.createdBy || ''),
                 updatedBy: String(d.updatedBy || ''),
                 createdByEmail: String(d.createdByEmail || ''),
@@ -1746,6 +1764,11 @@ export function useAuthAndRoleData() {
       startTime: string;
       visibleTo: OperationalRoleId[];
       notes: string;
+      repeatFreq?: CalendarRecurrenceFreq;
+      repeatInterval?: number;
+      repeatUntil?: string;
+      repeatWeekdays?: number[];
+      excludedDates?: string[];
     }) => {
       const uid = auth.currentUser?.uid;
       const email = (currentAccount?.email || auth.currentUser?.email || '').trim().toLowerCase();
@@ -1769,6 +1792,19 @@ export function useAuthAndRoleData() {
       if (visibleTo.length === 0) {
         throw new Error('Pilih minimal satu departemen penerima tampilan event.');
       }
+      const repeatFreq = normalizeCalendarRecurrenceFreq(input.repeatFreq);
+      const repeatInterval = normalizeCalendarInterval(input.repeatInterval);
+      const rawUntil = (input.repeatUntil || '').trim();
+      if (rawUntil && !/^\d{4}-\d{2}-\d{2}$/.test(rawUntil)) {
+        throw new Error('Tanggal akhir pengulangan tidak valid.');
+      }
+      if (rawUntil && rawUntil < input.date) {
+        throw new Error('Tanggal akhir pengulangan tidak boleh lebih awal dari tanggal event.');
+      }
+      const repeatUntil = repeatFreq === 'none' ? '' : rawUntil;
+      const repeatWeekdays =
+        repeatFreq === 'weekly' ? normalizeCalendarWeekdays(input.repeatWeekdays) : [];
+      const excludedDates = normalizeExcludedDates(input.excludedDates);
 
       const eventId = `evt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       const evtPath = `calendarEvents/${eventId}`;
@@ -1779,6 +1815,11 @@ export function useAuthAndRoleData() {
           startTime: input.startTime,
           visibleTo,
           notes: (input.notes || '').trim().slice(0, 500),
+          repeatFreq,
+          repeatInterval,
+          repeatUntil,
+          repeatWeekdays,
+          excludedDates,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
           createdBy: uid,
@@ -1803,6 +1844,11 @@ export function useAuthAndRoleData() {
         startTime: string;
         visibleTo: OperationalRoleId[];
         notes: string;
+        repeatFreq?: CalendarRecurrenceFreq;
+        repeatInterval?: number;
+        repeatUntil?: string;
+        repeatWeekdays?: number[];
+        excludedDates?: string[];
       }
     ) => {
       const uid = auth.currentUser?.uid;
@@ -1826,6 +1872,19 @@ export function useAuthAndRoleData() {
       if (visibleTo.length === 0) {
         throw new Error('Pilih minimal satu departemen penerima tampilan event.');
       }
+      const repeatFreq = normalizeCalendarRecurrenceFreq(input.repeatFreq);
+      const repeatInterval = normalizeCalendarInterval(input.repeatInterval);
+      const rawUntil = (input.repeatUntil || '').trim();
+      if (rawUntil && !/^\d{4}-\d{2}-\d{2}$/.test(rawUntil)) {
+        throw new Error('Tanggal akhir pengulangan tidak valid.');
+      }
+      if (rawUntil && rawUntil < input.date) {
+        throw new Error('Tanggal akhir pengulangan tidak boleh lebih awal dari tanggal event.');
+      }
+      const repeatUntil = repeatFreq === 'none' ? '' : rawUntil;
+      const repeatWeekdays =
+        repeatFreq === 'weekly' ? normalizeCalendarWeekdays(input.repeatWeekdays) : [];
+      const excludedDates = normalizeExcludedDates(input.excludedDates);
 
       const evtPath = `calendarEvents/${eventId}`;
       try {
@@ -1835,6 +1894,11 @@ export function useAuthAndRoleData() {
           startTime: input.startTime,
           visibleTo,
           notes: (input.notes || '').trim().slice(0, 500),
+          repeatFreq,
+          repeatInterval,
+          repeatUntil,
+          repeatWeekdays,
+          excludedDates,
           updatedAt: serverTimestamp(),
           updatedBy: uid,
         });

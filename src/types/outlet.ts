@@ -141,6 +141,8 @@ export interface FirebaseStorageStats {
   totalDocs: number;
 }
 
+export type CalendarRecurrenceFreq = 'none' | 'daily' | 'weekly' | 'monthly' | 'yearly';
+
 export interface CalendarEvent {
   id: string;
   title: string;
@@ -148,6 +150,11 @@ export interface CalendarEvent {
   startTime: string;
   visibleTo: OperationalRoleId[];
   notes: string;
+  repeatFreq?: CalendarRecurrenceFreq;
+  repeatInterval?: number;
+  repeatUntil?: string;
+  repeatWeekdays?: number[];
+  excludedDates?: string[];
   createdBy: string;
   updatedBy: string;
   createdByEmail: string;
