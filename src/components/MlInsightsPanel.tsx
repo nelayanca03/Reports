@@ -24,6 +24,7 @@ import {
 import {
   OPERATIONAL_ROLES,
   buildMonthsWorkingDays,
+  currentMonthKey,
   downloadTextFile,
   getPeopleMap,
   getPersonList,
@@ -32,6 +33,7 @@ import {
 
 interface MlInsightsPanelProps {
   activeRoleId: OperationalRoleId;
+  activeMonth: string;
   roleConfigs: Record<OperationalRoleId, RoleConfig>;
   allWorkspaces: Record<OperationalRoleId, OutletStoreState>;
   inputLogs: InputLogEntry[];
@@ -51,6 +53,7 @@ const PAGE_SIZE = 15;
 
 export function MlInsightsPanel({
   activeRoleId,
+  activeMonth,
   roleConfigs,
   allWorkspaces,
   inputLogs,
@@ -59,14 +62,23 @@ export function MlInsightsPanel({
   onOpenAdminTasks,
 }: MlInsightsPanelProps) {
   const today = todayIso();
+  const curMonth = currentMonthKey(today);
   const scopedDays = useMemo(
     () => buildMonthsWorkingDays(selectableMonths),
     [selectableMonths]
   );
 
+  const monthDefaultFrom = days[0] || today;
+  const monthDefaultTo =
+    activeMonth === curMonth
+      ? today
+      : activeMonth < curMonth
+        ? days[days.length - 1] || today
+        : days[0] || today;
+
   const [roleFilter, setRoleFilter] = useState<'ALL' | OperationalRoleId>('ALL');
-  const [dateFrom, setDateFrom] = useState<string>(() => days[0] || today);
-  const [dateTo, setDateTo] = useState<string>(today);
+  const [dateFrom, setDateFrom] = useState<string>(() => monthDefaultFrom);
+  const [dateTo, setDateTo] = useState<string>(() => monthDefaultTo);
   const [picFilter, setPicFilter] = useState<string>('ALL');
   const [outletFilter, setOutletFilter] = useState<string>('ALL');
   const [kpiTargetPct, setKpiTargetPct] = useState<number>(90);
@@ -76,11 +88,9 @@ export function MlInsightsPanel({
   const [exportNotice, setExportNotice] = useState<string | null>(null);
 
   useEffect(() => {
-    // Keep dateFrom valid within selectable history if unset
-    if (scopedDays.length > 0 && !dateFrom) {
-      setDateFrom(scopedDays[0]);
-    }
-  }, [scopedDays, dateFrom]);
+    setDateFrom(monthDefaultFrom);
+    setDateTo(monthDefaultTo);
+  }, [activeMonth, monthDefaultFrom, monthDefaultTo]);
 
   const { picOptions, outletOptions } = useMemo(() => {
     const rIds =
@@ -181,12 +191,14 @@ export function MlInsightsPanel({
     picFilter !== 'ALL' ||
     outletFilter !== 'ALL' ||
     kpiTargetPct !== 90 ||
+    dateFrom !== monthDefaultFrom ||
+    dateTo !== monthDefaultTo ||
     Boolean(searchQuery.trim());
 
   const handleResetFilters = () => {
     setRoleFilter('ALL');
-    setDateFrom(days[0] || today);
-    setDateTo(today);
+    setDateFrom(monthDefaultFrom);
+    setDateTo(monthDefaultTo);
     setPicFilter('ALL');
     setOutletFilter('ALL');
     setKpiTargetPct(90);
@@ -387,7 +399,19 @@ export function MlInsightsPanel({
               Jendela data aktif: {suite.evaluationPeriodLabel}
             </p>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            {scopedDays.length > 0 && dateFrom !== scopedDays[0] && (
+              <button
+                type="button"
+                onClick={() => {
+                  setDateFrom(scopedDays[0]);
+                  setDateTo(today);
+                }}
+                className="text-xs font-medium text-blue-700 hover:underline dark:text-blue-400"
+              >
+                Gabung Semua Riwayat
+              </button>
+            )}
             {roleFilter !== activeRoleId && (
               <button
                 type="button"

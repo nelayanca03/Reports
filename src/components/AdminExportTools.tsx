@@ -34,6 +34,7 @@ import {
   DEFAULT_START,
   OPERATIONAL_ROLES,
   buildMonthsWorkingDays,
+  currentMonthKey,
   downloadTextFile,
   fmtDate,
   fmtDateLong,
@@ -115,6 +116,34 @@ export function AdminExportTools({
 
   const weekOptions = useMemo(() => buildWeekOptions(scopedDays), [scopedDays]);
   const monthOptions = useMemo(() => buildMonthOptions(scopedDays), [scopedDays]);
+
+  useEffect(() => {
+    const curMonth = currentMonthKey(today);
+    const nextDay =
+      activeMonth === curMonth
+        ? nearestWorkingDay(days, yesterdayIso())
+        : activeMonth < curMonth
+          ? days[days.length - 1] || today
+          : days[0] || today;
+    setTargetDay(nextDay);
+    setRangeFrom(days[0] || today);
+    setRangeTo(
+      activeMonth === curMonth
+        ? today
+        : activeMonth < curMonth
+          ? days[days.length - 1] || today
+          : days[0] || today
+    );
+    if (monthOptions.some((m) => m.key === activeMonth)) {
+      setSelectedMonthKey(activeMonth);
+    }
+    const matchingWeek =
+      weekOptions.find((w) => w.days.includes(today) && activeMonth === curMonth) ||
+      weekOptions.find((w) => w.days.some((d) => d.slice(0, 7) === activeMonth));
+    if (matchingWeek) {
+      setSelectedWeekKey(matchingWeek.key);
+    }
+  }, [activeMonth, days, today, monthOptions, weekOptions]);
 
   useEffect(() => {
     if (scopedDays.length > 0 && !scopedDays.includes(targetDay)) {
@@ -448,6 +477,7 @@ export function AdminExportTools({
           {activeSection === 'ml' && (
             <MlInsightsPanel
               activeRoleId={config.roleId}
+              activeMonth={activeMonth}
               roleConfigs={roleConfigs}
               allWorkspaces={allWorkspaces}
               inputLogs={inputLogs}
