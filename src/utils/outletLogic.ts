@@ -996,9 +996,13 @@ export function calcVisitLeaderboard(
   return { elapsedDays, grandTotalVisits, rows };
 }
 
-function escapeCsv(val: string | number): string {
-  const str = String(val ?? '');
-  if (/[",\n]/.test(str)) {
+export function escapeCsv(val: string | number): string {
+  const raw = String(val ?? '');
+  const trimmedStart = raw.replace(/^[ \t\r\n]+/, '');
+  const isPlainNumber = typeof val === 'number' || /^[+-]?\d+(\.\d+)?$/.test(raw.trim());
+  const hasFormulaPrefix = /^[=+\-@\t\r]/.test(raw) || /^[=+\-@]/.test(trimmedStart);
+  const str = hasFormulaPrefix && !isPlainNumber ? `'${raw}` : raw;
+  if (/[",\n\r]/.test(str)) {
     return `"${str.replace(/"/g, '""')}"`;
   }
   return str;

@@ -11,6 +11,7 @@ import {
   calcRecap,
   calcTask,
   calcVisitLeaderboard,
+  escapeCsv,
   fmtDate,
   fmtDateLong,
   fmtDateTimeWithSeconds,
@@ -968,18 +969,10 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
   };
 }
 
-function escapeCsvCell(val: string | number): string {
-  const str = String(val ?? '');
-  if (/[",\n]/.test(str)) {
-    return `"${str.replace(/"/g, '""')}"`;
-  }
-  return str;
-}
-
 export function reportTableToCsv(columns: string[], rows: PreviewRow[]): string {
   const lines = [
-    columns.map(escapeCsvCell).join(','),
-    ...rows.map((r) => r.cells.map(escapeCsvCell).join(',')),
+    columns.map(escapeCsv).join(','),
+    ...rows.map((r) => r.cells.map(escapeCsv).join(',')),
   ];
   return `\uFEFF${lines.join('\n')}`;
 }

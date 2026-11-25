@@ -12,6 +12,7 @@ import {
   buildMonthsWorkingDays,
   calcTask,
   diffDays,
+  escapeCsv,
   fmtDate,
   fmtDateLong,
   getPersonList,
@@ -1855,18 +1856,10 @@ export function computeMlInsightsSuite(params: ComputeMlSuiteParams): MlInsights
   };
 }
 
-function escapeCsvCell(val: string | number): string {
-  const str = String(val ?? '');
-  if (/[",\n]/.test(str)) {
-    return `"${str.replace(/"/g, '""')}"`;
-  }
-  return str;
-}
-
 export function mlTableToCsv(columns: string[], rows: MlTableRow[]): string {
   const lines = [
-    columns.map(escapeCsvCell).join(','),
-    ...rows.map((r) => r.cells.map(escapeCsvCell).join(',')),
+    columns.map(escapeCsv).join(','),
+    ...rows.map((r) => r.cells.map(escapeCsv).join(',')),
   ];
   return `\uFEFF${lines.join('\n')}`;
 }

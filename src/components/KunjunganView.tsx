@@ -355,7 +355,16 @@ export function KunjunganView({
       if (err instanceof Error) {
         try {
           const parsed = JSON.parse(err.message);
-          if (parsed?.error) msg = `Gagal menyimpan: ${parsed.error}`;
+          const rawErr = String(parsed?.error || err.message || '');
+          const errPath = String(parsed?.path || '');
+          const lower = rawErr.toLowerCase();
+          if (lower.includes('missing or insufficient permissions') || lower.includes('permission-denied')) {
+            msg = errPath
+              ? `Gagal menyimpan (${errPath}): Akses ditolak oleh aturan keamanan (${rawErr}).`
+              : `Gagal menyimpan: Akses ditolak oleh aturan keamanan (${rawErr}).`;
+          } else if (rawErr) {
+            msg = `Gagal menyimpan: ${rawErr}`;
+          }
         } catch {
           if (err.message) msg = `Gagal menyimpan: ${err.message}`;
         }

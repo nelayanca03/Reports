@@ -264,7 +264,7 @@ export function MlInsightsPanel({
               </h2>
             </div>
             <p className="mt-1.5 text-xs leading-relaxed text-slate-500 dark:text-slate-400">
-              Mesin prediksi membaca langsung konfigurasi tugas (harian, mingguan, bulanan, & ketergantungan) serta outlet di semua departemen. Setiap tugas baru yang Anda tambahkan untuk Stock Accounting, GL, atau Accounting otomatis ikut dianalisis.
+              Menghitung skor statistik & pola historis (EWMA, regresi tren, korelasi, dan klaster K-Means) langsung dari konfigurasi tugas serta outlet di semua departemen sebagai alat bantu keputusan operasional (bukan penilaian kinerja final). Tugas baru di Stock Accounting, GL, atau Accounting otomatis ikut dianalisis.
             </p>
           </div>
 

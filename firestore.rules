@@ -244,72 +244,97 @@ service cloud.firestore {
     }
 
     function yesterdayWibDateKey() {
-      return dateKeyFromShiftedTs(request.time + duration.value(7, 'h') - duration.value(1, 'd'));
+      return dateKeyFromShiftedTs(request.time - duration.value(17, 'h'));
     }
 
     function tomorrowWibDateKey() {
-      return dateKeyFromShiftedTs(request.time + duration.value(7, 'h') + duration.value(1, 'd'));
+      return dateKeyFromShiftedTs(request.time + duration.value(31, 'h'));
+    }
+
+    function isMonthUnlockedInCfg(cfg, monthKey) {
+      return 'unlockedPastMonths' in cfg
+        && cfg.unlockedPastMonths is list
+        && monthKey in cfg.unlockedPastMonths;
     }
 
     function isMonthUnlockedForRole(roleId, monthKey) {
       let cfgPath = /databases/$(database)/documents/roleConfigs/$(roleId);
-      let hasCfg = exists(cfgPath);
-      return hasCfg
-        && 'unlockedPastMonths' in get(cfgPath).data
-        && get(cfgPath).data.unlockedPastMonths is list
-        && monthKey in get(cfgPath).data.unlockedPastMonths;
+      return exists(cfgPath) && isMonthUnlockedInCfg(get(cfgPath).data, monthKey);
     }
 
-    function canWriteMonth(roleId, monthKey) {
-      return isAdmin() || monthKey >= currentWibMonthKey() || isMonthUnlockedForRole(roleId, monthKey);
-    }
-
-    function accountPicUpper() {
-      let path = accountDocPath();
-      return (isVerifiedUser() && exists(path) && get(path).data.active == true)
-        ? accountPicFromData(get(path).data)
-        : '';
+    function roleOutletsFromCfg(cfg, picUpper) {
+      return ('outletsByPic' in cfg
+        && cfg.outletsByPic is map
+        && picUpper in cfg.outletsByPic
+        && cfg.outletsByPic[picUpper] is list)
+        ? cfg.outletsByPic[picUpper]
+        : [];
     }
 
     function roleOutletsForPic(roleId, picUpper) {
       let cfgPath = /databases/$(database)/documents/roleConfigs/$(roleId);
-      return picUpper != ''
-        && exists(cfgPath)
-        && 'outletsByPic' in get(cfgPath).data
-        && get(cfgPath).data.outletsByPic is map
-        && picUpper in get(cfgPath).data.outletsByPic
-        && get(cfgPath).data.outletsByPic[picUpper] is list
-        ? get(cfgPath).data.outletsByPic[picUpper]
+      return picUpper != '' && exists(cfgPath)
+        ? roleOutletsFromCfg(get(cfgPath).data, picUpper)
         : [];
     }
 
-    function canWriteEntOutlets(roleId, changedOutlets) {
-      let picUpper = accountPicUpper();
-      return isAdmin()
-        || changedOutlets.size() == 0
-        || (picUpper != '' && changedOutlets.hasOnly(roleOutletsForPic(roleId, picUpper)));
+    function canAccountWriteWorkspace(acc, roleId, checkMonth, monthKey, changedOutlets, changedVisitKeys) {
+      let isAdm = acc.active == true && acc.role == 'admin';
+      let hasRole = acc.active == true && (isAdm || acc.role == roleId);
+      let picUpper = acc.active == true ? accountPicFromData(acc) : '';
+      return hasRole && (
+        isAdm || (
+          (!checkMonth || monthKey >= currentWibMonthKey() || isMonthUnlockedForRole(roleId, monthKey))
+          && (changedOutlets.size() == 0 || (picUpper != '' && changedOutlets.hasOnly(roleOutletsForPic(roleId, picUpper))))
+          && (changedVisitKeys.size() == 0 || (
+            picUpper != ''
+            && changedVisitKeys.hasOnly([
+              picUpper + '|' + yesterdayWibDateKey(),
+              picUpper + '|' + currentWibDateKey(),
+              picUpper + '|' + tomorrowWibDateKey()
+            ])
+          ))
+        )
+      );
     }
 
-    function canWriteVisitKeys(changedVisitKeys) {
-      let picUpper = accountPicUpper();
-      return isAdmin()
-        || changedVisitKeys.size() == 0
-        || (
-          picUpper != ''
-          && changedVisitKeys.hasOnly([
-            picUpper + '|' + yesterdayWibDateKey(),
-            picUpper + '|' + currentWibDateKey(),
-            picUpper + '|' + tomorrowWibDateKey()
-          ])
-        );
+    function canWriteWorkspace(roleId, changedOutlets, changedVisitKeys) {
+      let accPath = accountDocPath();
+      return isBootstrappedAdmin() || (
+        isVerifiedUser()
+        && exists(accPath)
+        && canAccountWriteWorkspace(get(accPath).data, roleId, false, '', changedOutlets, changedVisitKeys)
+      );
     }
 
-    function canWriteInputLogPic(pic) {
-      let picUpper = accountPicUpper();
-      return isAdmin() || (
-        picUpper != ''
-        && pic is string
-        && pic.trim().upper() == picUpper
+    function canWriteMonthlyWorkspace(roleId, monthKey, changedOutlets, changedVisitKeys) {
+      let accPath = accountDocPath();
+      return isBootstrappedAdmin() || (
+        isVerifiedUser()
+        && exists(accPath)
+        && canAccountWriteWorkspace(get(accPath).data, roleId, true, monthKey, changedOutlets, changedVisitKeys)
+      );
+    }
+
+    function canAccountCreateInputLog(acc, roleId, pic) {
+      let isAdm = acc.active == true && acc.role == 'admin';
+      let picUpper = acc.active == true ? accountPicFromData(acc) : '';
+      return acc.active == true && (
+        isAdm || (
+          acc.role == roleId
+          && picUpper != ''
+          && pic is string
+          && pic.trim().upper() == picUpper
+        )
+      );
+    }
+
+    function canCreateInputLogAuth(roleId, pic) {
+      let accPath = accountDocPath();
+      return isBootstrappedAdmin() || (
+        isVerifiedUser()
+        && exists(accPath)
+        && canAccountCreateInputLog(get(accPath).data, roleId, pic)
       );
     }
 
@@ -335,6 +360,26 @@ service cloud.firestore {
         && exists(path)
         && isAuthorizedRecordPrefixForAcc(prefix, get(path).data)
         && canWriteSavedRecordAsAccount(get(path).data, department, pic, outlet)
+      );
+    }
+
+    function canUpdateSavedRecordAuth(existingCreatedBy, prefix, department, pic, outlet) {
+      let path = accountDocPath();
+      return isBootstrappedAdmin() || (
+        isVerifiedUser()
+        && exists(path)
+        && canAccountUpdateSavedRecord(get(path).data, existingCreatedBy, prefix, department, pic, outlet)
+      );
+    }
+
+    function canAccountUpdateSavedRecord(acc, existingCreatedBy, prefix, department, pic, outlet) {
+      return acc.active == true && (
+        acc.role in ['admin', 'accounting']
+        || (
+          existingCreatedBy == request.auth.uid
+          && isAuthorizedRecordPrefixForAcc(prefix, acc)
+          && canWriteSavedRecordAsAccount(acc, department, pic, outlet)
+        )
       );
     }
 
@@ -445,18 +490,14 @@ service cloud.firestore {
         && isValidId(roleId)
         && isOperationalRole(roleId)
         && isValidRoleWorkspace(incoming())
-        && hasRoleAccess(roleId)
-        && canWriteEntOutlets(incoming().roleId, incoming().ent.keys())
-        && canWriteVisitKeys(incoming().visit.keys())
+        && canWriteWorkspace(incoming().roleId, incoming().ent.keys(), incoming().visit.keys())
         && incoming().roleId == roleId
         && incoming().updatedAt == request.time;
       allow update: if isVerifiedUser()
         && isValidId(roleId)
         && isOperationalRole(roleId)
         && isValidRoleWorkspace(incoming())
-        && hasRoleAccess(roleId)
-        && canWriteEntOutlets(existing().roleId, incoming().ent.diff(existing().ent).affectedKeys())
-        && canWriteVisitKeys(incoming().visit.diff(existing().visit).affectedKeys())
+        && canWriteWorkspace(existing().roleId, incoming().ent.diff(existing().ent).affectedKeys(), incoming().visit.diff(existing().visit).affectedKeys())
         && incoming().roleId == existing().roleId
         && incoming().updatedAt == request.time
         && incoming().diff(existing()).affectedKeys().hasOnly(['ent', 'visit', 'updatedAt', 'updatedBy']);
@@ -469,19 +510,13 @@ service cloud.firestore {
       allow create: if isVerifiedUser()
         && isValidMonthDocId(workspaceMonthId)
         && isValidRoleMonthlyWorkspace(incoming())
-        && hasRoleAccess(incoming().roleId)
-        && canWriteMonth(incoming().roleId, incoming().monthKey)
-        && canWriteEntOutlets(incoming().roleId, incoming().ent.keys())
-        && canWriteVisitKeys(incoming().visit.keys())
+        && canWriteMonthlyWorkspace(incoming().roleId, incoming().monthKey, incoming().ent.keys(), incoming().visit.keys())
         && workspaceMonthId == (incoming().roleId + '_' + incoming().monthKey)
         && incoming().updatedAt == request.time;
       allow update: if isVerifiedUser()
         && isValidMonthDocId(workspaceMonthId)
         && isValidRoleMonthlyWorkspace(incoming())
-        && hasRoleAccess(existing().roleId)
-        && canWriteMonth(existing().roleId, existing().monthKey)
-        && canWriteEntOutlets(existing().roleId, incoming().ent.diff(existing().ent).affectedKeys())
-        && canWriteVisitKeys(incoming().visit.diff(existing().visit).affectedKeys())
+        && canWriteMonthlyWorkspace(existing().roleId, existing().monthKey, incoming().ent.diff(existing().ent).affectedKeys(), incoming().visit.diff(existing().visit).affectedKeys())
         && incoming().roleId == existing().roleId
         && incoming().monthKey == existing().monthKey
         && workspaceMonthId == (existing().roleId + '_' + existing().monthKey)
@@ -496,8 +531,7 @@ service cloud.firestore {
       allow create: if isVerifiedUser()
         && isValidId(logId)
         && isValidInputLog(incoming())
-        && hasRoleAccess(incoming().roleId)
-        && canWriteInputLogPic(incoming().pic)
+        && canCreateInputLogAuth(incoming().roleId, incoming().pic)
         && incoming().createdAt == request.time;
       allow update, delete: if false;
     }
@@ -569,14 +603,18 @@ service cloud.firestore {
         && data.createdByName is string && data.createdByName.size() >= 1 && data.createdByName.size() <= 80;
     }
 
+    function canAccountViewCalendarEvent(acc, data) {
+      return acc.active == true && (
+        acc.role in ['admin', 'accounting']
+        || (acc.role in ['stock_accounting', 'gl'] && acc.role in data.visibleTo)
+      );
+    }
+
     function canViewCalendarEvent(data) {
-      return isAdmin()
-        || (hasActiveAccount() && currentAccountRole() == 'accounting')
-        || (
-          hasActiveAccount()
-          && currentAccountRole() in ['stock_accounting', 'gl']
-          && currentAccountRole() in data.visibleTo
-        );
+      let path = accountDocPath();
+      return isBootstrappedAdmin() || (
+        exists(path) && canAccountViewCalendarEvent(get(path).data, data)
+      );
     }
 
     match /calendarEvents/{eventId} {
@@ -623,12 +661,23 @@ service cloud.firestore {
         && data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128;
     }
 
-    match /recordCounters/{counterId} {
-      allow get: if isVerifiedUser() && isValidCounterId(counterId) && (
-        isAccountingOrAdmin()
-        || (hasActiveAccount() && currentAccountRole() == 'stock_accounting' && counterId.matches('^SA_[0-9]{4}$'))
-        || (hasActiveAccount() && currentAccountRole() == 'gl' && counterId.matches('^GL_[0-9]{4}$'))
+    function canAccountGetCounter(acc, counterId) {
+      return acc.active == true && (
+        acc.role in ['admin', 'accounting']
+        || (acc.role == 'stock_accounting' && counterId.matches('^SA_[0-9]{4}$'))
+        || (acc.role == 'gl' && counterId.matches('^GL_[0-9]{4}$'))
       );
+    }
+
+    function canGetRecordCounter(counterId) {
+      let path = accountDocPath();
+      return isBootstrappedAdmin() || (
+        exists(path) && canAccountGetCounter(get(path).data, counterId)
+      );
+    }
+
+    match /recordCounters/{counterId} {
+      allow get: if isVerifiedUser() && isValidCounterId(counterId) && canGetRecordCounter(counterId);
       allow list, delete: if false;
       allow create: if isVerifiedUser()
         && isValidCounterId(counterId)
@@ -684,14 +733,18 @@ service cloud.firestore {
         && data.createdByName is string && data.createdByName.size() >= 1 && data.createdByName.size() <= 80;
     }
 
+    function canAccountViewSavedRecord(acc, data) {
+      return acc.active == true && (
+        acc.role in ['admin', 'accounting']
+        || (acc.role in ['stock_accounting', 'gl'] && data.department == acc.role)
+      );
+    }
+
     function canViewSavedRecord(data) {
-      return isAdmin()
-        || (hasActiveAccount() && currentAccountRole() == 'accounting')
-        || (
-          hasActiveAccount()
-          && currentAccountRole() in ['stock_accounting', 'gl']
-          && data.department == currentAccountRole()
-        );
+      let path = accountDocPath();
+      return isBootstrappedAdmin() || (
+        exists(path) && canAccountViewSavedRecord(get(path).data, data)
+      );
     }
 
     match /savedRecords/{recordId} {
@@ -714,13 +767,7 @@ service cloud.firestore {
       allow update: if isVerifiedUser()
         && isValidRecordId(recordId)
         && isValidSavedRecord(incoming())
-        && (
-          isAccountingOrAdmin()
-          || (
-            existing().createdBy == request.auth.uid
-            && canCreateSavedRecordAuth(existing().prefix, existing().department, incoming().pic, incoming().outlet)
-          )
-        )
+        && canUpdateSavedRecordAuth(existing().createdBy, existing().prefix, existing().department, incoming().pic, incoming().outlet)
         && incoming().refCode == existing().refCode
         && incoming().prefix == existing().prefix
         && incoming().yymm == existing().yymm

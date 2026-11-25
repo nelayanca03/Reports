@@ -3,7 +3,6 @@ import {
   FieldPath,
   Timestamp,
   collection,
-  deleteDoc,
   deleteField,
   doc,
   getCountFromServer,
@@ -32,7 +31,6 @@ import {
   AccountProfile,
   AccountRole,
   CalendarEvent,
-  CalendarRecurrenceFreq,
   EntryItem,
   FirebaseStorageStats,
   InputLogActionType,
@@ -59,45 +57,33 @@ import {
   fmtDateLong,
   fmtMonth,
   fmtWeek,
-  formatReferenceCode,
-  formatYymmFromIsoDate,
   getEntry,
-  getPeopleMap,
   getSelectableMonths,
   getTaskInputType,
   getVisitEntries,
   isSunday,
-  isValidCalendarStartTime,
   mergeWorkspaceStates,
   normalizeCalendarInterval,
   normalizeCalendarRecurrenceFreq,
   normalizeCalendarVisibleTo,
   normalizeCalendarWeekdays,
   normalizeExcludedDates,
-  resolveAuthorizedRecordPrefix,
   shiftMonthKey,
   todayIso,
   weekStartIso,
 } from '../utils/outletLogic';
-
-const THEME_STORAGE_KEY = 'outlet-theme-v1';
+import {
+  parseUnlockedPastMonths,
+  useAdminManagementActions,
+} from './useAdminManagementActions';
+import { useCalendarAndRecordsActions } from './useCalendarAndRecordsActions';
+import { useThemePreference } from './useThemePreference';
 
 export type AuthStatus = 'loading' | 'signed_out' | 'unregistered' | 'inactive' | 'ready';
 
 type WorkspaceSlice = Pick<OutletStoreState, 'ent' | 'visit'>;
 
 const EMPTY_SLICE: WorkspaceSlice = { ent: {}, visit: {} };
-
-function parseUnlockedPastMonths(raw: unknown): string[] {
-  if (!Array.isArray(raw)) return [];
-  return Array.from(
-    new Set(
-      raw.filter((m): m is string => typeof m === 'string' && /^\d{4}-\d{2}$/.test(m))
-    )
-  )
-    .sort()
-    .slice(0, 24);
-}
 
 function parseOutletsByPic(raw: unknown): Record<string, string[]> | undefined {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
@@ -130,19 +116,6 @@ function areOutletsByPicEqual(
     }
   }
   return true;
-}
-
-function loadInitialTheme(): 'light' | 'dark' {
-  try {
-    const saved = localStorage.getItem(THEME_STORAGE_KEY);
-    if (saved === 'dark' || saved === 'light') return saved;
-    if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
-      return 'dark';
-    }
-  } catch {
-    // ignore
-  }
-  return 'light';
 }
 
 function readLegacyLocalStorage(): { ent: OutletStoreState['ent']; visit: OutletStoreState['visit']; start: string } | null {
@@ -194,7 +167,7 @@ export function useAuthAndRoleData() {
   });
   const [adminMonthlySlices, setAdminMonthlySlices] = useState<Record<string, WorkspaceSlice>>({});
   const [totalInputLogCount, setTotalInputLogCount] = useState<number>(0);
-  const [theme, setTheme] = useState<'light' | 'dark'>(loadInitialTheme);
+  const { theme, toggleTheme } = useThemePreference();
 
   const effectiveRoleId: OperationalRoleId =
     currentAccount?.role === 'admin'
@@ -241,25 +214,6 @@ export function useAuthAndRoleData() {
       setActiveMonth(selectableMonths.includes(cur) ? cur : selectableMonths[0] || cur);
     }
   }, [authStatus, currentAccount, selectableMonths, activeMonth]);
-
-  // Theme sync
-  useEffect(() => {
-    const root = document.documentElement;
-    if (theme === 'dark') {
-      root.classList.add('dark');
-    } else {
-      root.classList.remove('dark');
-    }
-    try {
-      localStorage.setItem(THEME_STORAGE_KEY, theme);
-    } catch {
-      // ignore
-    }
-  }, [theme]);
-
-  const toggleTheme = useCallback(() => {
-    setTheme((prev) => (prev === 'dark' ? 'light' : 'dark'));
-  }, []);
 
   // Bootstrap initial Firestore docs when the owner/admin signs in for the first time
   const bootstrapOwnerEnvironment = useCallback(async (user: User) => {
@@ -1525,642 +1479,33 @@ export function useAuthAndRoleData() {
     [saveVisitDay, workspaceData.visit]
   );
 
-  const saveRoleConfig = useCallback(async (roleId: OperationalRoleId, nextConfig: RoleConfig) => {
-    const uid = auth.currentUser?.uid;
-    if (!uid) return;
-    const path = `roleConfigs/${roleId}`;
-    const validOpenMonth =
-      nextConfig.openUntilMonth && /^\d{4}-\d{2}$/.test(nextConfig.openUntilMonth)
-        ? nextConfig.openUntilMonth
-        : undefined;
-    const curMonth = currentMonthKey(todayIso());
-    const validUnlockedPast = parseUnlockedPastMonths(nextConfig.unlockedPastMonths).filter(
-      (m) => m < curMonth
-    );
-    try {
-      const boundedOutlets = nextConfig.outlets.slice(0, 100);
-      await setDoc(doc(db, 'roleConfigs', roleId), {
-        roleId,
-        label: nextConfig.label.slice(0, 60),
-        start: nextConfig.start,
-        ndays: Math.max(1, Math.min(60, Math.round(nextConfig.ndays))),
-        ...(validOpenMonth ? { openUntilMonth: validOpenMonth } : {}),
-        ...(validUnlockedPast.length > 0 ? { unlockedPastMonths: validUnlockedPast } : {}),
-        tasks: nextConfig.tasks.slice(0, 30),
-        outlets: boundedOutlets,
-        outletsByPic: buildOutletsByPicMap(boundedOutlets),
-        updatedAt: serverTimestamp(),
-        updatedBy: uid,
-      });
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, path);
-    }
-  }, []);
+  const {
+    saveRoleConfig,
+    saveOpenUntilMonthAllRoles,
+    togglePastMonthAllRoles,
+    saveAccount,
+    deleteAccount,
+    importWorkspaceData,
+    resetRoleWorkspace,
+  } = useAdminManagementActions({
+    currentAccount,
+    effectiveRoleId,
+    activeMonth,
+    roleConfigs,
+  });
 
-  const saveOpenUntilMonthAllRoles = useCallback(
-    async (openUntilMonth?: string) => {
-      const uid = auth.currentUser?.uid;
-      if (!uid || currentAccount?.role !== 'admin') return;
-      const validOpenMonth =
-        openUntilMonth && /^\d{4}-\d{2}$/.test(openUntilMonth) ? openUntilMonth : undefined;
-      const roleIds: OperationalRoleId[] = ['stock_accounting', 'gl', 'accounting'];
-      for (const rId of roleIds) {
-        const currentCfg = roleConfigs[rId] || DEFAULT_ROLE_CONFIGS[rId];
-        await saveRoleConfig(rId, {
-          ...currentCfg,
-          openUntilMonth: validOpenMonth,
-        });
-      }
-    },
-    [currentAccount?.role, roleConfigs, saveRoleConfig]
-  );
-
-  const togglePastMonthAllRoles = useCallback(
-    async (monthKey: string, open: boolean) => {
-      const uid = auth.currentUser?.uid;
-      if (!uid || currentAccount?.role !== 'admin') return;
-      const curMonth = currentMonthKey(todayIso());
-      if (!/^\d{4}-\d{2}$/.test(monthKey) || monthKey >= curMonth) return;
-      const roleIds: OperationalRoleId[] = ['stock_accounting', 'gl', 'accounting'];
-      for (const rId of roleIds) {
-        const currentCfg = roleConfigs[rId] || DEFAULT_ROLE_CONFIGS[rId];
-        const prevList = currentCfg.unlockedPastMonths || [];
-        const nextList = open
-          ? Array.from(new Set([...prevList, monthKey])).sort()
-          : prevList.filter((m) => m !== monthKey);
-        await saveRoleConfig(rId, {
-          ...currentCfg,
-          unlockedPastMonths: nextList,
-        });
-      }
-    },
-    [currentAccount?.role, roleConfigs, saveRoleConfig]
-  );
-
-  const saveAccount = useCallback(
-    async (input: {
-      email: string;
-      name: string;
-      role: AccountRole;
-      picName: string;
-      refPrefix?: RecordPrefix;
-      active: boolean;
-    }) => {
-      const uid = auth.currentUser?.uid;
-      if (!uid) return;
-      const email = input.email.trim().toLowerCase();
-      const accId = emailToAccountId(email);
-      const accPath = `accounts/${accId}`;
-      const accRef = doc(db, 'accounts', accId);
-
-      try {
-        const existingSnap = await getDoc(accRef);
-        const cleanName = input.name.trim().slice(0, 80);
-        const cleanPic = input.picName.trim().slice(0, 60);
-        const validRefPrefix =
-          input.role === 'accounting' && (input.refPrefix === 'SA' || input.refPrefix === 'GL')
-            ? input.refPrefix
-            : undefined;
-
-        if (existingSnap.exists()) {
-          await updateDoc(accRef, {
-            name: cleanName,
-            role: input.role,
-            picName: cleanPic,
-            refPrefix: validRefPrefix ? validRefPrefix : deleteField(),
-            active: input.active,
-            updatedAt: serverTimestamp(),
-          });
-        } else {
-          await setDoc(accRef, {
-            email,
-            name: cleanName,
-            role: input.role,
-            picName: cleanPic,
-            ...(validRefPrefix ? { refPrefix: validRefPrefix } : {}),
-            active: input.active,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-            createdBy: uid,
-          });
-        }
-
-        // Sync adminRegistry/accounts
-        const regRef = doc(db, 'adminRegistry', 'accounts');
-        const regSnap = await getDoc(regRef);
-        const prevMap = regSnap.exists() ? regSnap.data().accounts || {} : {};
-        await setDoc(regRef, {
-          accounts: {
-            ...prevMap,
-            [accId]: {
-              email,
-              name: cleanName,
-              role: input.role,
-              picName: cleanPic,
-              ...(validRefPrefix ? { refPrefix: validRefPrefix } : {}),
-              active: input.active,
-            },
-          },
-          updatedAt: serverTimestamp(),
-          updatedBy: uid,
-        });
-      } catch (error) {
-        handleFirestoreError(error, OperationType.WRITE, accPath);
-      }
-    },
-    []
-  );
-
-  const deleteAccount = useCallback(async (accountId: string) => {
-    const uid = auth.currentUser?.uid;
-    if (!uid) return;
-    const accPath = `accounts/${accountId}`;
-    try {
-      await deleteDoc(doc(db, 'accounts', accountId));
-      const regRef = doc(db, 'adminRegistry', 'accounts');
-      const regSnap = await getDoc(regRef);
-      if (regSnap.exists()) {
-        const prevMap = { ...(regSnap.data().accounts || {}) };
-        delete prevMap[accountId];
-        await setDoc(regRef, {
-          accounts: prevMap,
-          updatedAt: serverTimestamp(),
-          updatedBy: uid,
-        });
-      }
-    } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, accPath);
-    }
-  }, []);
-
-  const importWorkspaceData = useCallback(
-    async (incoming: OutletStoreState) => {
-      const uid = auth.currentUser?.uid;
-      if (!uid || currentAccount?.role !== 'admin') return;
-
-      const byMonth: Record<string, { ent: OutletStoreState['ent']; visit: OutletStoreState['visit'] }> = {};
-      const ensureBucket = (mKey: string) => {
-        if (!byMonth[mKey]) byMonth[mKey] = { ent: {}, visit: {} };
-        return byMonth[mKey];
-      };
-
-      for (const [outlet, outletMap] of Object.entries(incoming.ent || {})) {
-        for (const [k, item] of Object.entries(outletMap || {})) {
-          const day = k.split('|')[0] || '';
-          const mKey = /^\d{4}-\d{2}-\d{2}$/.test(day) ? day.slice(0, 7) : activeMonth;
-          const bucket = ensureBucket(mKey);
-          if (!bucket.ent[outlet]) bucket.ent[outlet] = {};
-          bucket.ent[outlet][k] = item as EntryItem;
-        }
-      }
-
-      for (const [vKey, vItem] of Object.entries(incoming.visit || {})) {
-        const parts = vKey.split('|');
-        const day = parts[1] || '';
-        const mKey = /^\d{4}-\d{2}-\d{2}$/.test(day) ? day.slice(0, 7) : activeMonth;
-        const bucket = ensureBucket(mKey);
-        bucket.visit[vKey] = vItem;
-      }
-
-      const monthKeys = Object.keys(byMonth);
-      if (monthKeys.length === 0) {
-        monthKeys.push(activeMonth);
-        ensureBucket(activeMonth);
-      }
-
-      for (const mKey of monthKeys) {
-        const docId = `${effectiveRoleId}_${mKey}`;
-        const path = `roleMonthlyWorkspaces/${docId}`;
-        try {
-          const wsRef = doc(db, 'roleMonthlyWorkspaces', docId);
-          const snap = await getDoc(wsRef);
-          const payload = byMonth[mKey];
-          if (snap.exists()) {
-            await updateDoc(wsRef, {
-              ent: payload.ent,
-              visit: payload.visit,
-              updatedAt: serverTimestamp(),
-              updatedBy: uid,
-            });
-          } else {
-            await setDoc(wsRef, {
-              roleId: effectiveRoleId,
-              monthKey: mKey,
-              ent: payload.ent,
-              visit: payload.visit,
-              updatedAt: serverTimestamp(),
-              updatedBy: uid,
-            });
-          }
-        } catch (error) {
-          handleFirestoreError(error, OperationType.WRITE, path);
-        }
-      }
-    },
-    [currentAccount?.role, effectiveRoleId, activeMonth]
-  );
-
-  const resetRoleWorkspace = useCallback(async () => {
-    const uid = auth.currentUser?.uid;
-    if (!uid) return;
-
-    const docId = `${effectiveRoleId}_${activeMonth}`;
-    const monthlyPath = `roleMonthlyWorkspaces/${docId}`;
-    try {
-      const mRef = doc(db, 'roleMonthlyWorkspaces', docId);
-      const mSnap = await getDoc(mRef);
-      if (mSnap.exists()) {
-        await updateDoc(mRef, {
-          ent: {},
-          visit: {},
-          updatedAt: serverTimestamp(),
-          updatedBy: uid,
-        });
-      }
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, monthlyPath);
-    }
-
-    // Also prune entries belonging to activeMonth from legacy doc so cleared month items never resurface
-    const legacyPath = `roleWorkspaces/${effectiveRoleId}`;
-    try {
-      const legacyRef = doc(db, 'roleWorkspaces', effectiveRoleId);
-      const legacySnap = await getDoc(legacyRef);
-      if (legacySnap.exists()) {
-        const d = legacySnap.data();
-        const prevEnt = (d.ent as OutletStoreState['ent']) || {};
-        const prevVisit = (d.visit as OutletStoreState['visit']) || {};
-        const nextEnt: OutletStoreState['ent'] = {};
-        for (const [outlet, outletMap] of Object.entries(prevEnt)) {
-          const kept: Record<string, EntryItem> = {};
-          for (const [k, v] of Object.entries(outletMap || {})) {
-            if (!k.startsWith(`${activeMonth}-`)) {
-              kept[k] = v;
-            }
-          }
-          if (Object.keys(kept).length > 0) {
-            nextEnt[outlet] = kept;
-          }
-        }
-        const nextVisit: OutletStoreState['visit'] = {};
-        for (const [vKey, vVal] of Object.entries(prevVisit)) {
-          const dayPart = vKey.split('|')[1] || '';
-          if (!dayPart.startsWith(`${activeMonth}-`)) {
-            nextVisit[vKey] = vVal;
-          }
-        }
-        await updateDoc(legacyRef, {
-          ent: nextEnt,
-          visit: nextVisit,
-          updatedAt: serverTimestamp(),
-          updatedBy: uid,
-        });
-      }
-    } catch (error) {
-      handleFirestoreError(error, OperationType.WRITE, legacyPath);
-    }
-  }, [effectiveRoleId, activeMonth]);
-
-  const createCalendarEvent = useCallback(
-    async (input: {
-      title: string;
-      date: string;
-      startTime: string;
-      visibleTo: OperationalRoleId[];
-      notes: string;
-      repeatFreq?: CalendarRecurrenceFreq;
-      repeatInterval?: number;
-      repeatUntil?: string;
-      repeatWeekdays?: number[];
-      excludedDates?: string[];
-    }) => {
-      const uid = auth.currentUser?.uid;
-      const email = (currentAccount?.email || auth.currentUser?.email || '').trim().toLowerCase();
-      if (!uid || !email || !currentAccount) {
-        throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
-      }
-      if (currentAccount.role !== 'admin' && currentAccount.role !== 'accounting') {
-        throw new Error('Hanya Accounting atau Admin yang dapat membuat event kalender.');
-      }
-      const cleanTitle = input.title.trim().slice(0, 120);
-      if (!cleanTitle) {
-        throw new Error('Judul event wajib diisi.');
-      }
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) {
-        throw new Error('Tanggal event tidak valid.');
-      }
-      if (!isValidCalendarStartTime(input.startTime)) {
-        throw new Error('Jam mulai hanya diperbolehkan antara 08:00 hingga 19:00 (kelipatan 30 menit).');
-      }
-      const visibleTo = normalizeCalendarVisibleTo(input.visibleTo);
-      if (visibleTo.length === 0) {
-        throw new Error('Pilih minimal satu departemen penerima tampilan event.');
-      }
-      const repeatFreq = normalizeCalendarRecurrenceFreq(input.repeatFreq);
-      const repeatInterval = normalizeCalendarInterval(input.repeatInterval);
-      const rawUntil = (input.repeatUntil || '').trim();
-      if (rawUntil && !/^\d{4}-\d{2}-\d{2}$/.test(rawUntil)) {
-        throw new Error('Tanggal akhir pengulangan tidak valid.');
-      }
-      if (rawUntil && rawUntil < input.date) {
-        throw new Error('Tanggal akhir pengulangan tidak boleh lebih awal dari tanggal event.');
-      }
-      const repeatUntil = repeatFreq === 'none' ? '' : rawUntil;
-      const repeatWeekdays =
-        repeatFreq === 'weekly' ? normalizeCalendarWeekdays(input.repeatWeekdays) : [];
-      const excludedDates = normalizeExcludedDates(input.excludedDates);
-
-      const eventId = `evt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-      const evtPath = `calendarEvents/${eventId}`;
-      try {
-        await setDoc(doc(db, 'calendarEvents', eventId), {
-          title: cleanTitle,
-          date: input.date,
-          startTime: input.startTime,
-          visibleTo,
-          notes: (input.notes || '').trim().slice(0, 500),
-          repeatFreq,
-          repeatInterval,
-          repeatUntil,
-          repeatWeekdays,
-          excludedDates,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-          createdBy: uid,
-          updatedBy: uid,
-          createdByEmail: email.slice(0, 120),
-          createdByName: (currentAccount.name || email).slice(0, 80),
-        });
-      } catch (error) {
-        handleFirestoreError(error, OperationType.CREATE, evtPath);
-      }
-      return eventId;
-    },
-    [currentAccount]
-  );
-
-  const updateCalendarEvent = useCallback(
-    async (
-      eventId: string,
-      input: {
-        title: string;
-        date: string;
-        startTime: string;
-        visibleTo: OperationalRoleId[];
-        notes: string;
-        repeatFreq?: CalendarRecurrenceFreq;
-        repeatInterval?: number;
-        repeatUntil?: string;
-        repeatWeekdays?: number[];
-        excludedDates?: string[];
-      }
-    ) => {
-      const uid = auth.currentUser?.uid;
-      if (!uid || !currentAccount) {
-        throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
-      }
-      if (currentAccount.role !== 'admin' && currentAccount.role !== 'accounting') {
-        throw new Error('Hanya Accounting atau Admin yang dapat mengubah event kalender.');
-      }
-      const cleanTitle = input.title.trim().slice(0, 120);
-      if (!cleanTitle) {
-        throw new Error('Judul event wajib diisi.');
-      }
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) {
-        throw new Error('Tanggal event tidak valid.');
-      }
-      if (!isValidCalendarStartTime(input.startTime)) {
-        throw new Error('Jam mulai hanya diperbolehkan antara 08:00 hingga 19:00 (kelipatan 30 menit).');
-      }
-      const visibleTo = normalizeCalendarVisibleTo(input.visibleTo);
-      if (visibleTo.length === 0) {
-        throw new Error('Pilih minimal satu departemen penerima tampilan event.');
-      }
-      const repeatFreq = normalizeCalendarRecurrenceFreq(input.repeatFreq);
-      const repeatInterval = normalizeCalendarInterval(input.repeatInterval);
-      const rawUntil = (input.repeatUntil || '').trim();
-      if (rawUntil && !/^\d{4}-\d{2}-\d{2}$/.test(rawUntil)) {
-        throw new Error('Tanggal akhir pengulangan tidak valid.');
-      }
-      if (rawUntil && rawUntil < input.date) {
-        throw new Error('Tanggal akhir pengulangan tidak boleh lebih awal dari tanggal event.');
-      }
-      const repeatUntil = repeatFreq === 'none' ? '' : rawUntil;
-      const repeatWeekdays =
-        repeatFreq === 'weekly' ? normalizeCalendarWeekdays(input.repeatWeekdays) : [];
-      const excludedDates = normalizeExcludedDates(input.excludedDates);
-
-      const evtPath = `calendarEvents/${eventId}`;
-      try {
-        await updateDoc(doc(db, 'calendarEvents', eventId), {
-          title: cleanTitle,
-          date: input.date,
-          startTime: input.startTime,
-          visibleTo,
-          notes: (input.notes || '').trim().slice(0, 500),
-          repeatFreq,
-          repeatInterval,
-          repeatUntil,
-          repeatWeekdays,
-          excludedDates,
-          updatedAt: serverTimestamp(),
-          updatedBy: uid,
-        });
-      } catch (error) {
-        handleFirestoreError(error, OperationType.UPDATE, evtPath);
-      }
-    },
-    [currentAccount]
-  );
-
-  const deleteCalendarEvent = useCallback(
-    async (eventId: string) => {
-      const uid = auth.currentUser?.uid;
-      if (!uid || !currentAccount) {
-        throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
-      }
-      if (currentAccount.role !== 'admin' && currentAccount.role !== 'accounting') {
-        throw new Error('Hanya Accounting atau Admin yang dapat menghapus event kalender.');
-      }
-      const evtPath = `calendarEvents/${eventId}`;
-      try {
-        await deleteDoc(doc(db, 'calendarEvents', eventId));
-      } catch (error) {
-        handleFirestoreError(error, OperationType.DELETE, evtPath);
-      }
-    },
-    [currentAccount]
-  );
-
-  const createSavedRecord = useCallback(
-    async (input: {
-      date: string;
-      pic: string;
-      outlet: string;
-      summary?: string;
-      notes?: string;
-    }) => {
-      const uid = auth.currentUser?.uid;
-      const email = (currentAccount?.email || auth.currentUser?.email || '').trim().toLowerCase();
-      if (!uid || !email || !currentAccount) {
-        throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
-      }
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) {
-        throw new Error('Tanggal wajib diisi dengan format yang valid.');
-      }
-      const cleanPic = input.pic.trim().slice(0, 60);
-      const cleanOutlet = input.outlet.trim().slice(0, 40);
-      if (!cleanPic) {
-        throw new Error('Nama PIC wajib diisi.');
-      }
-      if (!cleanOutlet) {
-        throw new Error('Outlet wajib dipilih dari daftar.');
-      }
-      const canManageAny =
-        currentAccount.role === 'admin' || currentAccount.role === 'accounting';
-      if (!canManageAny) {
-        const isOwnPic = canAccountEditPic(currentAccount, activeConfig.outlets, cleanPic);
-        const picOutlets = getPeopleMap(activeConfig.outlets)[cleanPic] || [];
-        if (!isOwnPic || !picOutlets.includes(cleanOutlet)) {
-          throw new Error(
-            'Anda hanya dapat menyimpan data update daily untuk outlet dan tugas milik Anda sendiri.'
-          );
-        }
-      }
-
-      const { prefix, department } = resolveAuthorizedRecordPrefix(currentAccount, effectiveRoleId);
-      const yymm = formatYymmFromIsoDate(input.date);
-      const counterId = `${prefix}_${yymm}`;
-      const counterRef = doc(db, 'recordCounters', counterId);
-
-      let generatedRefCode = '';
-      const path = `savedRecords/${prefix}${yymm}XXXX`;
-      try {
-        await runTransaction(db, async (tx) => {
-          const counterSnap = await tx.get(counterRef);
-          const nextSeq = counterSnap.exists()
-            ? Number(counterSnap.data().seq || 0) + 1
-            : 1;
-          generatedRefCode = formatReferenceCode(prefix, yymm, nextSeq);
-          const recordRef = doc(db, 'savedRecords', generatedRefCode);
-
-          if (!counterSnap.exists()) {
-            tx.set(counterRef, {
-              prefix,
-              yymm,
-              seq: nextSeq,
-              updatedAt: serverTimestamp(),
-              updatedBy: uid,
-            });
-          } else {
-            tx.update(counterRef, {
-              seq: nextSeq,
-              updatedAt: serverTimestamp(),
-              updatedBy: uid,
-            });
-          }
-
-          tx.set(recordRef, {
-            refCode: generatedRefCode,
-            prefix,
-            yymm,
-            department,
-            date: input.date,
-            pic: cleanPic,
-            outlet: cleanOutlet,
-            summary: (input.summary || '').trim().slice(0, 200),
-            notes: (input.notes || '').trim().slice(0, 1000),
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-            createdBy: uid,
-            updatedBy: uid,
-            createdByEmail: email.slice(0, 120),
-            createdByName: (currentAccount.name || email).slice(0, 80),
-          });
-        });
-      } catch (error) {
-        handleFirestoreError(error, OperationType.CREATE, path);
-      }
-
-      return generatedRefCode;
-    },
-    [currentAccount, effectiveRoleId, activeConfig.outlets]
-  );
-
-  const updateSavedRecord = useCallback(
-    async (
-      recordId: string,
-      input: {
-        date: string;
-        pic: string;
-        outlet: string;
-        summary?: string;
-        notes?: string;
-      }
-    ) => {
-      const uid = auth.currentUser?.uid;
-      if (!uid || !currentAccount) {
-        throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
-      }
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) {
-        throw new Error('Tanggal wajib diisi dengan format yang valid.');
-      }
-      const cleanPic = input.pic.trim().slice(0, 60);
-      const cleanOutlet = input.outlet.trim().slice(0, 40);
-      if (!cleanPic) {
-        throw new Error('Nama PIC wajib diisi.');
-      }
-      if (!cleanOutlet) {
-        throw new Error('Outlet wajib dipilih dari daftar.');
-      }
-      const canManageAny =
-        currentAccount.role === 'admin' || currentAccount.role === 'accounting';
-      if (!canManageAny) {
-        const isOwnPic = canAccountEditPic(currentAccount, activeConfig.outlets, cleanPic);
-        const picOutlets = getPeopleMap(activeConfig.outlets)[cleanPic] || [];
-        if (!isOwnPic || !picOutlets.includes(cleanOutlet)) {
-          throw new Error(
-            'Anda hanya dapat memperbarui data update daily untuk outlet dan tugas milik Anda sendiri.'
-          );
-        }
-      }
-
-      const recPath = `savedRecords/${recordId}`;
-      try {
-        await updateDoc(doc(db, 'savedRecords', recordId), {
-          date: input.date,
-          pic: cleanPic,
-          outlet: cleanOutlet,
-          summary: (input.summary || '').trim().slice(0, 200),
-          notes: (input.notes || '').trim().slice(0, 1000),
-          updatedAt: serverTimestamp(),
-          updatedBy: uid,
-        });
-      } catch (error) {
-        handleFirestoreError(error, OperationType.UPDATE, recPath);
-      }
-    },
-    [currentAccount, activeConfig.outlets]
-  );
-
-  const deleteSavedRecord = useCallback(
-    async (recordId: string) => {
-      const uid = auth.currentUser?.uid;
-      if (!uid || !currentAccount) {
-        throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
-      }
-      if (currentAccount.role !== 'admin' && currentAccount.role !== 'accounting') {
-        throw new Error('Hanya Accounting atau Admin yang dapat menghapus data tersimpan.');
-      }
-      const recPath = `savedRecords/${recordId}`;
-      try {
-        await deleteDoc(doc(db, 'savedRecords', recordId));
-      } catch (error) {
-        handleFirestoreError(error, OperationType.DELETE, recPath);
-      }
-    },
-    [currentAccount]
-  );
+  const {
+    createCalendarEvent,
+    updateCalendarEvent,
+    deleteCalendarEvent,
+    createSavedRecord,
+    updateSavedRecord,
+    deleteSavedRecord,
+  } = useCalendarAndRecordsActions({
+    currentAccount,
+    effectiveRoleId,
+    activeOutlets: activeConfig.outlets,
+  });
 
   return {
     firebaseUser,
