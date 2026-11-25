@@ -3,6 +3,7 @@ import {
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  ImageDown,
   Lock,
   RotateCcw,
   Save,
@@ -18,6 +19,8 @@ import {
   SavedRecord,
 } from '../types/outlet';
 import {
+  DEFAULT_START,
+  buildSelectableWeeks,
   calcTask,
   canAccountEditPic,
   canEditOutletDay,
@@ -26,6 +29,8 @@ import {
   fmtDateTimeWithSeconds,
   fmtDateWeekdayLong,
   fmtMonth,
+  fmtWeek,
+  fmtWeekShort,
   formatPicTitle,
   getPeopleMap,
   getPersonList,
@@ -34,12 +39,15 @@ import {
   isSunday,
   nearestWorkingDay,
   prevMonthFirstDay,
+  prevWeekMonday,
   prevWorkingDay,
   resolveAccountPic,
   resolveAuthorizedRecordPrefix,
   todayIso,
+  weekStartIso,
   yesterdayIso,
 } from '../utils/outletLogic';
+import { ExportResultPhotoModal } from './ExportResultPhotoModal';
 import { SavedRecordsSection } from './SavedRecordsSection';
 
 interface DraftEntry {
@@ -117,6 +125,12 @@ export function InputHarianView({
   const [savedNotice, setSavedNotice] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [dailyModalOpen, setDailyModalOpen] = useState(false);
+  const [exportPhotoOpen, setExportPhotoOpen] = useState(false);
+  const [exportPhotoContext, setExportPhotoContext] = useState<{
+    person: string;
+    outlet: string;
+    day: string;
+  } | null>(null);
   const lastJumpTriggerRef = useRef<number>(jumpTrigger);
 
   useEffect(() => {
@@ -281,11 +295,13 @@ export function InputHarianView({
         const dVal = (item.isDirty && item.draft ? item.draft.d : item.calc.d).trim();
         const nVal = (item.isDirty && item.draft ? item.draft.n : item.calc.n).trim();
         const label = item.def.shortLabel || item.def.label;
-        const isMonthly = getTaskInputType(item.def) === 'month';
+        const inputType = getTaskInputType(item.def);
         const dateFormatted = dVal
-          ? isMonthly
+          ? inputType === 'month'
             ? fmtMonth(dVal)
-            : fmtDate(dVal)
+            : inputType === 'week'
+              ? fmtWeek(dVal)
+              : fmtDate(dVal)
           : 'Kosong';
         summaryItems.push(`${label}: ${dateFormatted}`);
         noteLines.push(
@@ -328,6 +344,11 @@ export function InputHarianView({
         delete next[dayKey];
         return next;
       });
+      setExportPhotoContext({
+        person: activePerson,
+        outlet: activeOutlet,
+        day: selectedDay,
+      });
       setSavedNotice(
         generatedOrKeptCode
           ? `Data ${activeOutlet} (${fmtDateLong(selectedDay)}) tersimpan · Kode Referensi: ${generatedOrKeptCode}.`
@@ -355,20 +376,41 @@ export function InputHarianView({
       {savedNotice && (
         <div
           role="status"
-          className="flex items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-medium text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-300"
+          className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-xs font-medium text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/50 dark:text-emerald-300"
         >
           <div className="flex items-center gap-2">
             <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
             <span>{savedNotice}</span>
           </div>
-          <button
-            type="button"
-            onClick={() => setSavedNotice(null)}
-            aria-label="Tutup notifikasi tersimpan"
-            className="shrink-0 underline hover:no-underline"
-          >
-            Tutup
-          </button>
+          <div className="flex flex-wrap items-center gap-2.5">
+            {hasDailySetup && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (!exportPhotoContext) {
+                    setExportPhotoContext({
+                      person: activePerson,
+                      outlet: activeOutlet,
+                      day: selectedDay,
+                    });
+                  }
+                  setExportPhotoOpen(true);
+                }}
+                className="inline-flex min-h-[34px] items-center gap-1.5 rounded-lg bg-emerald-700 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-emerald-800 dark:bg-emerald-600 dark:hover:bg-emerald-500"
+              >
+                <ImageDown className="h-3.5 w-3.5 shrink-0" />
+                <span>Ekspor Foto Hasil</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => setSavedNotice(null)}
+              aria-label="Tutup notifikasi tersimpan"
+              className="shrink-0 underline hover:no-underline"
+            >
+              Tutup
+            </button>
+          </div>
         </div>
       )}
 
@@ -384,6 +426,35 @@ export function InputHarianView({
                 setSavedNotice(null);
                 setSaveError(null);
                 setDailyModalOpen(true);
+              }
+            : undefined
+        }
+        onOpenExportPhoto={
+          hasDailySetup
+            ? () => {
+                setExportPhotoContext({
+                  person: ownPic && personList.includes(ownPic) ? ownPic : activePerson,
+                  outlet: activeOutlet,
+                  day: selectedDay,
+                });
+                setExportPhotoOpen(true);
+              }
+            : undefined
+        }
+        onOpenExportPhotoForRecord={
+          hasDailySetup
+            ? (record) => {
+                const matchedPic =
+                  personList.find(
+                    (p) => p.toUpperCase() === record.pic.trim().toUpperCase()
+                  ) ||
+                  (ownPic && personList.includes(ownPic) ? ownPic : activePerson);
+                setExportPhotoContext({
+                  person: matchedPic,
+                  outlet: record.outlet,
+                  day: days.includes(record.date) ? record.date : nearestWorkingDay(days, record.date),
+                });
+                setExportPhotoOpen(true);
               }
             : undefined
         }
@@ -703,6 +774,21 @@ export function InputHarianView({
                 )}
                 <button
                   type="button"
+                  onClick={() => {
+                    setExportPhotoContext({
+                      person: activePerson,
+                      outlet: activeOutlet,
+                      day: selectedDay,
+                    });
+                    setExportPhotoOpen(true);
+                  }}
+                  className="inline-flex min-h-[40px] shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                >
+                  <ImageDown className="h-4 w-4 shrink-0" />
+                  <span>Ekspor Foto</span>
+                </button>
+                <button
+                  type="button"
                   disabled={!canEditDay || !hasUnsavedChanges || saving}
                   onClick={handleSaveDay}
                   className="inline-flex min-h-[40px] shrink-0 items-center gap-2 whitespace-nowrap rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 dark:bg-blue-600 dark:hover:bg-blue-500 dark:disabled:bg-slate-800 dark:disabled:text-slate-500"
@@ -780,17 +866,42 @@ export function InputHarianView({
                   {calculatedTasks.map(({ def, calc, displayD, displayN, isDirty }) => {
                     const inputType = getTaskInputType(def);
                     const isMonthly = inputType === 'month';
+                    const isWeekly = inputType === 'week';
                     const quickTargetDate =
                       isMonthly || def.formulaType === 'memo_month'
                         ? prevMonthFirstDay(selectedDay)
-                        : prevWorkingDay(selectedDay);
+                        : isWeekly || def.formulaType === 'weekly_plus_1'
+                          ? prevWeekMonday(selectedDay)
+                          : prevWorkingDay(selectedDay);
                     const currentComparable = isMonthly
                       ? displayD
                         ? `${displayD.slice(0, 7)}-01`
                         : ''
-                      : displayD;
+                      : isWeekly
+                        ? displayD
+                          ? weekStartIso(displayD)
+                          : ''
+                        : displayD;
                     const formattedTs = fmtDateTimeWithSeconds(calc.ts);
                     const maxMonth = today.slice(0, 7);
+                    const maxWeekMonday = weekStartIso(today);
+                    const weekOptions = isWeekly
+                      ? buildSelectableWeeks(
+                          days[0] || DEFAULT_START,
+                          today,
+                          currentComparable ? [currentComparable] : []
+                        )
+                      : [];
+                    const quickTargetTitle = isMonthly
+                      ? fmtMonth(quickTargetDate)
+                      : isWeekly
+                        ? fmtWeek(quickTargetDate)
+                        : fmtDate(quickTargetDate);
+                    const quickTargetButtonLabel = isMonthly
+                      ? fmtMonth(quickTargetDate)
+                      : isWeekly
+                        ? fmtWeekShort(quickTargetDate)
+                        : fmtDate(quickTargetDate);
                     return (
                       <tr
                         key={def.key}
@@ -812,7 +923,12 @@ export function InputHarianView({
                           </div>
                           {isAdmin && (
                             <div className="mt-0.5 text-xs text-slate-400 dark:text-slate-500">
-                              {isMonthly ? 'Input per bulan' : 'Input per tanggal'} · {def.formulaNote}
+                              {isMonthly
+                                ? 'Input per bulan'
+                                : isWeekly
+                                  ? 'Input per minggu'
+                                  : 'Input per tanggal'}{' '}
+                              · {def.formulaNote}
                             </div>
                           )}
                         </td>
@@ -836,6 +952,32 @@ export function InputHarianView({
                                 }}
                                 className="h-[38px] w-[150px] shrink-0 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 font-mono text-xs text-slate-900 tabular-nums disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-200/80 disabled:text-slate-400 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:disabled:border-slate-700/70 dark:disabled:bg-slate-800/50 dark:disabled:text-slate-500"
                               />
+                            ) : isWeekly ? (
+                              <select
+                                disabled={!canEditDay}
+                                aria-label={`Minggu update ${def.label}`}
+                                value={currentComparable}
+                                onChange={(e) => {
+                                  const raw = e.target.value;
+                                  const normalized = raw ? weekStartIso(raw) : '';
+                                  const clamped =
+                                    normalized && normalized > maxWeekMonday
+                                      ? maxWeekMonday
+                                      : normalized;
+                                  setTaskDraft(def.key, calc.d, calc.n, {
+                                    d: clamped,
+                                    cleared: false,
+                                  });
+                                }}
+                                className="h-[38px] w-[172px] shrink-0 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 font-mono text-xs text-slate-900 tabular-nums disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-200/80 disabled:text-slate-400 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:disabled:border-slate-700/70 dark:disabled:bg-slate-800/50 dark:disabled:text-slate-500"
+                              >
+                                <option value="">Pilih minggu...</option>
+                                {weekOptions.map((opt) => (
+                                  <option key={opt.value} value={opt.value}>
+                                    {opt.label}
+                                  </option>
+                                ))}
+                              </select>
                             ) : (
                               <input
                                 type="date"
@@ -864,13 +1006,13 @@ export function InputHarianView({
                                       cleared: false,
                                     })
                                   }
-                                  title={`Atur ke ${isMonthly ? fmtMonth(quickTargetDate) : fmtDate(quickTargetDate)}`}
-                                  className="inline-flex h-[38px] w-[108px] shrink-0 items-center justify-center whitespace-nowrap rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                                  title={`Atur ke ${quickTargetTitle}`}
+                                  className="inline-flex h-[38px] min-w-[108px] shrink-0 items-center justify-center whitespace-nowrap rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
                                 >
-                                  Set {isMonthly ? fmtMonth(quickTargetDate) : fmtDate(quickTargetDate)}
+                                  Set {quickTargetButtonLabel}
                                 </button>
                               ) : (
-                                <span className="h-[38px] w-[108px] shrink-0" aria-hidden="true" />
+                                <span className="h-[38px] min-w-[108px] shrink-0" aria-hidden="true" />
                               ))}
                             {canEditDay &&
                               (calc.own || isDirty ? (
@@ -925,9 +1067,13 @@ export function InputHarianView({
                           <td className="px-4 py-3.5 align-middle font-mono text-xs text-slate-600 tabular-nums dark:text-slate-400">
                             {isMonthly
                               ? fmtMonth(calc.rumus)
-                              : calc.rumus
-                                ? fmtDate(calc.rumus)
-                                : '—'}
+                              : isWeekly
+                                ? calc.rumus
+                                  ? fmtWeek(calc.rumus)
+                                  : '—'
+                                : calc.rumus
+                                  ? fmtDate(calc.rumus)
+                                  : '—'}
                           </td>
                         )}
 
@@ -1008,6 +1154,20 @@ export function InputHarianView({
             </div>
           </div>
         </div>
+      )}
+
+      {hasDailySetup && (
+        <ExportResultPhotoModal
+          open={exportPhotoOpen}
+          account={account}
+          config={config}
+          store={store}
+          days={days}
+          initialPerson={exportPhotoContext?.person || activePerson}
+          initialOutlet={exportPhotoContext?.outlet || activeOutlet}
+          initialDay={exportPhotoContext?.day || selectedDay}
+          onClose={() => setExportPhotoOpen(false)}
+        />
       )}
     </div>
   );

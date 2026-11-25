@@ -6,6 +6,8 @@ import {
   calcTask,
   fmtDate,
   fmtMonth,
+  fmtWeek,
+  formatTaskDateByType,
   getPersonList,
   getTaskInputType,
   nearestWorkingDay,
@@ -68,7 +70,7 @@ export function RekapRankingView({
   const activeTaskDef =
     config.tasks.find((t) => t.key === selectedTask) || config.tasks[0];
   const activeTaskKey = activeTaskDef.key;
-  const isActiveTaskMonthly = getTaskInputType(activeTaskDef) === 'month';
+  const activeTaskInputType = getTaskInputType(activeTaskDef);
 
   const normalizedQuery = searchQuery.trim().toLowerCase();
 
@@ -383,8 +385,10 @@ export function RekapRankingView({
                             <span className="font-sans text-slate-400 dark:text-slate-500">
                               Belum pernah input
                             </span>
-                          ) : isActiveTaskMonthly ? (
+                          ) : activeTaskInputType === 'month' ? (
                             fmtMonth(row.latestDate)
+                          ) : activeTaskInputType === 'week' ? (
+                            fmtWeek(row.latestDate)
                           ) : (
                             fmtDate(row.latestDate)
                           )}
@@ -534,7 +538,7 @@ export function RekapRankingView({
                         t.key,
                         today
                       );
-                      const isMonthly = getTaskInputType(t) === 'month';
+                      const taskInputType = getTaskInputType(t);
                       return (
                         <td key={t.key} className="px-3 py-3 text-right font-mono tabular-nums">
                           <div
@@ -547,7 +551,7 @@ export function RekapRankingView({
                             {!c.d ? '—' : c.pm > 0 ? `+${c.pm}` : c.pm}
                           </div>
                           <div className="text-[11px] text-slate-400 dark:text-slate-500">
-                            {isMonthly ? fmtMonth(c.d) : fmtDate(c.d)}
+                            {formatTaskDateByType(taskInputType, c.d, 'short')}
                           </div>
                         </td>
                       );

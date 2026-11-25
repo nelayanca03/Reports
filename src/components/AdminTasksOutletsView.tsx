@@ -38,6 +38,7 @@ interface AdminTasksOutletsViewProps {
 
 const FORMULA_LABELS: Record<FormulaType, string> = {
   daily_plus_1: 'Harian (+1 dari tgl kerja)',
+  weekly_plus_1: 'Mingguan (Selisih minggu + 1)',
   memo_month: 'Bulanan (Selisih bulan + 1)',
   ref_task: 'Mengikuti tugas lain',
 };
@@ -240,18 +241,43 @@ export function AdminTasksOutletsView({
   };
 
   const handleChangeTaskInputType = async (task: TaskDefinition, nextType: TaskInputType) => {
-    const updatedTasks = config.tasks.map((t) =>
-      t.key === task.key ? { ...t, inputType: nextType } : t
-    );
+    const tol = getTaskTolerance(task);
+    const updatedTasks = config.tasks.map((t) => {
+      if (t.key !== task.key) return t;
+      let nextFormula: FormulaType = t.formulaType;
+      let nextFormulaNote = t.formulaNote;
+      if (t.formulaType !== 'ref_task') {
+        if (nextType === 'month') {
+          nextFormula = 'memo_month';
+          nextFormulaNote = buildFormulaNote('memo_month', tol);
+        } else if (nextType === 'week') {
+          nextFormula = 'weekly_plus_1';
+          nextFormulaNote = buildFormulaNote('weekly_plus_1', tol);
+        } else {
+          nextFormula = 'daily_plus_1';
+          nextFormulaNote = buildFormulaNote('daily_plus_1', tol);
+        }
+      }
+      return {
+        ...t,
+        inputType: nextType,
+        formulaType: nextFormula,
+        formulaNote: nextFormulaNote,
+      };
+    });
+    const typeLabel =
+      nextType === 'month'
+        ? 'Per Bulan'
+        : nextType === 'week'
+          ? 'Per Minggu'
+          : 'Per Tanggal';
     setBusy(true);
     try {
       await onSaveRoleConfig(targetRole, {
         ...config,
         tasks: updatedTasks,
       });
-      setFeedback(
-        `Jenis input tugas "${task.label}" diubah menjadi ${nextType === 'month' ? 'Per Bulan' : 'Per Tanggal'}.`
-      );
+      setFeedback(`Jenis input tugas "${task.label}" diubah menjadi ${typeLabel}.`);
     } finally {
       setBusy(false);
     }
@@ -284,8 +310,14 @@ export function AdminTasksOutletsView({
         delete next[task.key];
         return next;
       });
+      const unitWord =
+        task.formulaType === 'memo_month'
+          ? 'bulan'
+          : task.formulaType === 'weekly_plus_1'
+            ? 'minggu'
+            : 'hari';
       setFeedback(
-        `Batas toleransi tugas "${task.label}" diperbarui menjadi ${parsed >= 0 ? `+${parsed}` : parsed} ${task.formulaType === 'memo_month' ? 'bulan' : 'hari'}.`
+        `Batas toleransi tugas "${task.label}" diperbarui menjadi ${parsed >= 0 ? `+${parsed}` : parsed} ${unitWord}.`
       );
     } finally {
       setBusy(false);
@@ -693,7 +725,10 @@ export function AdminTasksOutletsView({
                 if (nextInput === 'month') {
                   setTaskFormula('memo_month');
                   setTaskTolerance('1');
-                } else if (taskFormula === 'memo_month') {
+                } else if (nextInput === 'week') {
+                  setTaskFormula('weekly_plus_1');
+                  setTaskTolerance('1');
+                } else if (taskFormula === 'memo_month' || taskFormula === 'weekly_plus_1') {
                   setTaskFormula('daily_plus_1');
                   setTaskTolerance('1');
                 }
@@ -701,6 +736,7 @@ export function AdminTasksOutletsView({
               className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
             >
               <option value="date">Per Tanggal</option>
+              <option value="week">Per Minggu</option>
               <option value="month">Per Bulan</option>
             </select>
           </div>
@@ -721,11 +757,19 @@ export function AdminTasksOutletsView({
                 setTaskTolerance(nextFormula === 'ref_task' ? '0' : '1');
                 if (nextFormula === 'memo_month') {
                   setTaskInputType('month');
+                } else if (nextFormula === 'weekly_plus_1') {
+                  setTaskInputType('week');
+                } else if (
+                  nextFormula === 'daily_plus_1' &&
+                  (taskInputType === 'month' || taskInputType === 'week')
+                ) {
+                  setTaskInputType('date');
                 }
               }}
               className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
             >
               <option value="daily_plus_1">Harian (vs tgl kerja)</option>
+              <option value="weekly_plus_1">Mingguan (vs minggu ini)</option>
               <option value="memo_month">Bulanan (vs bulan ini)</option>
               {config.tasks.length > 0 && (
                 <option value="ref_task">Mengikuti tugas lain</option>
@@ -810,7 +854,12 @@ export function AdminTasksOutletsView({
                   const savedTol = getTaskTolerance(t);
                   const draftVal = toleranceDrafts[t.key] ?? String(savedTol);
                   const isDirty = draftVal !== String(savedTol);
-                  const unitLabel = t.formulaType === 'memo_month' ? 'bln' : 'hari';
+                  const unitLabel =
+                    t.formulaType === 'memo_month'
+                      ? 'bln'
+                      : t.formulaType === 'weekly_plus_1'
+                        ? 'mgg'
+                        : 'hari';
                   const currentInputType = getTaskInputType(t);
                   return (
                     <tr key={t.key} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/30">
@@ -831,6 +880,7 @@ export function AdminTasksOutletsView({
                           className="min-h-[34px] rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-800 focus:border-blue-600 focus:outline-none disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
                         >
                           <option value="date">Per Tanggal</option>
+                          <option value="week">Per Minggu</option>
                           <option value="month">Per Bulan</option>
                         </select>
                       </td>

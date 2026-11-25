@@ -15,6 +15,7 @@ import {
   fmtDateLong,
   fmtDateTimeWithSeconds,
   fmtMonth,
+  fmtWeek,
   getPeopleMap,
   getPersonList,
   getSelectableMonths,
@@ -357,8 +358,14 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
             const c = calcTask(ws, rDays, cfg.tasks, outlet, dayItem, t.key, today);
             if (onlyPending && !c.pend) continue;
 
-            const isMonthly = getTaskInputType(t) === 'month';
-            const displayD = c.d ? (isMonthly ? fmtMonth(c.d) : fmtDateLong(c.d)) : 'Belum diinput';
+            const inputType = getTaskInputType(t);
+            const displayD = c.d
+              ? inputType === 'month'
+                ? fmtMonth(c.d)
+                : inputType === 'week'
+                  ? fmtWeek(c.d)
+                  : fmtDateLong(c.d)
+              : 'Belum diinput';
             const signedPm = !c.d ? '—' : c.pm > 0 ? `+${c.pm}` : `${c.pm}`;
 
             if (onlyPending) {
@@ -386,11 +393,16 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
                   : c.source === 'inherited' && c.sourceDay
                     ? `Ikut ${fmtDate(c.sourceDay)}${tsFormatted ? ` (${tsFormatted})` : ''}`
                     : 'Belum diinput';
-              const rumusLabel = isMonthly
-                ? fmtMonth(c.rumus)
-                : c.rumus
-                  ? fmtDateLong(c.rumus)
-                  : '—';
+              const rumusLabel =
+                inputType === 'month'
+                  ? fmtMonth(c.rumus)
+                  : inputType === 'week'
+                    ? c.rumus
+                      ? fmtWeek(c.rumus)
+                      : '—'
+                    : c.rumus
+                      ? fmtDateLong(c.rumus)
+                      : '—';
               rawRows.push({
                 key: `${dayItem}|${rId}|${outlet}|${t.key}`,
                 status: c.pend ? 'PENDING' : 'UPDATE',

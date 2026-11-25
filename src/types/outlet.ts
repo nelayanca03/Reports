@@ -2,8 +2,8 @@ export type AccountRole = 'admin' | 'stock_accounting' | 'gl' | 'accounting';
 export type OperationalRoleId = 'stock_accounting' | 'gl' | 'accounting';
 export type RecordPrefix = 'SA' | 'GL';
 export type RecordDepartment = 'stock_accounting' | 'gl';
-export type FormulaType = 'daily_plus_1' | 'memo_month' | 'ref_task';
-export type TaskInputType = 'date' | 'month';
+export type FormulaType = 'daily_plus_1' | 'weekly_plus_1' | 'memo_month' | 'ref_task';
+export type TaskInputType = 'date' | 'week' | 'month';
 export type InputLogActionType = 'input_harian' | 'kunjungan';
 
 export interface TaskDefinition {

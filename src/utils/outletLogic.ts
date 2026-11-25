@@ -108,10 +108,16 @@ export const STOCK_ACCOUNTING_TASKS: TaskDefinition[] = [
 export function getTaskInputType(
   taskDef?: Pick<TaskDefinition, 'inputType' | 'formulaType'>
 ): TaskInputType {
-  if (taskDef?.inputType === 'month' || taskDef?.inputType === 'date') {
+  if (
+    taskDef?.inputType === 'month' ||
+    taskDef?.inputType === 'week' ||
+    taskDef?.inputType === 'date'
+  ) {
     return taskDef.inputType;
   }
-  return taskDef?.formulaType === 'memo_month' ? 'month' : 'date';
+  if (taskDef?.formulaType === 'memo_month') return 'month';
+  if (taskDef?.formulaType === 'weekly_plus_1') return 'week';
+  return 'date';
 }
 
 export function getTaskTolerance(taskDef?: Pick<TaskDefinition, 'formulaType' | 'toleranceOffset'>): number {
@@ -133,6 +139,9 @@ export function buildFormulaNote(
   const signed = toleranceOffset >= 0 ? `+ ${toleranceOffset}` : `- ${Math.abs(toleranceOffset)}`;
   if (formulaType === 'memo_month') {
     return `Selisih bulan terhadap tanggal kerja ${signed}`;
+  }
+  if (formulaType === 'weekly_plus_1') {
+    return `Selisih minggu terhadap tanggal kerja ${signed}`;
   }
   if (formulaType === 'ref_task' && refLabel) {
     return toleranceOffset === 0
@@ -276,6 +285,30 @@ export function prevMonthFirstDay(isoStr: string): string {
   return toIsoUtc(d);
 }
 
+export function weekStartIso(isoStr: string): string {
+  const raw = (isoStr || '').trim();
+  const isoWeekMatch = /^(\d{4})-W(\d{2})$/.exec(raw);
+  if (isoWeekMatch) {
+    const year = Number(isoWeekMatch[1]);
+    const weekNum = Number(isoWeekMatch[2]);
+    const jan4 = new Date(Date.UTC(year, 0, 4));
+    const jan4Dow = jan4.getUTCDay() || 7;
+    const week1Mon = new Date(jan4.getTime() + (1 - jan4Dow) * 864e5);
+    const targetMon = new Date(week1Mon.getTime() + (weekNum - 1) * 7 * 864e5);
+    return toIsoUtc(targetMon);
+  }
+  const normalized = raw.length === 7 ? `${raw}-01` : raw;
+  const d = parseUtcDate(normalized);
+  if (Number.isNaN(d.getTime())) return raw;
+  const dow = d.getUTCDay();
+  const diffToMon = dow === 0 ? -6 : 1 - dow;
+  return shiftIsoDays(normalized, diffToMon);
+}
+
+export function prevWeekMonday(isoStr: string): string {
+  return shiftIsoDays(weekStartIso(isoStr), -7);
+}
+
 export function currentMonthKey(today: string = todayIso()): string {
   return /^\d{4}-\d{2}/.test(today) ? today.slice(0, 7) : MIN_WORKSPACE_MONTH;
 }
@@ -400,6 +433,108 @@ export function fmtDateLong(isoStr: string): string {
     year: 'numeric',
     timeZone: 'UTC',
   });
+}
+
+export function fmtWeek(isoStr: string): string {
+  if (!isoStr) return '—';
+  const monIso = weekStartIso(isoStr);
+  const monDate = parseUtcDate(monIso);
+  if (Number.isNaN(monDate.getTime())) return isoStr;
+  const satIso = shiftIsoDays(monIso, 5);
+  const satDate = parseUtcDate(satIso);
+  const monDay = String(monDate.getUTCDate()).padStart(2, '0');
+  if (monIso.slice(0, 7) === satIso.slice(0, 7)) {
+    const satPart = satDate.toLocaleDateString('id-ID', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      timeZone: 'UTC',
+    });
+    return `${monDay}–${satPart}`;
+  }
+  if (monIso.slice(0, 4) === satIso.slice(0, 4)) {
+    const monPart = monDate.toLocaleDateString('id-ID', {
+      day: '2-digit',
+      month: 'short',
+      timeZone: 'UTC',
+    });
+    const satPart = satDate.toLocaleDateString('id-ID', {
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      timeZone: 'UTC',
+    });
+    return `${monPart}–${satPart}`;
+  }
+  return `${fmtDateLong(monIso)}–${fmtDateLong(satIso)}`;
+}
+
+export function fmtWeekShort(isoStr: string): string {
+  if (!isoStr) return '—';
+  const monIso = weekStartIso(isoStr);
+  const monDate = parseUtcDate(monIso);
+  if (Number.isNaN(monDate.getTime())) return isoStr;
+  const satIso = shiftIsoDays(monIso, 5);
+  const satDate = parseUtcDate(satIso);
+  const monDay = String(monDate.getUTCDate()).padStart(2, '0');
+  if (monIso.slice(0, 7) === satIso.slice(0, 7)) {
+    const satPart = satDate.toLocaleDateString('id-ID', {
+      day: '2-digit',
+      month: 'short',
+      timeZone: 'UTC',
+    });
+    return `${monDay}–${satPart}`;
+  }
+  const satDay = String(satDate.getUTCDate()).padStart(2, '0');
+  return `${monDay}/${monIso.slice(5, 7)}–${satDay}/${satIso.slice(5, 7)}`;
+}
+
+export function formatTaskDateByType(
+  inputType: TaskInputType,
+  isoStr: string,
+  variant: 'short' | 'long' = 'short'
+): string {
+  if (!isoStr) return '—';
+  if (inputType === 'month') return fmtMonth(isoStr);
+  if (inputType === 'week') {
+    return variant === 'short' ? fmtWeekShort(isoStr) : fmtWeek(isoStr);
+  }
+  return variant === 'long' ? fmtDateLong(isoStr) : fmtDate(isoStr);
+}
+
+export function buildSelectableWeeks(
+  startIso: string,
+  maxIso: string,
+  extraDates: string[] = []
+): Array<{ value: string; label: string }> {
+  const maxMon = weekStartIso(maxIso || todayIso());
+  const baseStart = startIso && startIso < maxMon ? startIso : maxMon;
+  const earliestMon = shiftIsoDays(weekStartIso(baseStart), -12 * 7);
+  const weekSet = new Set<string>();
+
+  let cursor = earliestMon;
+  let safety = 0;
+  while (cursor <= maxMon && safety < 260) {
+    weekSet.add(cursor);
+    cursor = shiftIsoDays(cursor, 7);
+    safety++;
+  }
+  weekSet.add(maxMon);
+
+  for (const extra of extraDates) {
+    if (!extra) continue;
+    const normalized = weekStartIso(extra);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+      weekSet.add(normalized);
+    }
+  }
+
+  return Array.from(weekSet)
+    .sort((a, b) => b.localeCompare(a))
+    .map((mon) => ({
+      value: mon,
+      label: fmtWeek(mon),
+    }));
 }
 
 export function fmtDateFull(isoStr: string): string {
@@ -650,6 +785,19 @@ export function calcTask(
       const b = parseUtcDate(anchorDay.length === 7 ? `${anchorDay}-01` : anchorDay);
       pm = (a.getUTCFullYear() - b.getUTCFullYear()) * 12 + a.getUTCMonth() - b.getUTCMonth() + tol;
     }
+  } else if (formulaType === 'weekly_plus_1') {
+    const anchorMonday = weekStartIso(day || today);
+    rumus = anchorMonday;
+    if (!resolved.d) {
+      pm = -daysSincePeriodStart;
+    } else {
+      const rawWeekMonday = weekStartIso(resolved.d);
+      const todayWeekMonday = weekStartIso(today);
+      const effectiveWeekMonday =
+        rawWeekMonday > todayWeekMonday ? todayWeekMonday : rawWeekMonday;
+      const weeksDiff = Math.round(diffDays(effectiveWeekMonday, anchorMonday) / 7);
+      pm = weeksDiff + tol;
+    }
   } else if (formulaType === 'ref_task' && taskDef?.refTaskKey) {
     const refResolved = getEntry(state, days, tasks, outlet, day, taskDef.refTaskKey);
     const rawRef = refResolved.d || '';
@@ -892,8 +1040,20 @@ export function generateDailyFleetCsv(
               ? `Ikut ${c.sourceDay} (${tsFormatted})`
               : `Ikut ${c.sourceDay}`
             : 'Belum diinput';
-      const isMonthly = getTaskInputType(t) === 'month';
-      const displayDate = c.d ? (isMonthly ? c.d.slice(0, 7) : c.d) : '';
+      const inputType = getTaskInputType(t);
+      const displayDate = c.d
+        ? inputType === 'month'
+          ? c.d.slice(0, 7)
+          : inputType === 'week'
+            ? fmtWeek(c.d)
+            : c.d
+        : '';
+      const rumusCsv =
+        inputType === 'month' && c.rumus
+          ? c.rumus.slice(0, 7)
+          : inputType === 'week' && c.rumus
+            ? fmtWeek(c.rumus)
+            : c.rumus;
       rows.push(
         [
           config.label,
@@ -903,7 +1063,7 @@ export function generateDailyFleetCsv(
           t.label,
           displayDate,
           sourceLabel,
-          ...(includeFormula ? [c.rumus, c.pm] : []),
+          ...(includeFormula ? [rumusCsv, c.pm] : []),
           c.pend ? 'PENDING' : 'UPDATE',
           c.n,
         ]
@@ -948,13 +1108,15 @@ export function generateRecapCsv(
     )
     .sort((a, b) => Number(a.hasAnyInput) - Number(b.hasAnyInput) || a.avg - b.avg);
 
-  const isMonthly = getTaskInputType(taskDef) === 'month';
+  const inputType = getTaskInputType(taskDef);
   const rows: string[] = [header.map(escapeCsv).join(',')];
   recaps.forEach((r, idx) => {
     const displayLatest = r.latestDate
-      ? isMonthly
+      ? inputType === 'month'
         ? r.latestDate.slice(0, 7)
-        : r.latestDate
+        : inputType === 'week'
+          ? fmtWeek(r.latestDate)
+          : r.latestDate
       : 'Belum pernah input';
     rows.push(
       [

@@ -58,6 +58,7 @@ import {
   estimateFirestoreDocBytes,
   fmtDateLong,
   fmtMonth,
+  fmtWeek,
   formatReferenceCode,
   formatYymmFromIsoDate,
   getEntry,
@@ -76,6 +77,7 @@ import {
   resolveAuthorizedRecordPrefix,
   shiftMonthKey,
   todayIso,
+  weekStartIso,
 } from '../utils/outletLogic';
 
 const THEME_STORAGE_KEY = 'outlet-theme-v1';
@@ -1009,13 +1011,20 @@ export function useAuthAndRoleData() {
       }
 
       const taskDef = activeConfig.tasks.find((t) => t.key === taskKey);
-      const isMonthly = getTaskInputType(taskDef) === 'month';
+      const inputType = getTaskInputType(taskDef);
       const safeValue = field === 'n' ? value.slice(0, 100) : value.trim();
 
       if (field === 'd' && safeValue) {
-        if (isMonthly) {
+        if (inputType === 'month') {
           if (!/^\d{4}-\d{2}/.test(safeValue) || safeValue.slice(0, 7) > currentMonthKey(today)) {
             throw new Error('Bulan update tidak boleh melebihi bulan berjalan.');
+          }
+        } else if (inputType === 'week') {
+          if (
+            !/^\d{4}-\d{2}-\d{2}$/.test(safeValue) ||
+            weekStartIso(safeValue) > weekStartIso(today)
+          ) {
+            throw new Error('Minggu update tidak boleh melebihi minggu berjalan.');
           }
         } else if (!/^\d{4}-\d{2}-\d{2}$/.test(safeValue) || safeValue > today) {
           throw new Error('Tanggal update tidak boleh melebihi tanggal hari ini.');
@@ -1163,15 +1172,25 @@ export function useAuthAndRoleData() {
       }
 
       const curMonth = currentMonthKey(today);
+      const curWeekMonday = weekStartIso(today);
       for (const [taskKey, item] of entries) {
         const cleanDate = (item.d || '').trim();
         if (item.cleared || !cleanDate) continue;
         const taskDef = activeConfig.tasks.find((t) => t.key === taskKey);
-        const isMonthly = getTaskInputType(taskDef) === 'month';
-        if (isMonthly) {
+        const inputType = getTaskInputType(taskDef);
+        if (inputType === 'month') {
           if (!/^\d{4}-\d{2}/.test(cleanDate) || cleanDate.slice(0, 7) > curMonth) {
             throw new Error(
               `Bulan update pada ${taskDef?.label || taskKey} tidak boleh melebihi bulan berjalan.`
+            );
+          }
+        } else if (inputType === 'week') {
+          if (
+            !/^\d{4}-\d{2}-\d{2}$/.test(cleanDate) ||
+            weekStartIso(cleanDate) > curWeekMonday
+          ) {
+            throw new Error(
+              `Minggu update pada ${taskDef?.label || taskKey} tidak boleh melebihi minggu berjalan.`
             );
           }
         } else if (!/^\d{4}-\d{2}-\d{2}$/.test(cleanDate) || cleanDate > today) {
@@ -1246,10 +1265,13 @@ export function useAuthAndRoleData() {
         if (item.cleared || (!item.d && !cleanNote)) {
           return `${label}: Dikosongkan`;
         }
+        const taskInputType = getTaskInputType(taskDef);
         const datePart = item.d
-          ? getTaskInputType(taskDef) === 'month'
+          ? taskInputType === 'month'
             ? fmtMonth(item.d)
-            : fmtDateLong(item.d)
+            : taskInputType === 'week'
+              ? fmtWeek(item.d)
+              : fmtDateLong(item.d)
           : '-';
         return cleanNote ? `${label}: ${datePart} (${cleanNote})` : `${label}: ${datePart}`;
       });
