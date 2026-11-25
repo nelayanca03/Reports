@@ -1,15 +1,32 @@
-import { useEffect, useRef, useState } from 'react';
-import { AdminAccountsView } from './components/AdminAccountsView';
-import { AdminExportTools } from './components/AdminExportTools';
-import { AdminLogsView } from './components/AdminLogsView';
-import { AdminTasksOutletsView } from './components/AdminTasksOutletsView';
-import { InputHarianView } from './components/InputHarianView';
-import { KalenderView } from './components/KalenderView';
-import { KunjunganView } from './components/KunjunganView';
+import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { LoginView } from './components/LoginView';
-import { RekapRankingView } from './components/RekapRankingView';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
+
+const AdminAccountsView = lazy(() =>
+  import('./components/AdminAccountsView').then((m) => ({ default: m.AdminAccountsView }))
+);
+const AdminExportTools = lazy(() =>
+  import('./components/AdminExportTools').then((m) => ({ default: m.AdminExportTools }))
+);
+const AdminLogsView = lazy(() =>
+  import('./components/AdminLogsView').then((m) => ({ default: m.AdminLogsView }))
+);
+const AdminTasksOutletsView = lazy(() =>
+  import('./components/AdminTasksOutletsView').then((m) => ({ default: m.AdminTasksOutletsView }))
+);
+const InputHarianView = lazy(() =>
+  import('./components/InputHarianView').then((m) => ({ default: m.InputHarianView }))
+);
+const KalenderView = lazy(() =>
+  import('./components/KalenderView').then((m) => ({ default: m.KalenderView }))
+);
+const KunjunganView = lazy(() =>
+  import('./components/KunjunganView').then((m) => ({ default: m.KunjunganView }))
+);
+const RekapRankingView = lazy(() =>
+  import('./components/RekapRankingView').then((m) => ({ default: m.RekapRankingView }))
+);
 import { BOOTSTRAPPED_ADMIN_EMAIL } from './firebase';
 import { useAuthAndRoleData } from './hooks/useAuthAndRoleData';
 import { AppView } from './types/outlet';
@@ -308,120 +325,128 @@ export default function App() {
               : 'mx-auto w-full max-w-[1200px] flex-1 p-4 sm:p-6'
           }
         >
-          {activeView === 'calendar' && (
-            <KalenderView
-              account={currentAccount}
-              events={calendarEvents}
-              onCreateEvent={createCalendarEvent}
-              onUpdateEvent={updateCalendarEvent}
-              onDeleteEvent={deleteCalendarEvent}
-            />
-          )}
+          <Suspense
+            fallback={
+              <div className="flex min-h-[240px] items-center justify-center rounded-xl border border-slate-200 bg-white p-8 text-sm text-slate-500 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-400">
+                Memuat tampilan...
+              </div>
+            }
+          >
+            {activeView === 'calendar' && (
+              <KalenderView
+                account={currentAccount}
+                events={calendarEvents}
+                onCreateEvent={createCalendarEvent}
+                onUpdateEvent={updateCalendarEvent}
+                onDeleteEvent={deleteCalendarEvent}
+              />
+            )}
 
-          {activeView === 'input' && (
-            <InputHarianView
-              account={currentAccount}
-              currentUserUid={firebaseUser?.uid || ''}
-              activeRoleId={activeRoleId}
-              config={activeConfig}
-              roleConfigs={roleConfigs}
-              store={store}
-              savedRecords={savedRecords}
-              days={days}
-              isAdmin={isAdmin}
-              selectedPerson={selectedPerson}
-              selectedOutlet={selectedOutlet}
-              selectedDay={selectedDay}
-              jumpTrigger={dailyModalJumpTrigger}
-              onChangePerson={handleChangePerson}
-              onChangeOutlet={setSelectedOutlet}
-              onChangeDay={setSelectedDay}
-              onSaveOutletDay={saveOutletDayEntries}
-              onCreateSavedRecord={createSavedRecord}
-              onUpdateSavedRecord={updateSavedRecord}
-              onDeleteSavedRecord={deleteSavedRecord}
-              onOpenAdminConfig={() => setActiveView('admin_tasks')}
-            />
-          )}
+            {activeView === 'input' && (
+              <InputHarianView
+                account={currentAccount}
+                currentUserUid={firebaseUser?.uid || ''}
+                activeRoleId={activeRoleId}
+                config={activeConfig}
+                roleConfigs={roleConfigs}
+                store={store}
+                savedRecords={savedRecords}
+                days={days}
+                isAdmin={isAdmin}
+                selectedPerson={selectedPerson}
+                selectedOutlet={selectedOutlet}
+                selectedDay={selectedDay}
+                jumpTrigger={dailyModalJumpTrigger}
+                onChangePerson={handleChangePerson}
+                onChangeOutlet={setSelectedOutlet}
+                onChangeDay={setSelectedDay}
+                onSaveOutletDay={saveOutletDayEntries}
+                onCreateSavedRecord={createSavedRecord}
+                onUpdateSavedRecord={updateSavedRecord}
+                onDeleteSavedRecord={deleteSavedRecord}
+                onOpenAdminConfig={() => setActiveView('admin_tasks')}
+              />
+            )}
 
-          {activeView === 'rekap' && isAdmin && (
-            <RekapRankingView
-              config={activeConfig}
-              store={store}
-              days={days}
-              selectedTask={selectedTask}
-              recapDate={recapDate}
-              recapDateMode={rekapDateMode}
-              rangeFrom={rekapRangeFrom}
-              rangeTo={rekapRangeTo}
-              onChangeTask={setSelectedTask}
-              onChangeRecapDate={setRecapDate}
-              onChangeRecapDateMode={setRekapDateMode}
-              onChangeRangeFrom={setRekapRangeFrom}
-              onChangeRangeTo={setRekapRangeTo}
-              onJumpToOutlet={handleJumpToInput}
-            />
-          )}
+            {activeView === 'rekap' && isAdmin && (
+              <RekapRankingView
+                config={activeConfig}
+                store={store}
+                days={days}
+                selectedTask={selectedTask}
+                recapDate={recapDate}
+                recapDateMode={rekapDateMode}
+                rangeFrom={rekapRangeFrom}
+                rangeTo={rekapRangeTo}
+                onChangeTask={setSelectedTask}
+                onChangeRecapDate={setRecapDate}
+                onChangeRecapDateMode={setRekapDateMode}
+                onChangeRangeFrom={setRekapRangeFrom}
+                onChangeRangeTo={setRekapRangeTo}
+                onJumpToOutlet={handleJumpToInput}
+              />
+            )}
 
-          {activeView === 'kunj' && (
-            <KunjunganView
-              account={currentAccount}
-              isAdmin={isAdmin}
-              config={activeConfig}
-              store={store}
-              days={days}
-              selectedPerson={selectedPerson}
-              onSaveVisitDay={saveVisitDay}
-              onJumpToInput={handleJumpToInput}
-            />
-          )}
+            {activeView === 'kunj' && (
+              <KunjunganView
+                account={currentAccount}
+                isAdmin={isAdmin}
+                config={activeConfig}
+                store={store}
+                days={days}
+                selectedPerson={selectedPerson}
+                onSaveVisitDay={saveVisitDay}
+                onJumpToInput={handleJumpToInput}
+              />
+            )}
 
-          {activeView === 'export' && isAdmin && (
-            <AdminExportTools
-              alwaysExpanded
-              config={activeConfig}
-              roleConfigs={roleConfigs}
-              store={store}
-              allWorkspaces={allWorkspaces}
-              inputLogs={inputLogs}
-              days={days}
-              activeMonth={activeMonth}
-              selectableMonths={selectableMonths}
-              selectedDay={selectedDay}
-              onImportStore={importWorkspaceData}
-              onResetAllData={resetRoleWorkspace}
-              onOpenAdminTasks={() => setActiveView('admin_tasks')}
-            />
-          )}
+            {activeView === 'export' && isAdmin && (
+              <AdminExportTools
+                alwaysExpanded
+                config={activeConfig}
+                roleConfigs={roleConfigs}
+                store={store}
+                allWorkspaces={allWorkspaces}
+                inputLogs={inputLogs}
+                days={days}
+                activeMonth={activeMonth}
+                selectableMonths={selectableMonths}
+                selectedDay={selectedDay}
+                onImportStore={importWorkspaceData}
+                onResetAllData={resetRoleWorkspace}
+                onOpenAdminTasks={() => setActiveView('admin_tasks')}
+              />
+            )}
 
-          {activeView === 'admin_tasks' && isAdmin && (
-            <AdminTasksOutletsView
-              roleConfigs={roleConfigs}
-              initialRoleId={activeRoleId}
-              accounts={managedAccounts}
-              onSaveRoleConfig={saveRoleConfig}
-              onSaveOpenUntilMonthAllRoles={saveOpenUntilMonthAllRoles}
-              onTogglePastMonthAllRoles={togglePastMonthAllRoles}
-            />
-          )}
+            {activeView === 'admin_tasks' && isAdmin && (
+              <AdminTasksOutletsView
+                roleConfigs={roleConfigs}
+                initialRoleId={activeRoleId}
+                accounts={managedAccounts}
+                onSaveRoleConfig={saveRoleConfig}
+                onSaveOpenUntilMonthAllRoles={saveOpenUntilMonthAllRoles}
+                onTogglePastMonthAllRoles={togglePastMonthAllRoles}
+              />
+            )}
 
-          {activeView === 'admin_accounts' && isAdmin && (
-            <AdminAccountsView
-              accounts={managedAccounts}
-              roleConfigs={roleConfigs}
-              isPrimaryAdmin={isPrimaryAdmin}
-              onSaveAccount={saveAccount}
-              onDeleteAccount={deleteAccount}
-            />
-          )}
+            {activeView === 'admin_accounts' && isAdmin && (
+              <AdminAccountsView
+                accounts={managedAccounts}
+                roleConfigs={roleConfigs}
+                isPrimaryAdmin={isPrimaryAdmin}
+                onSaveAccount={saveAccount}
+                onDeleteAccount={deleteAccount}
+              />
+            )}
 
-          {activeView === 'admin_logs' && isAdmin && (
-            <AdminLogsView
-              logs={inputLogs}
-              accounts={managedAccounts}
-              roleConfigs={roleConfigs}
-            />
-          )}
+            {activeView === 'admin_logs' && isAdmin && (
+              <AdminLogsView
+                logs={inputLogs}
+                accounts={managedAccounts}
+                roleConfigs={roleConfigs}
+              />
+            )}
+          </Suspense>
         </main>
       </div>
     </div>
