@@ -1,4 +1,5 @@
 import {
+  BrainCircuit,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -7,6 +8,7 @@ import {
   Download,
   Eye,
   FileJson,
+  FileSpreadsheet,
   RotateCcw,
   Search,
   Trash2,
@@ -43,6 +45,7 @@ import {
   yesterdayIso,
 } from '../utils/outletLogic';
 import { ConfirmModal } from './ConfirmModal';
+import { MlInsightsPanel } from './MlInsightsPanel';
 
 interface AdminExportToolsProps {
   config: RoleConfig;
@@ -57,6 +60,7 @@ interface AdminExportToolsProps {
   alwaysExpanded?: boolean;
   onImportStore: (incoming: OutletStoreState) => Promise<void>;
   onResetAllData: () => Promise<void>;
+  onOpenAdminTasks?: () => void;
 }
 
 const PREVIEW_PAGE_SIZE = 15;
@@ -74,9 +78,11 @@ export function AdminExportTools({
   alwaysExpanded = false,
   onImportStore,
   onResetAllData,
+  onOpenAdminTasks,
 }: AdminExportToolsProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [expanded, setExpanded] = useState(alwaysExpanded);
+  const [activeSection, setActiveSection] = useState<'ml' | 'reports' | 'backup'>('ml');
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; message: string } | null>(null);
 
@@ -374,6 +380,51 @@ export function AdminExportTools({
             alwaysExpanded ? '' : 'border-t border-slate-200 dark:border-slate-800'
           }`}
         >
+          {/* Top Section Switcher */}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-4 dark:border-slate-800">
+            <div className="inline-flex flex-wrap gap-1 rounded-lg border border-slate-200 bg-slate-50 p-1 dark:border-slate-700 dark:bg-slate-800/70">
+              <button
+                type="button"
+                onClick={() => setActiveSection('ml')}
+                className={`inline-flex min-h-[38px] items-center gap-2 rounded-md px-3.5 py-1.5 text-xs font-semibold transition-colors ${
+                  activeSection === 'ml'
+                    ? 'bg-blue-700 text-white dark:bg-blue-600'
+                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100'
+                }`}
+              >
+                <BrainCircuit className="h-4 w-4 shrink-0" />
+                <span>Machine Learning & Prediksi</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveSection('reports')}
+                className={`inline-flex min-h-[38px] items-center gap-2 rounded-md px-3.5 py-1.5 text-xs font-semibold transition-colors ${
+                  activeSection === 'reports'
+                    ? 'bg-blue-700 text-white dark:bg-blue-600'
+                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100'
+                }`}
+              >
+                <FileSpreadsheet className="h-4 w-4 shrink-0" />
+                <span>Laporan & Ekspor CSV</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveSection('backup')}
+                className={`inline-flex min-h-[38px] items-center gap-2 rounded-md px-3.5 py-1.5 text-xs font-semibold transition-colors ${
+                  activeSection === 'backup'
+                    ? 'bg-blue-700 text-white dark:bg-blue-600'
+                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100'
+                }`}
+              >
+                <Database className="h-4 w-4 shrink-0" />
+                <span>Cadangan JSON & Reset</span>
+              </button>
+            </div>
+            <div className="text-xs text-slate-500 tabular-nums dark:text-slate-400">
+              {totalEntriesCount} entri · {totalVisitsCount} kunjungan tercatat
+            </div>
+          </div>
+
           {feedback && (
             <div
               role="status"
@@ -394,7 +445,20 @@ export function AdminExportTools({
             </div>
           )}
 
+          {activeSection === 'ml' && (
+            <MlInsightsPanel
+              activeRoleId={config.roleId}
+              roleConfigs={roleConfigs}
+              allWorkspaces={allWorkspaces}
+              inputLogs={inputLogs}
+              selectableMonths={selectableMonths}
+              days={days}
+              onOpenAdminTasks={onOpenAdminTasks}
+            />
+          )}
+
           {/* Report Builder, Filter & Preview */}
+          {activeSection === 'reports' && (
           <section className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
             <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 pb-4 dark:border-slate-800">
               <div>
@@ -830,8 +894,11 @@ export function AdminExportTools({
               )}
             </div>
           </section>
+          )}
 
           {/* Backup JSON */}
+          {activeSection === 'backup' && (
+          <>
           <section className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
             <h2 className="text-base font-semibold text-slate-900 dark:text-slate-100">
               Cadangan Data JSON · {config.label}
@@ -906,6 +973,8 @@ export function AdminExportTools({
               });
             }}
           />
+          </>
+          )}
         </div>
       )}
     </div>

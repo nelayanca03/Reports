@@ -99,6 +99,39 @@ function parseUnlockedPastMonths(raw: unknown): string[] {
     .slice(0, 24);
 }
 
+function parseOutletsByPic(raw: unknown): Record<string, string[]> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const result: Record<string, string[]> = {};
+  for (const [picKey, val] of Object.entries(raw as Record<string, unknown>)) {
+    const cleanKey = picKey.trim().toUpperCase();
+    if (!cleanKey || !Array.isArray(val)) continue;
+    result[cleanKey] = Array.from(
+      new Set(val.filter((c): c is string => typeof c === 'string' && c.trim().length > 0).map((c) => c.trim()))
+    );
+  }
+  return result;
+}
+
+function areOutletsByPicEqual(
+  a: Record<string, string[]> | undefined,
+  b: Record<string, string[]>
+): boolean {
+  if (!a) return false;
+  const aKeys = Object.keys(a).sort();
+  const bKeys = Object.keys(b).sort();
+  if (aKeys.length !== bKeys.length) return false;
+  for (let i = 0; i < aKeys.length; i++) {
+    if (aKeys[i] !== bKeys[i]) return false;
+    const listA = [...(a[aKeys[i]] || [])].sort();
+    const listB = [...(b[bKeys[i]] || [])].sort();
+    if (listA.length !== listB.length) return false;
+    for (let j = 0; j < listA.length; j++) {
+      if (listA[j] !== listB[j]) return false;
+    }
+  }
+  return true;
+}
+
 function loadInitialTheme(): 'light' | 'dark' {
   try {
     const saved = localStorage.getItem(THEME_STORAGE_KEY);
@@ -419,6 +452,7 @@ export function useAuthAndRoleData() {
         if (snap.exists()) {
           const d = snap.data();
           const unlockedPastMonths = parseUnlockedPastMonths(d.unlockedPastMonths);
+          const parsedOutletsByPic = parseOutletsByPic(d.outletsByPic);
           const parsed: RoleConfig = {
             roleId: targetRole,
             label: String(d.label || DEFAULT_ROLE_CONFIGS[targetRole].label),
@@ -430,6 +464,7 @@ export function useAuthAndRoleData() {
             ...(unlockedPastMonths.length > 0 ? { unlockedPastMonths } : {}),
             tasks: Array.isArray(d.tasks) ? d.tasks : [],
             outlets: Array.isArray(d.outlets) ? d.outlets : [],
+            ...(parsedOutletsByPic ? { outletsByPic: parsedOutletsByPic } : {}),
           };
           setRoleConfigs((prev) => ({ ...prev, [targetRole]: parsed }));
         } else {
@@ -498,6 +533,7 @@ export function useAuthAndRoleData() {
             if (snap.exists()) {
               const d = snap.data();
               const unlockedPastMonths = parseUnlockedPastMonths(d.unlockedPastMonths);
+              const parsedOutletsByPic = parseOutletsByPic(d.outletsByPic);
               setRoleConfigs((prev) => ({
                 ...prev,
                 [rId]: {
@@ -511,6 +547,7 @@ export function useAuthAndRoleData() {
                   ...(unlockedPastMonths.length > 0 ? { unlockedPastMonths } : {}),
                   tasks: Array.isArray(d.tasks) ? d.tasks : [],
                   outlets: Array.isArray(d.outlets) ? d.outlets : [],
+                  ...(parsedOutletsByPic ? { outletsByPic: parsedOutletsByPic } : {}),
                 },
               }));
             }
@@ -660,9 +697,11 @@ export function useAuthAndRoleData() {
               const d = snap.data();
               const unlockedPastMonths = parseUnlockedPastMonths(d.unlockedPastMonths);
               const parsedOutlets = Array.isArray(d.outlets) ? d.outlets : [];
-              if (!d.outletsByPic && auth.currentUser?.uid) {
+              const parsedOutletsByPic = parseOutletsByPic(d.outletsByPic);
+              const expectedOutletsByPic = buildOutletsByPicMap(parsedOutlets);
+              if (!areOutletsByPicEqual(parsedOutletsByPic, expectedOutletsByPic) && auth.currentUser?.uid) {
                 void updateDoc(doc(db, 'roleConfigs', rId), {
-                  outletsByPic: buildOutletsByPicMap(parsedOutlets),
+                  outletsByPic: expectedOutletsByPic,
                   updatedAt: serverTimestamp(),
                   updatedBy: auth.currentUser.uid,
                 }).catch(() => {});
@@ -680,6 +719,9 @@ export function useAuthAndRoleData() {
                   ...(unlockedPastMonths.length > 0 ? { unlockedPastMonths } : {}),
                   tasks: Array.isArray(d.tasks) ? d.tasks : [],
                   outlets: parsedOutlets,
+                  outletsByPic: areOutletsByPicEqual(parsedOutletsByPic, expectedOutletsByPic)
+                    ? parsedOutletsByPic || expectedOutletsByPic
+                    : expectedOutletsByPic,
                 },
               }));
             }

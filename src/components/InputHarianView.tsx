@@ -58,6 +58,7 @@ interface DraftEntry {
 
 interface InputHarianViewProps {
   account: AccountProfile;
+  currentUserUid?: string;
   activeRoleId: OperationalRoleId;
   config: RoleConfig;
   roleConfigs: Record<OperationalRoleId, RoleConfig>;
@@ -100,6 +101,7 @@ interface InputHarianViewProps {
 
 export function InputHarianView({
   account,
+  currentUserUid = '',
   activeRoleId,
   config,
   roleConfigs,
@@ -283,9 +285,51 @@ export function InputHarianView({
     setSaving(true);
     setSaveError(null);
     setSavedNotice(null);
+
+    const formatSaveError = (err: unknown, stage: 'Data Harian' | 'Kode Referensi'): string => {
+      let rawErr = '';
+      let errPath = '';
+      if (err instanceof Error) {
+        try {
+          const parsed = JSON.parse(err.message);
+          rawErr = String(parsed?.error || err.message || '');
+          errPath = String(parsed?.path || '');
+        } catch {
+          rawErr = err.message || '';
+        }
+      }
+      const lower = rawErr.toLowerCase();
+      if (lower.includes('missing or insufficient permissions') || lower.includes('permission-denied')) {
+        if (!isAdmin && ownPic) {
+          const picKey = ownPic.toUpperCase();
+          const syncedOutlets = config.outletsByPic?.[picKey];
+          if (!config.outletsByPic || !syncedOutlets || !syncedOutlets.includes(activeOutlet)) {
+            return `Gagal menyimpan ${stage}: izin outlet ${activeOutlet} untuk PIC ${picKey} belum tersinkronisasi di server. Minta Admin membuka aplikasi sebentar agar konfigurasi PIC & Outlet tersinkronisasi.`;
+          }
+        }
+        return errPath
+          ? `Gagal menyimpan ${stage} (${errPath}): Akses ditolak oleh aturan keamanan (${rawErr}).`
+          : `Gagal menyimpan ${stage}: Akses ditolak oleh aturan keamanan (${rawErr}).`;
+      }
+      return rawErr ? `Gagal menyimpan ${stage}: ${rawErr}` : `Gagal menyimpan ${stage}. Periksa koneksi atau izin akses Anda.`;
+    };
+
     try {
       await onSaveOutletDay(activeOutlet, selectedDay, dirtyEntries);
+    } catch (err) {
+      setSaveError(formatSaveError(err, 'Data Harian'));
+      setSaving(false);
+      return;
+    }
 
+    // Daily entries saved successfully — clear draft right away
+    setDrafts((prev) => {
+      const next = { ...prev };
+      delete next[dayKey];
+      return next;
+    });
+
+    try {
       // Automatically assign/update a permanent Reference Code in Update Daily
       let generatedOrKeptCode: string | null = null;
       const { department } = resolveAuthorizedRecordPrefix(account, activeRoleId);
@@ -317,7 +361,10 @@ export function InputHarianView({
           r.date === selectedDay &&
           r.outlet.toUpperCase() === activeOutlet.toUpperCase() &&
           r.summary.startsWith('[Input Harian]') &&
-          (canManageRecords || r.createdByEmail.toLowerCase() === account.email.toLowerCase())
+          (canManageRecords ||
+            (currentUserUid
+              ? r.createdBy === currentUserUid
+              : r.createdByEmail.toLowerCase() === account.email.toLowerCase()))
       );
 
       if (existingDailyRecord) {
@@ -339,11 +386,6 @@ export function InputHarianView({
         });
       }
 
-      setDrafts((prev) => {
-        const next = { ...prev };
-        delete next[dayKey];
-        return next;
-      });
       setExportPhotoContext({
         person: activePerson,
         outlet: activeOutlet,
@@ -356,16 +398,9 @@ export function InputHarianView({
       );
       setDailyModalOpen(false);
     } catch (err) {
-      let msg = 'Gagal menyimpan data harian. Periksa koneksi atau izin akses Anda.';
-      if (err instanceof Error) {
-        try {
-          const parsed = JSON.parse(err.message);
-          if (parsed?.error) msg = `Gagal menyimpan: ${parsed.error}`;
-        } catch {
-          if (err.message) msg = `Gagal menyimpan: ${err.message}`;
-        }
-      }
-      setSaveError(msg);
+      setSaveError(
+        `Data harian tersimpan, namun gagal membuat/memperbarui Kode Referensi. ${formatSaveError(err, 'Kode Referensi')}`
+      );
     } finally {
       setSaving(false);
     }

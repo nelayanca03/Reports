@@ -42,18 +42,29 @@ service cloud.firestore {
       return isVerifiedUser() && request.auth.token.email.lower() == 'nelayanca03@gmail.com';
     }
 
+    function accountDocPath() {
+      return /databases/$(database)/documents/accounts/$(emailDocId());
+    }
+
     function hasActiveAccount() {
+      let path = accountDocPath();
       return isVerifiedUser()
-        && exists(/databases/$(database)/documents/accounts/$(emailDocId()))
-        && get(/databases/$(database)/documents/accounts/$(emailDocId())).data.active == true;
+        && exists(path)
+        && get(path).data.active == true;
     }
 
     function currentAccountRole() {
-      return get(/databases/$(database)/documents/accounts/$(emailDocId())).data.role;
+      return get(accountDocPath()).data.role;
     }
 
     function isAdmin() {
-      return isBootstrappedAdmin() || (hasActiveAccount() && currentAccountRole() == 'admin');
+      let path = accountDocPath();
+      return isBootstrappedAdmin() || (
+        isVerifiedUser()
+        && exists(path)
+        && get(path).data.active == true
+        && get(path).data.role == 'admin'
+      );
     }
 
     function isOperationalRole(roleId) {
@@ -65,31 +76,57 @@ service cloud.firestore {
     }
 
     function hasRoleAccess(roleId) {
-      return isAdmin() || (hasActiveAccount() && currentAccountRole() == roleId);
+      let path = accountDocPath();
+      return isBootstrappedAdmin() || (
+        isVerifiedUser()
+        && exists(path)
+        && get(path).data.active == true
+        && (get(path).data.role == 'admin' || get(path).data.role == roleId)
+      );
     }
 
     function isAccountingOrAdmin() {
-      return isAdmin() || (hasActiveAccount() && currentAccountRole() == 'accounting');
+      let path = accountDocPath();
+      return isBootstrappedAdmin() || (
+        isVerifiedUser()
+        && exists(path)
+        && get(path).data.active == true
+        && get(path).data.role in ['admin', 'accounting']
+      );
     }
 
-    function accountData() {
-      return get(/databases/$(database)/documents/accounts/$(emailDocId())).data;
+    function accountPicFromData(acc) {
+      return ('picName' in acc && acc.picName is string && acc.picName.trim().size() > 0)
+        ? acc.picName.trim().upper()
+        : (('name' in acc && acc.name is string) ? acc.name.trim().upper() : '');
+    }
+
+    function isAuthorizedRecordPrefixForAcc(prefix, acc) {
+      return prefix in ['SA', 'GL']
+        && acc.active == true
+        && (
+          acc.role == 'admin'
+          || (
+            acc.role == 'accounting'
+            && (
+              ('refPrefix' in acc && acc.refPrefix in ['SA', 'GL'])
+                ? prefix == acc.refPrefix
+                : prefix == 'SA'
+            )
+          )
+          || (acc.role == 'stock_accounting' && prefix == 'SA')
+          || (acc.role == 'gl' && prefix == 'GL')
+        );
     }
 
     function isAuthorizedRecordPrefix(prefix) {
-      return prefix in ['SA', 'GL'] && (
-        isAdmin()
-        || (
-          hasActiveAccount()
-          && currentAccountRole() == 'accounting'
-          && (
-            ('refPrefix' in accountData() && accountData().refPrefix in ['SA', 'GL'])
-              ? prefix == accountData().refPrefix
-              : prefix == 'SA'
-          )
+      let path = accountDocPath();
+      return (prefix in ['SA', 'GL']) && (
+        isBootstrappedAdmin() || (
+          isVerifiedUser()
+          && exists(path)
+          && isAuthorizedRecordPrefixForAcc(prefix, get(path).data)
         )
-        || (hasActiveAccount() && currentAccountRole() == 'stock_accounting' && prefix == 'SA')
-        || (hasActiveAccount() && currentAccountRole() == 'gl' && prefix == 'GL')
       );
     }
 
@@ -190,25 +227,6 @@ service cloud.firestore {
         && data.updatedBy == request.auth.uid;
     }
 
-    function currentWibMonthKey() {
-      return string((request.time + duration.time(7, 0, 0, 0)).year())
-        + '-'
-        + ((request.time + duration.time(7, 0, 0, 0)).month() < 10
-          ? '0' + string((request.time + duration.time(7, 0, 0, 0)).month())
-          : string((request.time + duration.time(7, 0, 0, 0)).month()));
-    }
-
-    function isMonthUnlockedForRole(roleId, monthKey) {
-      return exists(/databases/$(database)/documents/roleConfigs/$(roleId))
-        && 'unlockedPastMonths' in get(/databases/$(database)/documents/roleConfigs/$(roleId)).data
-        && get(/databases/$(database)/documents/roleConfigs/$(roleId)).data.unlockedPastMonths is list
-        && monthKey in get(/databases/$(database)/documents/roleConfigs/$(roleId)).data.unlockedPastMonths;
-    }
-
-    function canWriteMonth(roleId, monthKey) {
-      return isAdmin() || monthKey >= currentWibMonthKey() || isMonthUnlockedForRole(roleId, monthKey);
-    }
-
     function pad2(n) {
       return n < 10 ? '0' + string(n) : string(n);
     }
@@ -221,6 +239,10 @@ service cloud.firestore {
       return dateKeyFromShiftedTs(request.time + duration.value(7, 'h'));
     }
 
+    function currentWibMonthKey() {
+      return currentWibDateKey()[0:7];
+    }
+
     function yesterdayWibDateKey() {
       return dateKeyFromShiftedTs(request.time + duration.value(7, 'h') - duration.value(1, 'd'));
     }
@@ -229,51 +251,90 @@ service cloud.firestore {
       return dateKeyFromShiftedTs(request.time + duration.value(7, 'h') + duration.value(1, 'd'));
     }
 
+    function isMonthUnlockedForRole(roleId, monthKey) {
+      let cfgPath = /databases/$(database)/documents/roleConfigs/$(roleId);
+      let hasCfg = exists(cfgPath);
+      return hasCfg
+        && 'unlockedPastMonths' in get(cfgPath).data
+        && get(cfgPath).data.unlockedPastMonths is list
+        && monthKey in get(cfgPath).data.unlockedPastMonths;
+    }
+
+    function canWriteMonth(roleId, monthKey) {
+      return isAdmin() || monthKey >= currentWibMonthKey() || isMonthUnlockedForRole(roleId, monthKey);
+    }
+
     function accountPicUpper() {
-      return hasActiveAccount()
-        ? (
-          accountData().picName.trim().size() > 0
-            ? accountData().picName.trim().upper()
-            : accountData().name.trim().upper()
-        )
+      let path = accountDocPath();
+      return (isVerifiedUser() && exists(path) && get(path).data.active == true)
+        ? accountPicFromData(get(path).data)
         : '';
     }
 
-    function roleOutletsForPic(roleId) {
-      return accountPicUpper() != ''
-        && exists(/databases/$(database)/documents/roleConfigs/$(roleId))
-        && 'outletsByPic' in get(/databases/$(database)/documents/roleConfigs/$(roleId)).data
-        && get(/databases/$(database)/documents/roleConfigs/$(roleId)).data.outletsByPic is map
-        && accountPicUpper() in get(/databases/$(database)/documents/roleConfigs/$(roleId)).data.outletsByPic
-        && get(/databases/$(database)/documents/roleConfigs/$(roleId)).data.outletsByPic[accountPicUpper()] is list
-        ? get(/databases/$(database)/documents/roleConfigs/$(roleId)).data.outletsByPic[accountPicUpper()]
+    function roleOutletsForPic(roleId, picUpper) {
+      let cfgPath = /databases/$(database)/documents/roleConfigs/$(roleId);
+      return picUpper != ''
+        && exists(cfgPath)
+        && 'outletsByPic' in get(cfgPath).data
+        && get(cfgPath).data.outletsByPic is map
+        && picUpper in get(cfgPath).data.outletsByPic
+        && get(cfgPath).data.outletsByPic[picUpper] is list
+        ? get(cfgPath).data.outletsByPic[picUpper]
         : [];
     }
 
     function canWriteEntOutlets(roleId, changedOutlets) {
+      let picUpper = accountPicUpper();
       return isAdmin()
         || changedOutlets.size() == 0
-        || (accountPicUpper() != '' && changedOutlets.hasOnly(roleOutletsForPic(roleId)));
+        || (picUpper != '' && changedOutlets.hasOnly(roleOutletsForPic(roleId, picUpper)));
     }
 
     function canWriteVisitKeys(changedVisitKeys) {
+      let picUpper = accountPicUpper();
       return isAdmin()
         || changedVisitKeys.size() == 0
         || (
-          accountPicUpper() != ''
+          picUpper != ''
           && changedVisitKeys.hasOnly([
-            accountPicUpper() + '|' + yesterdayWibDateKey(),
-            accountPicUpper() + '|' + currentWibDateKey(),
-            accountPicUpper() + '|' + tomorrowWibDateKey()
+            picUpper + '|' + yesterdayWibDateKey(),
+            picUpper + '|' + currentWibDateKey(),
+            picUpper + '|' + tomorrowWibDateKey()
           ])
         );
     }
 
     function canWriteInputLogPic(pic) {
+      let picUpper = accountPicUpper();
       return isAdmin() || (
-        accountPicUpper() != ''
+        picUpper != ''
         && pic is string
-        && pic.trim().upper() == accountPicUpper()
+        && pic.trim().upper() == picUpper
+      );
+    }
+
+    function canWriteSavedRecordAsAccount(acc, department, pic, outlet) {
+      let picUpper = accountPicFromData(acc);
+      return acc.active == true && (
+        acc.role in ['admin', 'accounting']
+        || (
+          acc.role in ['stock_accounting', 'gl']
+          && department == acc.role
+          && picUpper != ''
+          && pic is string
+          && pic.trim().upper() == picUpper
+          && outlet in roleOutletsForPic(acc.role, picUpper)
+        )
+      );
+    }
+
+    function canCreateSavedRecordAuth(prefix, department, pic, outlet) {
+      let path = accountDocPath();
+      return isBootstrappedAdmin() || (
+        isVerifiedUser()
+        && exists(path)
+        && isAuthorizedRecordPrefixForAcc(prefix, get(path).data)
+        && canWriteSavedRecordAsAccount(get(path).data, department, pic, outlet)
       );
     }
 
@@ -571,7 +632,6 @@ service cloud.firestore {
       allow list, delete: if false;
       allow create: if isVerifiedUser()
         && isValidCounterId(counterId)
-        && (isAdmin() || hasActiveAccount())
         && isValidRecordCounter(incoming())
         && counterId == (incoming().prefix + '_' + incoming().yymm)
         && incoming().seq == 1
@@ -580,7 +640,6 @@ service cloud.firestore {
         && incoming().updatedAt == request.time;
       allow update: if isVerifiedUser()
         && isValidCounterId(counterId)
-        && (isAdmin() || hasActiveAccount())
         && isValidRecordCounter(incoming())
         && incoming().prefix == existing().prefix
         && incoming().yymm == existing().yymm
@@ -640,20 +699,12 @@ service cloud.firestore {
       allow list: if isVerifiedUser() && canViewSavedRecord(resource.data);
       allow create: if isVerifiedUser()
         && isValidRecordId(recordId)
-        && (isAdmin() || hasActiveAccount())
         && isValidSavedRecord(incoming())
         && recordId == incoming().refCode
         && incoming().yymm == (incoming().date[2:4] + incoming().date[5:7])
-        && incoming().refCode.matches('^' + incoming().prefix + incoming().yymm + '[0-9]{4,}$')
-        && isAuthorizedRecordPrefix(incoming().prefix)
-        && (
-          isAccountingOrAdmin()
-          || (
-            incoming().department == currentAccountRole()
-            && canWriteInputLogPic(incoming().pic)
-            && incoming().outlet in roleOutletsForPic(currentAccountRole())
-          )
-        )
+        && incoming().refCode[0:2] == incoming().prefix
+        && incoming().refCode[2:6] == incoming().yymm
+        && canCreateSavedRecordAuth(incoming().prefix, incoming().department, incoming().pic, incoming().outlet)
         && existsAfter(/databases/$(database)/documents/recordCounters/$(incoming().prefix + '_' + incoming().yymm))
         && incoming().createdBy == request.auth.uid
         && incoming().updatedBy == request.auth.uid
@@ -662,15 +713,12 @@ service cloud.firestore {
         && incoming().updatedAt == request.time;
       allow update: if isVerifiedUser()
         && isValidRecordId(recordId)
-        && (isAdmin() || hasActiveAccount())
         && isValidSavedRecord(incoming())
         && (
           isAccountingOrAdmin()
           || (
-            existing().department == currentAccountRole()
-            && existing().createdBy == request.auth.uid
-            && canWriteInputLogPic(incoming().pic)
-            && incoming().outlet in roleOutletsForPic(currentAccountRole())
+            existing().createdBy == request.auth.uid
+            && canCreateSavedRecordAuth(existing().prefix, existing().department, incoming().pic, incoming().outlet)
           )
         )
         && incoming().refCode == existing().refCode

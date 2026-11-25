@@ -321,6 +321,7 @@ export default function App() {
           {activeView === 'input' && (
             <InputHarianView
               account={currentAccount}
+              currentUserUid={firebaseUser?.uid || ''}
               activeRoleId={activeRoleId}
               config={activeConfig}
               roleConfigs={roleConfigs}
@@ -389,6 +390,7 @@ export default function App() {
               selectedDay={selectedDay}
               onImportStore={importWorkspaceData}
               onResetAllData={resetRoleWorkspace}
+              onOpenAdminTasks={() => setActiveView('admin_tasks')}
             />
           )}
 

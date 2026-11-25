@@ -32,6 +32,7 @@ export interface RoleConfig {
   unlockedPastMonths?: string[];
   tasks: TaskDefinition[];
   outlets: OutletAssignment[];
+  outletsByPic?: Record<string, string[]>;
 }
 
 export interface AccountProfile {
