@@ -1,6 +1,7 @@
 import { Check, Minus } from 'lucide-react';
 import { OutletStoreState, RoleConfig, VisitPersonStats } from '../../types/outlet';
 import { fmtDate, fmtDateFull, fmtDateLong, getVisitEntries } from '../../utils/outletLogic';
+import { DateRangeFilterPopover } from '../records/DateRangeFilterPopover';
 
 interface KunjunganLeaderboardAndMatrixProps {
   config: RoleConfig;
@@ -28,7 +29,6 @@ interface KunjunganLeaderboardAndMatrixProps {
 export function KunjunganLeaderboardAndMatrix({
   config,
   store,
-  days,
   today,
   personList,
   activePerson,
@@ -61,71 +61,31 @@ export function KunjunganLeaderboardAndMatrix({
             </p>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 dark:border-slate-700 dark:bg-slate-800">
-              {(
-                [
-                  { id: 'all', label: 'Semua' },
-                  { id: 'single', label: 'Per Tanggal' },
-                  { id: 'range', label: 'Range Tanggal' },
-                ] as const
-              ).map((opt) => (
-                <button
-                  key={opt.id}
-                  type="button"
-                  onClick={() => onChangeBoardDateMode(opt.id)}
-                  className={`min-h-[30px] rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
-                    boardDateMode === opt.id
-                      ? 'bg-blue-700 text-white dark:bg-blue-600'
-                      : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100'
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-
-            {boardDateMode === 'single' && (
-              <input
-                type="date"
-                max={today}
-                aria-label="Filter kunjungan per tanggal"
-                value={boardDateExact}
-                onChange={(e) => {
-                  const val = e.target.value || today;
-                  onChangeBoardDateExact(val > today ? today : val);
-                }}
-                className="min-h-[34px] rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-              />
-            )}
-
-            {boardDateMode === 'range' && (
-              <div className="flex items-center gap-1.5">
-                <input
-                  type="date"
-                  max={today}
-                  aria-label="Filter kunjungan dari tanggal"
-                  value={boardDateFrom}
-                  onChange={(e) => {
-                    const val = e.target.value || days[0] || today;
-                    onChangeBoardDateFrom(val > today ? today : val);
-                  }}
-                  className="min-h-[34px] rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-                />
-                <span className="text-xs text-slate-400">–</span>
-                <input
-                  type="date"
-                  max={today}
-                  aria-label="Filter kunjungan sampai tanggal"
-                  value={boardDateTo}
-                  onChange={(e) => {
-                    const val = e.target.value || today;
-                    onChangeBoardDateTo(val > today ? today : val);
-                  }}
-                  className="min-h-[34px] rounded-lg border border-slate-200 bg-slate-50 px-2 py-1 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-                />
-              </div>
-            )}
+          <div className="w-full sm:w-56">
+            <DateRangeFilterPopover
+              id="kunjungan-board-date-filter"
+              label="Filter Tanggal Kunjungan"
+              hideLabel
+              align="right"
+              placeholder="Semua Tanggal"
+              today={today}
+              maxDate={today}
+              allowClear
+              dateExact={boardDateMode === 'single' ? boardDateExact : ''}
+              dateFrom={boardDateMode === 'range' ? boardDateFrom : ''}
+              dateTo={boardDateMode === 'range' ? boardDateTo : ''}
+              triggerClassName="min-h-[36px]"
+              onSelectSingleDate={(iso) => {
+                onChangeBoardDateMode('single');
+                onChangeBoardDateExact(iso);
+              }}
+              onSelectDateRange={(start, end) => {
+                onChangeBoardDateMode('range');
+                onChangeBoardDateFrom(start);
+                onChangeBoardDateTo(end);
+              }}
+              onClearDateFilter={() => onChangeBoardDateMode('all')}
+            />
           </div>
         </div>
 

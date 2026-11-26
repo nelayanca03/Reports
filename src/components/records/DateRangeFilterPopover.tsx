@@ -42,7 +42,16 @@ interface DateRangeFilterPopoverProps {
   dateTo: string;
   onSelectSingleDate: (isoDate: string) => void;
   onSelectDateRange: (start: string, end: string) => void;
-  onClearDateFilter: () => void;
+  onClearDateFilter?: () => void;
+  id?: string;
+  label?: string;
+  hideLabel?: boolean;
+  placeholder?: string;
+  maxDate?: string;
+  allowClear?: boolean;
+  align?: 'left' | 'right';
+  labelClassName?: string;
+  triggerClassName?: string;
 }
 
 export function DateRangeFilterPopover({
@@ -53,6 +62,15 @@ export function DateRangeFilterPopover({
   onSelectSingleDate,
   onSelectDateRange,
   onClearDateFilter,
+  id = 'rec-date-trigger',
+  label = 'Date',
+  hideLabel = false,
+  placeholder = 'Semua Tanggal',
+  maxDate,
+  allowClear = true,
+  align = 'left',
+  labelClassName = 'mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400',
+  triggerClassName = 'min-h-[38px]',
 }: DateRangeFilterPopoverProps) {
   const [calendarOpen, setCalendarOpen] = useState(false);
   const [calendarMonth, setCalendarMonth] = useState(today.slice(0, 7));
@@ -96,8 +114,16 @@ export function DateRangeFilterPopover({
   const dateFilterDisplay = dateExact
     ? fmtDateSlash(dateExact)
     : dateFrom && dateTo
-      ? `${fmtDateSlash(dateFrom)} – ${fmtDateSlash(dateTo)}`
-      : 'Semua Tanggal';
+      ? dateFrom === dateTo
+        ? fmtDateSlash(dateFrom)
+        : `${fmtDateSlash(dateFrom)} – ${fmtDateSlash(dateTo)}`
+      : dateFrom
+        ? `≥ ${fmtDateSlash(dateFrom)}`
+        : dateTo
+          ? `≤ ${fmtDateSlash(dateTo)}`
+          : placeholder;
+
+  const canClear = allowClear && Boolean(onClearDateFilter);
 
   const handleToggleDatePopover = () => {
     if (calendarOpen) {
@@ -105,7 +131,7 @@ export function DateRangeFilterPopover({
       setRangeAnchor(null);
       setHoverDate(null);
     } else {
-      const targetMonth = (dateExact || dateFrom || today).slice(0, 7) || today.slice(0, 7);
+      const targetMonth = (dateExact || dateFrom || dateTo || today).slice(0, 7) || today.slice(0, 7);
       setCalendarMonth(targetMonth);
       setRangeAnchor(null);
       setHoverDate(null);
@@ -114,6 +140,7 @@ export function DateRangeFilterPopover({
   };
 
   const handleCalendarDayClick = (isoDate: string) => {
+    if (maxDate && isoDate > maxDate) return;
     if (!rangeAnchor) {
       setRangeAnchor(isoDate);
       return;
@@ -133,34 +160,34 @@ export function DateRangeFilterPopover({
   const handleReset = () => {
     setRangeAnchor(null);
     setHoverDate(null);
-    onClearDateFilter();
+    onClearDateFilter?.();
   };
 
   return (
     <div className="relative" ref={calendarPopoverRef}>
-      <label
-        htmlFor="rec-date-trigger"
-        className="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400"
-      >
-        Date
-      </label>
+      {!hideLabel && (
+        <label htmlFor={id} className={labelClassName}>
+          {label}
+        </label>
+      )}
       <div className="relative flex items-center">
         <button
-          id="rec-date-trigger"
+          id={id}
           type="button"
+          aria-label={hideLabel ? label : undefined}
           aria-expanded={calendarOpen}
           aria-haspopup="dialog"
           onClick={handleToggleDatePopover}
-          className={`flex min-h-[38px] w-full items-center gap-2 rounded-lg border bg-white px-2.5 py-1.5 text-left text-xs transition-colors focus:border-blue-600 focus:outline-none dark:bg-slate-900 ${
+          className={`flex w-full items-center gap-2 rounded-lg border bg-white px-2.5 py-1.5 text-left text-xs transition-colors focus:border-blue-600 focus:outline-none dark:bg-slate-900 ${triggerClassName} ${
             hasDateFilter
-              ? 'border-blue-500/70 pr-7 font-mono font-semibold text-blue-800 tabular-nums dark:border-blue-500/60 dark:text-blue-300'
+              ? `border-blue-500/70 ${canClear ? 'pr-7' : ''} font-mono font-semibold text-blue-800 tabular-nums dark:border-blue-500/60 dark:text-blue-300`
               : 'border-slate-200 font-medium text-slate-700 hover:border-slate-300 dark:border-slate-700 dark:text-slate-200 dark:hover:border-slate-600'
           }`}
         >
           <CalendarIcon className="h-3.5 w-3.5 shrink-0 text-slate-400" />
           <span className="truncate">{dateFilterDisplay}</span>
         </button>
-        {hasDateFilter && (
+        {canClear && hasDateFilter && (
           <button
             type="button"
             onClick={handleReset}
@@ -176,7 +203,9 @@ export function DateRangeFilterPopover({
         <div
           role="dialog"
           aria-label="Pilih tanggal atau range tanggal"
-          className="absolute top-full left-0 z-40 mt-1.5 w-[296px] rounded-xl border border-slate-200 bg-white p-3 shadow-xl dark:border-slate-700 dark:bg-slate-900"
+          className={`absolute top-full z-40 mt-1.5 w-[296px] rounded-xl border border-slate-200 bg-white p-3 shadow-xl dark:border-slate-700 dark:bg-slate-900 ${
+            align === 'right' ? 'right-0' : 'left-0'
+          }`}
         >
           <div className="mb-2 flex items-center justify-between gap-2">
             <button
@@ -212,6 +241,7 @@ export function DateRangeFilterPopover({
             {calendarGridDays.map((dayIso) => {
               const inMonth = dayIso.slice(0, 7) === calendarMonth;
               const isToday = dayIso === today;
+              const isDisabled = Boolean(maxDate && dayIso > maxDate);
 
               const activeStart = rangeAnchor
                 ? hoverDate && hoverDate < rangeAnchor
@@ -234,17 +264,22 @@ export function DateRangeFilterPopover({
                 <button
                   key={dayIso}
                   type="button"
-                  onMouseEnter={() => rangeAnchor && setHoverDate(dayIso)}
+                  disabled={isDisabled}
+                  onMouseEnter={() => {
+                    if (rangeAnchor && !isDisabled) setHoverDate(dayIso);
+                  }}
                   onClick={() => handleCalendarDayClick(dayIso)}
                   className={`flex h-8 items-center justify-center rounded-md font-mono text-[11px] tabular-nums transition-colors ${
-                    isEndpoint
-                      ? 'bg-blue-700 font-bold text-white dark:bg-blue-600'
-                      : isInRange
-                        ? 'bg-blue-100 font-semibold text-blue-900 dark:bg-blue-950/70 dark:text-blue-200'
-                        : inMonth
-                          ? 'text-slate-800 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800'
-                          : 'text-slate-300 hover:bg-slate-100 dark:text-slate-600 dark:hover:bg-slate-800/60'
-                  } ${isToday && !isEndpoint ? 'ring-1 ring-blue-500/70' : ''}`}
+                    isDisabled
+                      ? 'cursor-not-allowed text-slate-300 opacity-45 dark:text-slate-700'
+                      : isEndpoint
+                        ? 'bg-blue-700 font-bold text-white dark:bg-blue-600'
+                        : isInRange
+                          ? 'bg-blue-100 font-semibold text-blue-900 dark:bg-blue-950/70 dark:text-blue-200'
+                          : inMonth
+                            ? 'text-slate-800 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800'
+                            : 'text-slate-300 hover:bg-slate-100 dark:text-slate-600 dark:hover:bg-slate-800/60'
+                  } ${isToday && !isEndpoint && !isDisabled ? 'ring-1 ring-blue-500/70' : ''}`}
                 >
                   {Number(dayIso.slice(8, 10))}
                 </button>
@@ -258,16 +293,21 @@ export function DateRangeFilterPopover({
                 ? `Awal: ${fmtDateSlash(rangeAnchor)} · Klik lagi tgl ini (1 tgl) atau tgl akhir`
                 : 'Double klik = 1 tgl · Klik awal lalu akhir = range'}
             </span>
-            {(hasDateFilter || rangeAnchor) && (
+            {((canClear && hasDateFilter) || rangeAnchor) && (
               <button
                 type="button"
                 onClick={() => {
+                  if (rangeAnchor && !canClear) {
+                    setRangeAnchor(null);
+                    setHoverDate(null);
+                    return;
+                  }
                   handleReset();
                   setCalendarOpen(false);
                 }}
                 className="shrink-0 font-semibold text-blue-700 hover:underline dark:text-blue-400"
               >
-                Reset
+                {rangeAnchor && !canClear ? 'Batal' : 'Reset'}
               </button>
             )}
           </div>

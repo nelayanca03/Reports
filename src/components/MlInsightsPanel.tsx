@@ -31,6 +31,7 @@ import {
   getPersonList,
   todayIso,
 } from '../utils/outletLogic';
+import { DateRangeFilterPopover } from './records/DateRangeFilterPopover';
 
 interface MlInsightsPanelProps {
   activeRoleId: OperationalRoleId;
@@ -502,7 +503,7 @@ export function MlInsightsPanel({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-7">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-6">
           <div>
             <label
               htmlFor="ml-role-filter"
@@ -528,47 +529,26 @@ export function MlInsightsPanel({
             </select>
           </div>
 
-          <div>
-            <label
-              htmlFor="ml-date-from"
-              className="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400"
-            >
-              Basis Data Dari
-            </label>
-            <input
-              id="ml-date-from"
-              type="date"
-              max={today}
-              value={dateFrom}
-              onChange={(e) => {
-                const v = e.target.value || days[0] || today;
-                setDateFrom(v > today ? today : v);
-                setPage(1);
-              }}
-              className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-            />
-          </div>
-
-          <div>
-            <label
-              htmlFor="ml-date-to"
-              className="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400"
-            >
-              Sampai Tanggal
-            </label>
-            <input
-              id="ml-date-to"
-              type="date"
-              max={today}
-              value={dateTo}
-              onChange={(e) => {
-                const v = e.target.value || today;
-                setDateTo(v > today ? today : v);
-                setPage(1);
-              }}
-              className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-            />
-          </div>
+          <DateRangeFilterPopover
+            id="ml-date-range"
+            label="Periode Data"
+            today={today}
+            maxDate={today}
+            allowClear={false}
+            dateExact={dateFrom && dateFrom === dateTo ? dateFrom : ''}
+            dateFrom={dateFrom !== dateTo ? dateFrom : ''}
+            dateTo={dateFrom !== dateTo ? dateTo : ''}
+            onSelectSingleDate={(iso) => {
+              setDateFrom(iso);
+              setDateTo(iso);
+              setPage(1);
+            }}
+            onSelectDateRange={(start, end) => {
+              setDateFrom(start);
+              setDateTo(end);
+              setPage(1);
+            }}
+          />
 
           <div>
             <label

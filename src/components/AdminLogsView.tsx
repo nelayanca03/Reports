@@ -16,6 +16,7 @@ import {
   fmtDateTimeWithSeconds,
   todayIso,
 } from '../utils/outletLogic';
+import { DateRangeFilterPopover } from './records/DateRangeFilterPopover';
 
 interface AdminLogsViewProps {
   logs: InputLogEntry[];
@@ -319,82 +320,38 @@ export function AdminLogsView({ logs, accounts, roleConfigs }: AdminLogsViewProp
           </div>
 
           <div className="sm:col-span-2 lg:col-span-8">
-            <div className="mb-1.5 flex items-center justify-between gap-2">
-              <label
-                htmlFor={dateMode === 'single' ? 'log-date-exact' : 'log-date-from'}
-                className="text-xs font-medium text-slate-500 dark:text-slate-400"
-              >
-                {dateMode === 'single' ? 'Filter Tanggal Kerja (Per Tanggal)' : 'Filter Tanggal Kerja (Range Tanggal)'}
-              </label>
-              <div className="inline-flex rounded-md border border-slate-200 bg-slate-100 p-0.5 dark:border-slate-700 dark:bg-slate-800">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDateMode('single');
-                    setCurrentPage(1);
-                  }}
-                  className={`rounded px-2 py-0.5 text-[11px] font-semibold transition-colors ${
-                    dateMode === 'single'
-                      ? 'bg-white text-blue-700 shadow-xs dark:bg-slate-900 dark:text-blue-400'
-                      : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
-                  }`}
-                >
-                  Per Tanggal
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setDateMode('range');
-                    setCurrentPage(1);
-                  }}
-                  className={`rounded px-2 py-0.5 text-[11px] font-semibold transition-colors ${
-                    dateMode === 'range'
-                      ? 'bg-white text-blue-700 shadow-xs dark:bg-slate-900 dark:text-blue-400'
-                      : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
-                  }`}
-                >
-                  Range Tanggal
-                </button>
-              </div>
-            </div>
-
-            {dateMode === 'single' ? (
-              <input
-                id="log-date-exact"
-                type="date"
-                value={dateExact}
-                onChange={(e) => {
-                  setDateExact(e.target.value);
-                  setCurrentPage(1);
-                }}
-                className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-              />
-            ) : (
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <input
-                  id="log-date-from"
-                  type="date"
-                  aria-label="Tanggal Kerja Dari"
-                  value={dateFrom}
-                  onChange={(e) => {
-                    setDateFrom(e.target.value);
-                    setCurrentPage(1);
-                  }}
-                  className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-                />
-                <input
-                  id="log-date-to"
-                  type="date"
-                  aria-label="Tanggal Kerja Sampai"
-                  value={dateTo}
-                  onChange={(e) => {
-                    setDateTo(e.target.value);
-                    setCurrentPage(1);
-                  }}
-                  className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-                />
-              </div>
-            )}
+            <DateRangeFilterPopover
+              id="log-date-filter"
+              label="Filter Tanggal Kerja"
+              placeholder="Semua Tanggal"
+              today={todayIso()}
+              allowClear
+              dateExact={dateMode === 'single' ? dateExact : ''}
+              dateFrom={dateMode === 'range' ? dateFrom : ''}
+              dateTo={dateMode === 'range' ? dateTo : ''}
+              labelClassName="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
+              triggerClassName="min-h-[40px] bg-slate-50 dark:bg-slate-800 px-3"
+              onSelectSingleDate={(iso) => {
+                setDateMode('single');
+                setDateExact(iso);
+                setDateFrom('');
+                setDateTo('');
+                setCurrentPage(1);
+              }}
+              onSelectDateRange={(start, end) => {
+                setDateMode('range');
+                setDateExact('');
+                setDateFrom(start);
+                setDateTo(end);
+                setCurrentPage(1);
+              }}
+              onClearDateFilter={() => {
+                setDateExact('');
+                setDateFrom('');
+                setDateTo('');
+                setCurrentPage(1);
+              }}
+            />
           </div>
         </div>
       </section>

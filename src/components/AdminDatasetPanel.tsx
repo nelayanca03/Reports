@@ -32,6 +32,7 @@ import {
   getPersonList,
   todayIso,
 } from '../utils/outletLogic';
+import { DateRangeFilterPopover } from './records/DateRangeFilterPopover';
 
 interface AdminDatasetPanelProps {
   activeRoleId: OperationalRoleId;
@@ -511,7 +512,7 @@ export function AdminDatasetPanel({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-6">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
           <div>
             <label
               htmlFor="ds-role"
@@ -600,45 +601,25 @@ export function AdminDatasetPanel({
             </select>
           </div>
 
-          <div>
-            <label
-              htmlFor="ds-from"
-              className="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400"
-            >
-              Dari Tanggal
-            </label>
-            <input
-              id="ds-from"
-              type="date"
-              max={today}
-              value={dateFrom}
-              onChange={(e) => {
-                const v = e.target.value || defaultFrom;
-                setDateFrom(v > today ? today : v);
-              }}
-              className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-            />
-          </div>
-
-          <div>
-            <label
-              htmlFor="ds-to"
-              className="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400"
-            >
-              Sampai Tanggal
-            </label>
-            <input
-              id="ds-to"
-              type="date"
-              max={today}
-              value={dateTo}
-              onChange={(e) => {
-                const v = e.target.value || today;
-                setDateTo(v > today ? today : v);
-              }}
-              className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-            />
-          </div>
+          <DateRangeFilterPopover
+            id="ds-date-range"
+            label="Range Tanggal"
+            align="right"
+            today={today}
+            maxDate={today}
+            allowClear={false}
+            dateExact={dateFrom && dateFrom === dateTo ? dateFrom : ''}
+            dateFrom={dateFrom !== dateTo ? dateFrom : ''}
+            dateTo={dateFrom !== dateTo ? dateTo : ''}
+            onSelectSingleDate={(iso) => {
+              setDateFrom(iso);
+              setDateTo(iso);
+            }}
+            onSelectDateRange={(start, end) => {
+              setDateFrom(start);
+              setDateTo(end);
+            }}
+          />
         </div>
 
         {/* Export Action Buttons */}

@@ -13,6 +13,7 @@ import {
   nearestWorkingDay,
   todayIso,
 } from '../utils/outletLogic';
+import { DateRangeFilterPopover } from './records/DateRangeFilterPopover';
 
 interface RekapRankingViewProps {
   config: RoleConfig;
@@ -191,79 +192,27 @@ export function RekapRankingView({
           )}
 
           <div className={subMode === 'ranking' ? 'sm:col-span-5' : 'sm:col-span-7'}>
-            <div className="mb-1.5 flex items-center justify-between gap-2">
-              <label
-                htmlFor={recapDateMode === 'single' ? 'rekap-date' : 'rekap-date-from'}
-                className="text-xs font-medium text-slate-500 dark:text-slate-400"
-              >
-                {recapDateMode === 'single' ? 'Per Tanggal' : 'Range Tanggal'}
-              </label>
-              <div className="inline-flex rounded-md border border-slate-200 bg-slate-100 p-0.5 dark:border-slate-700 dark:bg-slate-800">
-                <button
-                  type="button"
-                  onClick={() => onChangeRecapDateMode('single')}
-                  className={`rounded px-2 py-0.5 text-[11px] font-semibold transition-colors ${
-                    recapDateMode === 'single'
-                      ? 'bg-white text-blue-700 shadow-xs dark:bg-slate-900 dark:text-blue-400'
-                      : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
-                  }`}
-                >
-                  Per Tanggal
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onChangeRecapDateMode('range')}
-                  className={`rounded px-2 py-0.5 text-[11px] font-semibold transition-colors ${
-                    recapDateMode === 'range'
-                      ? 'bg-white text-blue-700 shadow-xs dark:bg-slate-900 dark:text-blue-400'
-                      : 'text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
-                  }`}
-                >
-                  Range Tanggal
-                </button>
-              </div>
-            </div>
-
-            {recapDateMode === 'single' ? (
-              <input
-                id="rekap-date"
-                type="date"
-                max={today}
-                value={recapDate}
-                onChange={(e) => {
-                  const val = e.target.value || today;
-                  onChangeRecapDate(val > today ? today : val);
-                }}
-                className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 font-mono text-sm text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-              />
-            ) : (
-              <div className="grid grid-cols-2 gap-2">
-                <input
-                  id="rekap-date-from"
-                  type="date"
-                  max={today}
-                  aria-label="Dari tanggal rekap"
-                  value={rangeFrom}
-                  onChange={(e) => {
-                    const val = e.target.value || days[0] || today;
-                    onChangeRangeFrom(val > today ? today : val);
-                  }}
-                  className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 font-mono text-xs sm:text-sm text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-                />
-                <input
-                  id="rekap-date-to"
-                  type="date"
-                  max={today}
-                  aria-label="Sampai tanggal rekap"
-                  value={rangeTo}
-                  onChange={(e) => {
-                    const val = e.target.value || today;
-                    onChangeRangeTo(val > today ? today : val);
-                  }}
-                  className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-2 font-mono text-xs sm:text-sm text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-                />
-              </div>
-            )}
+            <DateRangeFilterPopover
+              id="rekap-date-filter"
+              label="Tanggal / Range Tanggal"
+              today={today}
+              maxDate={today}
+              allowClear={false}
+              dateExact={recapDateMode === 'single' ? recapDate : ''}
+              dateFrom={recapDateMode === 'range' ? rangeFrom : ''}
+              dateTo={recapDateMode === 'range' ? rangeTo : ''}
+              labelClassName="mb-1.5 block text-xs font-medium text-slate-500 dark:text-slate-400"
+              triggerClassName="min-h-[42px] bg-slate-50 dark:bg-slate-800 px-3 text-sm"
+              onSelectSingleDate={(iso) => {
+                onChangeRecapDateMode('single');
+                onChangeRecapDate(iso);
+              }}
+              onSelectDateRange={(start, end) => {
+                onChangeRecapDateMode('range');
+                onChangeRangeFrom(start);
+                onChangeRangeTo(end);
+              }}
+            />
           </div>
 
           <div className={subMode === 'ranking' ? 'sm:col-span-3' : 'sm:col-span-5'}>

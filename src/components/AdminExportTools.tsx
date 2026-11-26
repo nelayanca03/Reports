@@ -53,6 +53,7 @@ import {
 import { AdminDatasetPanel } from './AdminDatasetPanel';
 import { ConfirmModal } from './ConfirmModal';
 import { MlInsightsPanel } from './MlInsightsPanel';
+import { DateRangeFilterPopover } from './records/DateRangeFilterPopover';
 
 interface AdminExportToolsProps {
   config: RoleConfig;
@@ -594,16 +595,9 @@ export function AdminExportTools({
     reader.readAsText(file);
   };
 
-  const filterGridColsClass = useMemo(() => {
-    const count =
-      (effectiveDateMode === 'range' ? 2 : 1) +
-      3 + // role, pic, outlet
-      (activeReportMeta.supportsStatusFilter ? 1 : 0) +
-      1; // search
-    if (count >= 7) return 'lg:grid-cols-7';
-    if (count === 6) return 'lg:grid-cols-6';
-    return 'lg:grid-cols-5';
-  }, [effectiveDateMode, activeReportMeta.supportsStatusFilter]);
+  const filterGridColsClass = activeReportMeta.supportsStatusFilter
+    ? 'lg:grid-cols-6'
+    : 'lg:grid-cols-5';
 
   const content = (
     <div className="space-y-5">
@@ -775,7 +769,7 @@ export function AdminExportTools({
                     Filter Laporan
                   </span>
                   <div className="flex flex-wrap items-center gap-3">
-                    {period !== 'mingguan' && (
+                    {period === 'bulanan' && (
                       <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 dark:border-slate-700 dark:bg-slate-900">
                         <button
                           type="button"
@@ -789,7 +783,7 @@ export function AdminExportTools({
                               : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100'
                           }`}
                         >
-                          {period === 'bulanan' ? 'Per Bulan' : 'Per Tanggal'}
+                          Per Bulan
                         </button>
                         <button
                           type="button"
@@ -846,110 +840,103 @@ export function AdminExportTools({
                     </select>
                   </div>
 
-                  {effectiveDateMode === 'range' ? (
-                    <>
-                      <div>
-                        <label
-                          htmlFor="export-range-from"
-                          className="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400"
-                        >
-                          Dari Tanggal
-                        </label>
-                        <input
-                          id="export-range-from"
-                          type="date"
-                          max={today}
-                          value={rangeFrom}
-                          onChange={(e) => {
-                            const val = e.target.value || days[0] || today;
-                            setRangeFrom(val > today ? today : val);
-                            setPreviewPage(1);
-                          }}
-                          className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                        />
-                      </div>
-                      <div>
-                        <label
-                          htmlFor="export-range-to"
-                          className="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400"
-                        >
-                          Sampai Tanggal
-                        </label>
-                        <input
-                          id="export-range-to"
-                          type="date"
-                          max={today}
-                          value={rangeTo}
-                          onChange={(e) => {
-                            const val = e.target.value || today;
-                            setRangeTo(val > today ? today : val);
-                            setPreviewPage(1);
-                          }}
-                          className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                        />
-                      </div>
-                    </>
-                  ) : (
+                  {period === 'harian' && (
+                    <DateRangeFilterPopover
+                      id="export-harian-date-filter"
+                      label="Tanggal / Range Tanggal"
+                      today={today}
+                      maxDate={today}
+                      allowClear={false}
+                      dateExact={effectiveDateMode === 'single' ? effectiveTargetDay : ''}
+                      dateFrom={effectiveDateMode === 'range' ? rangeFrom : ''}
+                      dateTo={effectiveDateMode === 'range' ? rangeTo : ''}
+                      onSelectSingleDate={(iso) => {
+                        setDateMode('single');
+                        setTargetDay(iso);
+                        setPreviewPage(1);
+                      }}
+                      onSelectDateRange={(start, end) => {
+                        setDateMode('range');
+                        setRangeFrom(start);
+                        setRangeTo(end);
+                        setPreviewPage(1);
+                      }}
+                    />
+                  )}
+
+                  {period === 'mingguan' && (
                     <div>
                       <label
                         htmlFor="export-time-filter"
                         className="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400"
                       >
-                        {period === 'harian'
-                          ? 'Per Tanggal'
-                          : period === 'mingguan'
-                            ? 'Pilih Minggu'
-                            : 'Pilih Bulan'}
+                        Pilih Minggu
                       </label>
-                      {period === 'harian' && (
-                        <input
-                          id="export-time-filter"
-                          type="date"
-                          max={today}
-                          value={effectiveTargetDay}
-                          onChange={(e) => {
-                            const val = e.target.value || defaultDay;
-                            setTargetDay(val > today ? today : val);
-                            setPreviewPage(1);
-                          }}
-                          className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                        />
-                      )}
-                      {period === 'mingguan' && (
-                        <select
-                          id="export-time-filter"
-                          value={effectiveWeekKey}
-                          onChange={(e) => {
-                            setSelectedWeekKey(e.target.value);
-                            setPreviewPage(1);
-                          }}
-                          className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                        >
-                          {weekOptions.map((w) => (
-                            <option key={w.key} value={w.key}>
-                              {w.label}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-                      {period === 'bulanan' && (
-                        <select
-                          id="export-time-filter"
-                          value={effectiveMonthKey}
-                          onChange={(e) => {
-                            setSelectedMonthKey(e.target.value);
-                            setPreviewPage(1);
-                          }}
-                          className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                        >
-                          {monthOptions.map((m) => (
-                            <option key={m.key} value={m.key}>
-                              {m.label}
-                            </option>
-                          ))}
-                        </select>
-                      )}
+                      <select
+                        id="export-time-filter"
+                        value={effectiveWeekKey}
+                        onChange={(e) => {
+                          setSelectedWeekKey(e.target.value);
+                          setPreviewPage(1);
+                        }}
+                        className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                      >
+                        {weekOptions.map((w) => (
+                          <option key={w.key} value={w.key}>
+                            {w.label}
+                          </option>
+                        ))}
+                      </select>
                     </div>
+                  )}
+
+                  {period === 'bulanan' && effectiveDateMode === 'single' && (
+                    <div>
+                      <label
+                        htmlFor="export-time-filter"
+                        className="mb-1 block text-[11px] font-medium text-slate-500 dark:text-slate-400"
+                      >
+                        Pilih Bulan
+                      </label>
+                      <select
+                        id="export-time-filter"
+                        value={effectiveMonthKey}
+                        onChange={(e) => {
+                          setSelectedMonthKey(e.target.value);
+                          setPreviewPage(1);
+                        }}
+                        className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                      >
+                        {monthOptions.map((m) => (
+                          <option key={m.key} value={m.key}>
+                            {m.label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {period === 'bulanan' && effectiveDateMode === 'range' && (
+                    <DateRangeFilterPopover
+                      id="export-bulanan-range-filter"
+                      label="Range Tanggal"
+                      today={today}
+                      maxDate={today}
+                      allowClear={false}
+                      dateExact={rangeFrom && rangeFrom === rangeTo ? rangeFrom : ''}
+                      dateFrom={rangeFrom !== rangeTo ? rangeFrom : ''}
+                      dateTo={rangeFrom !== rangeTo ? rangeTo : ''}
+                      onSelectSingleDate={(iso) => {
+                        setRangeFrom(iso);
+                        setRangeTo(iso);
+                        setPreviewPage(1);
+                      }}
+                      onSelectDateRange={(start, end) => {
+                        setRangeFrom(start);
+                        setRangeTo(end);
+                        setPreviewPage(1);
+                      }}
+                    />
                   )}
 
                   <div>
