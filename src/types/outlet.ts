@@ -5,6 +5,7 @@ export type RecordDepartment = 'stock_accounting' | 'gl';
 export type FormulaType = 'daily_plus_1' | 'weekly_plus_1' | 'memo_month' | 'ref_task';
 export type TaskInputType = 'date' | 'week' | 'month';
 export type InputLogActionType = 'input_harian' | 'kunjungan';
+export type InputLogItemAction = 'set' | 'clear' | 'edit';
 
 export interface TaskDefinition {
   key: string;
@@ -84,6 +85,12 @@ export interface InputLogEntry {
   details: string;
   itemCount: number;
   clientTs: string;
+  taskKey?: string;
+  prevDate?: string;
+  newDate?: string;
+  prevNote?: string;
+  newNote?: string;
+  action?: InputLogItemAction;
 }
 
 export interface OutletStoreState {

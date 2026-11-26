@@ -687,6 +687,51 @@ describe('Firestore Security Rules Emulator Suite (security_spec.md + Operationa
       await assertFails(updateDoc(doc(stockDb, 'inputLogs', 'log_001'), { details: 'Tampered' }));
       await assertFails(deleteDoc(doc(stockDb, 'inputLogs', 'log_001')));
 
+      await assertSucceeds(
+        setDoc(doc(stockDb, 'inputLogs', 'log_002'), {
+          uid: STOCK_UID,
+          userEmail: STOCK_EMAIL,
+          userName: 'Peter',
+          userRole: 'stock_accounting',
+          roleId: 'stock_accounting',
+          roleLabel: 'Stock Accounting',
+          actionType: 'input_harian',
+          pic: 'PETER',
+          outlet: 'NKPM',
+          day: today,
+          details: 'HAM SPC: Update',
+          itemCount: 1,
+          clientTs: new Date().toISOString(),
+          taskKey: 'ham',
+          prevDate: '',
+          newDate: today,
+          prevNote: '',
+          newNote: 'Sesuai',
+          action: 'set',
+          createdAt: serverTimestamp(),
+        })
+      );
+
+      await assertFails(
+        setDoc(doc(stockDb, 'inputLogs', 'log_bad_action'), {
+          uid: STOCK_UID,
+          userEmail: STOCK_EMAIL,
+          userName: 'Peter',
+          userRole: 'stock_accounting',
+          roleId: 'stock_accounting',
+          roleLabel: 'Stock Accounting',
+          actionType: 'input_harian',
+          pic: 'PETER',
+          outlet: 'NKPM',
+          day: today,
+          details: 'Bad action',
+          itemCount: 1,
+          clientTs: new Date().toISOString(),
+          action: 'delete_all',
+          createdAt: serverTimestamp(),
+        })
+      );
+
       await assertSucceeds(getDoc(doc(stockDb, 'calendarEvents', 'evt_stock_only')));
       await assertFails(getDoc(doc(stockDb, 'calendarEvents', 'evt_gl_only')));
       const visibleSnap = await assertSucceeds(

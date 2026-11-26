@@ -269,6 +269,17 @@ export function toWibIsoDate(isoTimestamp?: string): string {
   return new Date(ms + 7 * 3600 * 1000).toISOString().slice(0, 10);
 }
 
+export function toWibTimeString(isoTimestamp?: string): string {
+  if (!isoTimestamp) return '';
+  const ms = Date.parse(isoTimestamp);
+  if (Number.isNaN(ms)) return '';
+  const wib = new Date(ms + 7 * 3600 * 1000);
+  const hh = String(wib.getUTCHours()).padStart(2, '0');
+  const mm = String(wib.getUTCMinutes()).padStart(2, '0');
+  const ss = String(wib.getUTCSeconds()).padStart(2, '0');
+  return `${hh}:${mm}:${ss}`;
+}
+
 export function todayIso(): string {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -566,16 +577,18 @@ export function fmtDateWeekdayLong(isoStr: string): string {
 
 export function fmtDateTimeWithSeconds(isoTimestamp?: string): string {
   if (!isoTimestamp) return '';
-  const d = new Date(isoTimestamp);
-  if (Number.isNaN(d.getTime())) return '';
-  const datePart = d.toLocaleDateString('id-ID', {
+  const ms = Date.parse(isoTimestamp);
+  if (Number.isNaN(ms)) return '';
+  const wib = new Date(ms + 7 * 3600 * 1000);
+  const datePart = wib.toLocaleDateString('id-ID', {
     day: '2-digit',
     month: 'short',
     year: 'numeric',
+    timeZone: 'UTC',
   });
-  const hh = String(d.getHours()).padStart(2, '0');
-  const mm = String(d.getMinutes()).padStart(2, '0');
-  const ss = String(d.getSeconds()).padStart(2, '0');
+  const hh = String(wib.getUTCHours()).padStart(2, '0');
+  const mm = String(wib.getUTCMinutes()).padStart(2, '0');
+  const ss = String(wib.getUTCSeconds()).padStart(2, '0');
   return `${datePart}, ${hh}:${mm}:${ss}`;
 }
 
@@ -997,16 +1010,40 @@ export function calcVisitLeaderboard(
   return { elapsedDays, grandTotalVisits, rows };
 }
 
-export function escapeCsv(val: string | number): string {
-  const raw = String(val ?? '');
+export function escapeCsvCell(
+  val: string | number,
+  options?: { delimiter?: ',' | ';'; decimalSeparator?: '.' | ',' }
+): string {
+  const delimiter = options?.delimiter || ',';
+  const decimalSeparator = options?.decimalSeparator || '.';
+  let raw: string;
+  if (typeof val === 'number') {
+    if (!Number.isFinite(val)) {
+      raw = '';
+    } else if (decimalSeparator === ',' && !Number.isInteger(val)) {
+      raw = String(val).replace('.', ',');
+    } else {
+      raw = String(val);
+    }
+  } else {
+    raw = String(val ?? '');
+  }
   const trimmedStart = raw.replace(/^[ \t\r\n]+/, '');
-  const isPlainNumber = typeof val === 'number' || /^[+-]?\d+(\.\d+)?$/.test(raw.trim());
-  const hasFormulaPrefix = /^[=+\-@\t\r]/.test(raw) || /^[=+\-@]/.test(trimmedStart);
+  const isPlainNumber =
+    typeof val === 'number' || /^[+-]?\d+([.,]\d+)?$/.test(raw.trim());
+  const hasFormulaPrefix =
+    /^[=+\-@\t\r]/.test(raw) || /^[=+\-@]/.test(trimmedStart);
   const str = hasFormulaPrefix && !isPlainNumber ? `'${raw}` : raw;
-  if (/[",\n\r]/.test(str)) {
+  const needsQuote =
+    str.includes(delimiter) || /["\n\r]/.test(str);
+  if (needsQuote) {
     return `"${str.replace(/"/g, '""')}"`;
   }
   return str;
+}
+
+export function escapeCsv(val: string | number): string {
+  return escapeCsvCell(val, { delimiter: ',', decimalSeparator: '.' });
 }
 
 export function generateDailyFleetCsv(
@@ -1245,7 +1282,10 @@ export function generateInputLogsCsv(logs: InputLogEntry[]): string {
 }
 
 export function downloadTextFile(filename: string, content: string, mimeType: string) {
-  const blob = new Blob([content], { type: mimeType });
+  const isCsv =
+    mimeType.toLowerCase().includes('csv') || filename.toLowerCase().endsWith('.csv');
+  const payload = isCsv && !content.startsWith('\uFEFF') ? `\uFEFF${content}` : content;
+  const blob = new Blob([payload], { type: mimeType });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;

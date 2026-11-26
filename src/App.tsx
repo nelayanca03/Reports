@@ -421,6 +421,9 @@ export default function App() {
                 store={store}
                 allWorkspaces={allWorkspaces}
                 inputLogs={inputLogs}
+                savedRecords={savedRecords}
+                calendarEvents={calendarEvents}
+                managedAccounts={managedAccounts}
                 days={days}
                 activeMonth={activeMonth}
                 selectableMonths={selectableMonths}

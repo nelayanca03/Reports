@@ -1,4 +1,5 @@
 import {
+  Archive,
   BrainCircuit,
   ChevronDown,
   ChevronLeft,
@@ -14,12 +15,15 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react';
-import { ChangeEvent, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, useCallback, useMemo, useRef, useState } from 'react';
 import {
+  AccountProfile,
+  CalendarEvent,
   InputLogEntry,
   OperationalRoleId,
   OutletStoreState,
   RoleConfig,
+  SavedRecord,
 } from '../types/outlet';
 import {
   EXPORT_REPORT_OPTIONS,
@@ -30,6 +34,7 @@ import {
   buildWeekOptions,
   reportTableToCsv,
 } from '../utils/exportReports';
+import { fetchAllInputLogs } from '../utils/fetchAllInputLogs';
 import {
   DEFAULT_START,
   OPERATIONAL_ROLES,
@@ -45,6 +50,7 @@ import {
   todayIso,
   yesterdayIso,
 } from '../utils/outletLogic';
+import { AdminDatasetPanel } from './AdminDatasetPanel';
 import { ConfirmModal } from './ConfirmModal';
 import { MlInsightsPanel } from './MlInsightsPanel';
 
@@ -54,6 +60,9 @@ interface AdminExportToolsProps {
   store: OutletStoreState;
   allWorkspaces: Record<OperationalRoleId, OutletStoreState>;
   inputLogs: InputLogEntry[];
+  savedRecords?: SavedRecord[];
+  calendarEvents?: CalendarEvent[];
+  managedAccounts?: AccountProfile[];
   days: string[];
   activeMonth: string;
   selectableMonths: string[];
@@ -72,6 +81,9 @@ export function AdminExportTools({
   store,
   allWorkspaces,
   inputLogs,
+  savedRecords = [],
+  calendarEvents = [],
+  managedAccounts = [],
   days,
   activeMonth,
   selectableMonths,
@@ -83,9 +95,37 @@ export function AdminExportTools({
 }: AdminExportToolsProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [expanded, setExpanded] = useState(alwaysExpanded);
-  const [activeSection, setActiveSection] = useState<'ml' | 'reports' | 'backup'>('ml');
+  const [activeSection, setActiveSection] = useState<'ml' | 'reports' | 'dataset' | 'backup'>('ml');
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; message: string } | null>(null);
+  const [reportDelimiter, setReportDelimiter] = useState<',' | ';'>(',');
+  const [serverLogs, setServerLogs] = useState<InputLogEntry[] | null>(null);
+  const [serverLogsLoading, setServerLogsLoading] = useState(false);
+  const [serverLogsProgress, setServerLogsProgress] = useState(0);
+  const [serverLogsTruncated, setServerLogsTruncated] = useState(false);
+
+  const effectiveInputLogs = serverLogs ?? inputLogs;
+
+  const handleLoadAllLogs = useCallback(async () => {
+    setServerLogsLoading(true);
+    setServerLogsProgress(0);
+    try {
+      const res = await fetchAllInputLogs((count) => setServerLogsProgress(count));
+      setServerLogs(res.logs);
+      setServerLogsTruncated(res.truncated);
+      setFeedback({
+        type: 'ok',
+        message: `${res.logs.length} log input berhasil dimuat dari server${res.truncated ? ' (batas maksimal 20.000 tercapai)' : ''}.`,
+      });
+    } catch {
+      setFeedback({
+        type: 'err',
+        message: 'Gagal memuat seluruh log input dari server.',
+      });
+    } finally {
+      setServerLogsLoading(false);
+    }
+  }, []);
 
   const today = todayIso();
   const defaultDay = nearestWorkingDay(days, yesterdayIso());
@@ -240,7 +280,7 @@ export function AdminExportTools({
         roleFilter,
         roleConfigs,
         allWorkspaces,
-        inputLogs,
+        inputLogs: effectiveInputLogs,
         availableDays: scopedDays,
         today,
         targetDay: effectiveTargetDay,
@@ -259,7 +299,7 @@ export function AdminExportTools({
       roleFilter,
       roleConfigs,
       allWorkspaces,
-      inputLogs,
+      effectiveInputLogs,
       scopedDays,
       today,
       effectiveTargetDay,
@@ -299,7 +339,7 @@ export function AdminExportTools({
     if (report.rows.length === 0) return;
     downloadTextFile(
       report.filename,
-      reportTableToCsv(report.columns, report.rows),
+      reportTableToCsv(report.columns, report.rows, { delimiter: reportDelimiter, bom: true }),
       'text/csv;charset=utf-8'
     );
     setFeedback({
@@ -414,6 +454,18 @@ export function AdminExportTools({
               </button>
               <button
                 type="button"
+                onClick={() => setActiveSection('dataset')}
+                className={`inline-flex min-h-[38px] items-center gap-2 rounded-md px-3.5 py-1.5 text-xs font-semibold transition-colors ${
+                  activeSection === 'dataset'
+                    ? 'bg-blue-700 text-white dark:bg-blue-600'
+                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100'
+                }`}
+              >
+                <Archive className="h-4 w-4 shrink-0" />
+                <span>Dataset Mentah (ZIP)</span>
+              </button>
+              <button
+                type="button"
                 onClick={() => setActiveSection('backup')}
                 className={`inline-flex min-h-[38px] items-center gap-2 rounded-md px-3.5 py-1.5 text-xs font-semibold transition-colors ${
                   activeSection === 'backup'
@@ -456,10 +508,34 @@ export function AdminExportTools({
               activeMonth={activeMonth}
               roleConfigs={roleConfigs}
               allWorkspaces={allWorkspaces}
-              inputLogs={inputLogs}
+              inputLogs={effectiveInputLogs}
               selectableMonths={selectableMonths}
               days={days}
+              serverLogsLoaded={serverLogs !== null}
+              serverLogsLoading={serverLogsLoading}
+              serverLogsProgress={serverLogsProgress}
+              onLoadAllLogs={handleLoadAllLogs}
               onOpenAdminTasks={onOpenAdminTasks}
+            />
+          )}
+
+          {activeSection === 'dataset' && (
+            <AdminDatasetPanel
+              activeRoleId={config.roleId}
+              activeMonth={activeMonth}
+              roleConfigs={roleConfigs}
+              allWorkspaces={allWorkspaces}
+              inputLogs={effectiveInputLogs}
+              savedRecords={savedRecords}
+              calendarEvents={calendarEvents}
+              managedAccounts={managedAccounts}
+              selectableMonths={selectableMonths}
+              days={days}
+              serverLogsLoaded={serverLogs !== null}
+              serverLogsLoading={serverLogsLoading}
+              serverLogsProgress={serverLogsProgress}
+              serverLogsTruncated={serverLogsTruncated}
+              onLoadAllLogs={handleLoadAllLogs}
             />
           )}
 
@@ -835,15 +911,53 @@ export function AdminExportTools({
                 </div>
               </div>
 
-              <button
-                type="button"
-                disabled={report.rows.length === 0}
-                onClick={handleDownloadPreviewCsv}
-                className="inline-flex min-h-[40px] items-center gap-2 whitespace-nowrap rounded-lg bg-blue-700 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 dark:bg-blue-600 dark:hover:bg-blue-500 dark:disabled:bg-slate-800 dark:disabled:text-slate-500"
-              >
-                <Download className="h-4 w-4 shrink-0" />
-                <span>Unduh CSV ({report.rows.length} baris)</span>
-              </button>
+              <div className="flex flex-wrap items-center gap-2.5">
+                {reportId === 'harian_audit_log' && serverLogs === null && (
+                  <button
+                    type="button"
+                    disabled={serverLogsLoading}
+                    onClick={() => void handleLoadAllLogs()}
+                    className="inline-flex min-h-[38px] items-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+                  >
+                    {serverLogsLoading
+                      ? `Memuat log (${serverLogsProgress})...`
+                      : 'Muat Seluruh Log Server'}
+                  </button>
+                )}
+                <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5 dark:border-slate-700 dark:bg-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setReportDelimiter(',')}
+                    className={`min-h-[32px] rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                      reportDelimiter === ','
+                        ? 'bg-white text-blue-700 shadow-xs dark:bg-slate-900 dark:text-blue-400'
+                        : 'text-slate-600 hover:text-slate-900 dark:text-slate-300'
+                    }`}
+                  >
+                    CSV Standar (,)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setReportDelimiter(';')}
+                    className={`min-h-[32px] rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                      reportDelimiter === ';'
+                        ? 'bg-white text-blue-700 shadow-xs dark:bg-slate-900 dark:text-blue-400'
+                        : 'text-slate-600 hover:text-slate-900 dark:text-slate-300'
+                    }`}
+                  >
+                    Excel ID (;)
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  disabled={report.rows.length === 0}
+                  onClick={handleDownloadPreviewCsv}
+                  className="inline-flex min-h-[40px] items-center gap-2 whitespace-nowrap rounded-lg bg-blue-700 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 dark:bg-blue-600 dark:hover:bg-blue-500 dark:disabled:bg-slate-800 dark:disabled:text-slate-500"
+                >
+                  <Download className="h-4 w-4 shrink-0" />
+                  <span>Unduh CSV ({report.rows.length} baris)</span>
+                </button>
+              </div>
             </div>
 
             {/* Preview Table */}

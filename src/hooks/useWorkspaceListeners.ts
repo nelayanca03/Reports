@@ -494,6 +494,10 @@ export function useWorkspaceListeners({
         (snap) => {
           const list: InputLogEntry[] = snap.docs.map((docSnap) => {
             const d = docSnap.data();
+            const action =
+              d.action === 'set' || d.action === 'clear' || d.action === 'edit'
+                ? d.action
+                : undefined;
             return {
               id: docSnap.id,
               uid: String(d.uid || ''),
@@ -509,6 +513,12 @@ export function useWorkspaceListeners({
               details: String(d.details || ''),
               itemCount: Number(d.itemCount || 1),
               clientTs: String(d.clientTs || ''),
+              ...(typeof d.taskKey === 'string' && d.taskKey ? { taskKey: d.taskKey } : {}),
+              ...(typeof d.prevDate === 'string' ? { prevDate: d.prevDate } : {}),
+              ...(typeof d.newDate === 'string' ? { newDate: d.newDate } : {}),
+              ...(typeof d.prevNote === 'string' ? { prevNote: d.prevNote } : {}),
+              ...(typeof d.newNote === 'string' ? { newNote: d.newNote } : {}),
+              ...(action ? { action } : {}),
             };
           });
           setInputLogs(list);

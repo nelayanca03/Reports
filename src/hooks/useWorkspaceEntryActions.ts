@@ -5,6 +5,7 @@ import {
   runTransaction,
   serverTimestamp,
   setDoc,
+  writeBatch,
 } from 'firebase/firestore';
 import { useCallback } from 'react';
 import { OperationType, auth, db, handleFirestoreError } from '../firebase';
@@ -12,6 +13,7 @@ import {
   AccountProfile,
   EntryItem,
   InputLogActionType,
+  InputLogItemAction,
   OperationalRoleId,
   OutletStoreState,
   RoleConfig,
@@ -60,6 +62,12 @@ export function useWorkspaceEntryActions({
       details: string;
       itemCount: number;
       clientTs: string;
+      taskKey?: string;
+      prevDate?: string;
+      newDate?: string;
+      prevNote?: string;
+      newNote?: string;
+      action?: InputLogItemAction;
     }) => {
       const uid = auth.currentUser?.uid;
       const email = (currentAccount?.email || auth.currentUser?.email || '').trim().toLowerCase();
@@ -81,10 +89,76 @@ export function useWorkspaceEntryActions({
           details: params.details.slice(0, 600),
           itemCount: Math.max(1, Math.min(50, Math.round(params.itemCount))),
           clientTs: params.clientTs.slice(0, 40),
+          ...(params.taskKey !== undefined ? { taskKey: params.taskKey.slice(0, 40) } : {}),
+          ...(params.prevDate !== undefined ? { prevDate: params.prevDate.slice(0, 20) } : {}),
+          ...(params.newDate !== undefined ? { newDate: params.newDate.slice(0, 20) } : {}),
+          ...(params.prevNote !== undefined ? { prevNote: params.prevNote.slice(0, 100) } : {}),
+          ...(params.newNote !== undefined ? { newNote: params.newNote.slice(0, 100) } : {}),
+          ...(params.action !== undefined ? { action: params.action } : {}),
           createdAt: serverTimestamp(),
         });
       } catch (error) {
         handleFirestoreError(error, OperationType.CREATE, logPath);
+      }
+    },
+    [activeConfig.label, currentAccount, effectiveRoleId]
+  );
+
+  const recordInputLogsBatch = useCallback(
+    async (
+      items: Array<{
+        actionType: InputLogActionType;
+        pic: string;
+        outlet: string;
+        day: string;
+        details: string;
+        itemCount: number;
+        clientTs: string;
+        taskKey?: string;
+        prevDate?: string;
+        newDate?: string;
+        prevNote?: string;
+        newNote?: string;
+        action?: InputLogItemAction;
+      }>
+    ) => {
+      if (items.length === 0) return;
+      const uid = auth.currentUser?.uid;
+      const email = (currentAccount?.email || auth.currentUser?.email || '').trim().toLowerCase();
+      if (!uid || !email || !currentAccount) return;
+
+      const batch = writeBatch(db);
+      const baseTs = Date.now();
+      items.forEach((params, idx) => {
+        const logId = `${baseTs}_${idx}_${Math.random().toString(36).slice(2, 8)}`;
+        batch.set(doc(db, 'inputLogs', logId), {
+          uid,
+          userEmail: email.slice(0, 120),
+          userName: (currentAccount.name || email).slice(0, 80),
+          userRole: currentAccount.role,
+          roleId: effectiveRoleId,
+          roleLabel: (activeConfig.label || effectiveRoleId).slice(0, 60),
+          actionType: params.actionType,
+          pic: params.pic.slice(0, 60),
+          outlet: params.outlet.slice(0, 120),
+          day: params.day.slice(0, 10),
+          details: params.details.slice(0, 600),
+          itemCount: Math.max(1, Math.min(50, Math.round(params.itemCount))),
+          clientTs: params.clientTs.slice(0, 40),
+          ...(params.taskKey !== undefined ? { taskKey: params.taskKey.slice(0, 40) } : {}),
+          ...(params.prevDate !== undefined ? { prevDate: params.prevDate.slice(0, 20) } : {}),
+          ...(params.newDate !== undefined ? { newDate: params.newDate.slice(0, 20) } : {}),
+          ...(params.prevNote !== undefined ? { prevNote: params.prevNote.slice(0, 100) } : {}),
+          ...(params.newNote !== undefined ? { newNote: params.newNote.slice(0, 100) } : {}),
+          ...(params.action !== undefined ? { action: params.action } : {}),
+          createdAt: serverTimestamp(),
+        });
+      });
+
+      try {
+        await batch.commit();
+      } catch (error) {
+        handleFirestoreError(error, OperationType.CREATE, 'inputLogs');
       }
     },
     [activeConfig.label, currentAccount, effectiveRoleId]
@@ -330,34 +404,55 @@ export function useWorkspaceEntryActions({
 
       const assignedPic =
         activeConfig.outlets.find((o) => o.code === outlet)?.person || '';
-      const summaryParts = entries.map(([taskKey, item]) => {
+      const perItemLogs = entries.map(([taskKey, item]) => {
         const taskDef = activeConfig.tasks.find((t) => t.key === taskKey);
         const label = taskDef?.shortLabel || taskDef?.label || taskKey;
+        const ownPrev = workspaceData.ent[outlet]?.[`${day}|${taskKey}`];
+        const prevDate = (ownPrev?.d || '').slice(0, 20);
+        const prevNote = (ownPrev?.n || '').slice(0, 100);
+        const cleanDate = (item.d || '').trim().slice(0, 20);
         const cleanNote = (item.n || '').trim().slice(0, 100);
-        if (item.cleared || (!item.d && !cleanNote)) {
-          return `${label}: Dikosongkan`;
-        }
-        const taskInputType = getTaskInputType(taskDef);
-        const datePart = item.d
-          ? taskInputType === 'month'
-            ? fmtMonth(item.d)
-            : taskInputType === 'week'
-              ? fmtWeek(item.d)
-              : fmtDateLong(item.d)
-          : '-';
-        return cleanNote ? `${label}: ${datePart} (${cleanNote})` : `${label}: ${datePart}`;
-      });
+        const isCleared = Boolean(item.cleared || (!cleanDate && !cleanNote));
+        const action: InputLogItemAction = isCleared
+          ? 'clear'
+          : ownPrev && (ownPrev.d || ownPrev.n)
+            ? 'edit'
+            : 'set';
 
-      try {
-        await recordInputLog({
-          actionType: 'input_harian',
+        let itemDetail: string;
+        if (isCleared) {
+          itemDetail = `${label}: Dikosongkan`;
+        } else {
+          const taskInputType = getTaskInputType(taskDef);
+          const datePart = cleanDate
+            ? taskInputType === 'month'
+              ? fmtMonth(cleanDate)
+              : taskInputType === 'week'
+                ? fmtWeek(cleanDate)
+                : fmtDateLong(cleanDate)
+            : '-';
+          itemDetail = cleanNote ? `${label}: ${datePart} (${cleanNote})` : `${label}: ${datePart}`;
+        }
+
+        return {
+          actionType: 'input_harian' as const,
           pic: assignedPic,
           outlet,
           day,
-          details: summaryParts.join(' · '),
-          itemCount: entries.length,
+          details: itemDetail,
+          itemCount: 1,
           clientTs: nowIso,
-        });
+          taskKey,
+          prevDate,
+          newDate: isCleared ? '' : cleanDate,
+          prevNote,
+          newNote: isCleared ? '' : cleanNote,
+          action,
+        };
+      });
+
+      try {
+        await recordInputLogsBatch(perItemLogs);
       } catch (logError) {
         console.error('Gagal mencatat log input harian (data utama tetap tersimpan):', logError);
       }
@@ -370,7 +465,7 @@ export function useWorkspaceEntryActions({
       activeConfig.tasks,
       activeConfig.outlets,
       days,
-      recordInputLog,
+      recordInputLogsBatch,
       canAccessMonthForWrite,
     ]
   );

@@ -11,7 +11,7 @@ import {
   calcRecap,
   calcTask,
   calcVisitLeaderboard,
-  escapeCsv,
+  escapeCsvCell,
   fmtDate,
   fmtDateLong,
   fmtDateTimeWithSeconds,
@@ -157,7 +157,7 @@ const VISIT_CATEGORY_LIST = [
   'Meeting',
 ] as const;
 
-function classifyVisitCategory(rawNote: string): string {
+export function classifyVisitCategory(rawNote: string): string {
   const clean = rawNote.trim();
   for (const cat of VISIT_CATEGORY_LIST) {
     if (clean === cat || clean.startsWith(`${cat} — `)) {
@@ -926,9 +926,15 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
       const rDays = calendarDays;
       const evalDays = hasCustomRange ? mDays : mDays.length > 0 ? mDays : rDays;
 
+      const knownOutletsByPerson = new Map<string, Set<string>>();
       for (const { code: outlet, person } of cfg.outlets) {
         if (picFilter !== 'ALL' && person !== picFilter) continue;
         if (outletFilter !== 'ALL' && outlet !== outletFilter) continue;
+
+        if (!knownOutletsByPerson.has(person)) {
+          knownOutletsByPerson.set(person, new Set());
+        }
+        knownOutletsByPerson.get(person)!.add(outlet);
 
         const counts: Record<string, number> = {};
         for (const b of buckets) counts[b] = 0;
@@ -951,6 +957,50 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
           cells: [cfg.label, periodLabel, person, outlet, ...buckets.map((b) => counts[b]), totalVisits],
         });
       }
+
+      // Catch visits with empty outlet ('') or outlet not listed in cfg.outlets so zero visits are silently dropped
+      const personList = getPersonList(cfg.outlets);
+      for (const person of personList) {
+        if (picFilter !== 'ALL' && person !== picFilter) continue;
+        const knownSet = knownOutletsByPerson.get(person) || new Set<string>();
+        const extraCountsByLabel = new Map<string, Record<string, number>>();
+        for (const d of evalDays) {
+          const v = ws.visit[`${person}|${d}`];
+          if (!v?.ok) continue;
+          for (const entry of getVisitEntries(v)) {
+            const rawOutlet = (entry.outlet || '').trim();
+            if (rawOutlet && knownSet.has(rawOutlet)) continue;
+            if (outletFilter !== 'ALL') {
+              if (!rawOutlet || rawOutlet !== outletFilter) continue;
+            }
+            const label = rawOutlet || '(tanpa outlet)';
+            let bucketCounts = extraCountsByLabel.get(label);
+            if (!bucketCounts) {
+              bucketCounts = {};
+              for (const b of buckets) bucketCounts[b] = 0;
+              extraCountsByLabel.set(label, bucketCounts);
+            }
+            const cat = classifyVisitCategory(entry.n);
+            bucketCounts[cat] = (bucketCounts[cat] || 0) + 1;
+          }
+        }
+        for (const [label, bucketCounts] of extraCountsByLabel.entries()) {
+          const totalVisits = buckets.reduce((sum, b) => sum + (bucketCounts[b] || 0), 0);
+          if (totalVisits > 0) {
+            rawRows.push({
+              key: `${rId}|${person}|${label}`,
+              cells: [
+                cfg.label,
+                periodLabel,
+                person,
+                label,
+                ...buckets.map((b) => bucketCounts[b] || 0),
+                totalVisits,
+              ],
+            });
+          }
+        }
+      }
     }
   }
 
@@ -969,10 +1019,22 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
   };
 }
 
-export function reportTableToCsv(columns: string[], rows: PreviewRow[]): string {
+export function reportTableToCsv(
+  columns: string[],
+  rows: PreviewRow[],
+  options?: { delimiter?: ',' | ';'; bom?: boolean }
+): string {
+  const delimiter = options?.delimiter || ',';
+  const bom = options?.bom ?? true;
+  const escape = (v: string | number) =>
+    escapeCsvCell(v, {
+      delimiter,
+      decimalSeparator: delimiter === ';' ? ',' : '.',
+    });
   const lines = [
-    columns.map(escapeCsv).join(','),
-    ...rows.map((r) => r.cells.map(escapeCsv).join(',')),
+    columns.map(escape).join(delimiter),
+    ...rows.map((r) => r.cells.map(escape).join(delimiter)),
   ];
-  return `\uFEFF${lines.join('\n')}`;
+  const csv = lines.join('\n');
+  return bom ? `\uFEFF${csv}` : csv;
 }

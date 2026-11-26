@@ -392,7 +392,8 @@ service cloud.firestore {
         && data.keys().hasOnly([
           'uid', 'userEmail', 'userName', 'userRole', 'roleId', 'roleLabel',
           'actionType', 'pic', 'outlet', 'day', 'details', 'itemCount',
-          'clientTs', 'createdAt'
+          'clientTs', 'createdAt',
+          'taskKey', 'prevDate', 'newDate', 'prevNote', 'newNote', 'action'
         ])
         && data.uid is string && data.uid.size() >= 1 && data.uid.size() <= 128
         && data.uid == request.auth.uid
@@ -409,7 +410,13 @@ service cloud.firestore {
         && data.details is string && data.details.size() <= 600
         && data.itemCount is int && data.itemCount >= 1 && data.itemCount <= 50
         && data.clientTs is string && data.clientTs.size() >= 10 && data.clientTs.size() <= 40
-        && data.createdAt is timestamp;
+        && data.createdAt is timestamp
+        && (!data.keys().hasAny(['taskKey']) || (data.taskKey is string && data.taskKey.size() <= 40))
+        && (!data.keys().hasAny(['prevDate']) || (data.prevDate is string && data.prevDate.size() <= 20))
+        && (!data.keys().hasAny(['newDate']) || (data.newDate is string && data.newDate.size() <= 20))
+        && (!data.keys().hasAny(['prevNote']) || (data.prevNote is string && data.prevNote.size() <= 100))
+        && (!data.keys().hasAny(['newNote']) || (data.newNote is string && data.newNote.size() <= 100))
+        && (!data.keys().hasAny(['action']) || (data.action is string && data.action in ['set', 'clear', 'edit']));
     }
 
     match /accounts/{accountId} {

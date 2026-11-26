@@ -1,8 +1,10 @@
 import {
+  Archive,
   BrainCircuit,
   ChevronLeft,
   ChevronRight,
   Download,
+  RefreshCw,
   RotateCcw,
   Search,
   SlidersHorizontal,
@@ -21,6 +23,7 @@ import {
   computeMlInsightsSuite,
   mlTableToCsv,
 } from '../utils/mlInsights';
+import { buildZip, downloadBinaryFile } from '../utils/exportDataset';
 import {
   OPERATIONAL_ROLES,
   buildMonthsWorkingDays,
@@ -39,6 +42,10 @@ interface MlInsightsPanelProps {
   inputLogs: InputLogEntry[];
   selectableMonths: string[];
   days: string[];
+  serverLogsLoaded?: boolean;
+  serverLogsLoading?: boolean;
+  serverLogsProgress?: number;
+  onLoadAllLogs?: () => Promise<void>;
   onOpenAdminTasks?: () => void;
 }
 
@@ -59,6 +66,10 @@ export function MlInsightsPanel({
   inputLogs,
   selectableMonths,
   days,
+  serverLogsLoaded = false,
+  serverLogsLoading = false,
+  serverLogsProgress = 0,
+  onLoadAllLogs,
   onOpenAdminTasks,
 }: MlInsightsPanelProps) {
   const today = todayIso();
@@ -217,6 +228,43 @@ export function MlInsightsPanel({
     );
   };
 
+  const handleDownloadAllMlZip = () => {
+    const roleSlug = roleFilter === 'ALL' ? 'semua-role' : roleFilter;
+    const entries = ML_MODULE_DEFINITIONS.map((def) => {
+      const modRes = suite.modules[def.id];
+      return {
+        name: modRes.filename,
+        content: mlTableToCsv(modRes.columns, modRes.rows),
+      };
+    });
+    const readmeLines = [
+      'UPDATE HARIAN OUTLET — EKSPOR SEMUA MODUL MACHINE LEARNING',
+      '=========================================================',
+      `Periode evaluasi : ${suite.evaluationPeriodLabel}`,
+      `Filter role      : ${roleFilter}`,
+      `Basis log input  : ${inputLogs.length} dokumen (${serverLogsLoaded ? 'lengkap dari server' : 'realtime <= 300'})`,
+      '',
+      'DAFTAR FILE CSV:',
+      ...ML_MODULE_DEFINITIONS.map((def) => {
+        const modRes = suite.modules[def.id];
+        return `- ${modRes.filename} (${modRes.rows.length} baris) — ${def.title}`;
+      }),
+    ];
+    entries.push({
+      name: 'README.txt',
+      content: `${readmeLines.join('\r\n')}\r\n`,
+    });
+    const zipBytes = buildZip(entries);
+    downloadBinaryFile(
+      `ml-semua-modul-${roleSlug}-${today}.zip`,
+      zipBytes,
+      'application/zip'
+    );
+    setExportNotice(
+      `Paket ZIP berisi seluruh ${ML_MODULE_DEFINITIONS.length} modul ML + README.txt berhasil diunduh.`
+    );
+  };
+
   const rolesWithoutConfig = suite.roleCoverage.filter(
     (r) => r.taskCount === 0 || r.outletCount === 0
   );
@@ -254,15 +302,40 @@ export function MlInsightsPanel({
             </p>
           </div>
 
-          <button
-            type="button"
-            disabled={suite.modules.action_plan.rows.length === 0}
-            onClick={handleDownloadActionPlanCsv}
-            className="inline-flex min-h-[40px] items-center gap-2 whitespace-nowrap rounded-lg bg-blue-700 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 dark:bg-blue-600 dark:hover:bg-blue-500 dark:disabled:bg-slate-800 dark:disabled:text-slate-500"
-          >
-            <Download className="h-4 w-4 shrink-0" />
-            <span>Unduh Action Plan ML (CSV)</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            {onLoadAllLogs && !serverLogsLoaded && (
+              <button
+                type="button"
+                disabled={serverLogsLoading}
+                onClick={() => void onLoadAllLogs()}
+                className="inline-flex min-h-[40px] items-center gap-2 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-wait disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 shrink-0 ${serverLogsLoading ? 'animate-spin' : ''}`} />
+                <span>
+                  {serverLogsLoading
+                    ? `Memuat log (${serverLogsProgress})...`
+                    : 'Muat Seluruh Log Server'}
+                </span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={handleDownloadAllMlZip}
+              className="inline-flex min-h-[40px] items-center gap-2 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-800 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
+            >
+              <Archive className="h-4 w-4 shrink-0" />
+              <span>Unduh Semua Modul ML (ZIP)</span>
+            </button>
+            <button
+              type="button"
+              disabled={suite.modules.action_plan.rows.length === 0}
+              onClick={handleDownloadActionPlanCsv}
+              className="inline-flex min-h-[40px] items-center gap-2 whitespace-nowrap rounded-lg bg-blue-700 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 dark:bg-blue-600 dark:hover:bg-blue-500 dark:disabled:bg-slate-800 dark:disabled:text-slate-500"
+            >
+              <Download className="h-4 w-4 shrink-0" />
+              <span>Unduh Action Plan ML (CSV)</span>
+            </button>
+          </div>
         </div>
 
         {/* Dynamic Role Coverage Metadata Strip (Unboxed clean typography) */}

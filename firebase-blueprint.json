@@ -291,6 +291,36 @@
           "type": "string",
           "format": "date-time",
           "description": "Server timestamp when log was written"
+        },
+        "taskKey": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "Optional task key for per-item revision logs"
+        },
+        "prevDate": {
+          "type": "string",
+          "maxLength": 20,
+          "description": "Previous task update date or month value before edit"
+        },
+        "newDate": {
+          "type": "string",
+          "maxLength": 20,
+          "description": "New task update date or month value after edit"
+        },
+        "prevNote": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Previous task note before edit"
+        },
+        "newNote": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "New task note after edit"
+        },
+        "action": {
+          "type": "string",
+          "enum": ["set", "clear", "edit"],
+          "description": "Item-level revision action"
         }
       },
       "required": [
