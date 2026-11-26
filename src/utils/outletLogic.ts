@@ -1046,15 +1046,20 @@ export function escapeCsv(val: string | number): string {
   return escapeCsvCell(val, { delimiter: ',', decimalSeparator: '.' });
 }
 
-export function generateDailyFleetCsv(
+export interface TabularExportData {
+  columns: string[];
+  rows: Array<Array<string | number>>;
+}
+
+export function buildDailyFleetTable(
   state: OutletStoreState,
   days: string[],
   config: RoleConfig,
   day: string,
   today: string = todayIso(),
   includeFormula: boolean = true
-): string {
-  const header = [
+): TabularExportData {
+  const columns = [
     'Role',
     'Tanggal Kerja',
     'PIC',
@@ -1066,7 +1071,7 @@ export function generateDailyFleetCsv(
     'Status',
     'Keterangan',
   ];
-  const rows: string[] = [header.map(escapeCsv).join(',')];
+  const rows: Array<Array<string | number>> = [];
 
   for (const { code: outlet, person } of config.outlets) {
     for (const t of config.tasks) {
@@ -1090,34 +1095,45 @@ export function generateDailyFleetCsv(
             ? fmtWeek(c.d)
             : c.d
         : '';
-      const rumusCsv =
+      const rumusVal =
         inputType === 'month' && c.rumus
           ? c.rumus.slice(0, 7)
           : inputType === 'week' && c.rumus
             ? fmtWeek(c.rumus)
             : c.rumus;
-      rows.push(
-        [
-          config.label,
-          day,
-          person,
-          outlet,
-          t.label,
-          displayDate,
-          sourceLabel,
-          ...(includeFormula ? [rumusCsv, c.pm] : []),
-          c.pend ? 'PENDING' : 'UPDATE',
-          c.n,
-        ]
-          .map(escapeCsv)
-          .join(',')
-      );
+      rows.push([
+        config.label,
+        day,
+        person,
+        outlet,
+        t.label,
+        displayDate,
+        sourceLabel,
+        ...(includeFormula ? [rumusVal, c.pm] : []),
+        c.pend ? 'PENDING' : 'UPDATE',
+        c.n,
+      ]);
     }
   }
-  return rows.join('\n');
+  return { columns, rows };
 }
 
-export function generateRecapCsv(
+export function generateDailyFleetCsv(
+  state: OutletStoreState,
+  days: string[],
+  config: RoleConfig,
+  day: string,
+  today: string = todayIso(),
+  includeFormula: boolean = true
+): string {
+  const { columns, rows } = buildDailyFleetTable(state, days, config, day, today, includeFormula);
+  return [
+    columns.map(escapeCsv).join(','),
+    ...rows.map((r) => r.map(escapeCsv).join(',')),
+  ].join('\n');
+}
+
+export function buildRecapTable(
   state: OutletStoreState,
   days: string[],
   config: RoleConfig,
@@ -1125,9 +1141,9 @@ export function generateRecapCsv(
   upto: string,
   today: string = todayIso(),
   fromDate?: string
-): string {
+): TabularExportData {
   const taskDef = config.tasks.find((t) => t.key === taskKey);
-  const header = [
+  const columns = [
     'Ranking',
     'Role',
     'Item',
@@ -1151,7 +1167,7 @@ export function generateRecapCsv(
     .sort((a, b) => Number(a.hasAnyInput) - Number(b.hasAnyInput) || a.avg - b.avg);
 
   const inputType = getTaskInputType(taskDef);
-  const rows: string[] = [header.map(escapeCsv).join(',')];
+  const rows: Array<Array<string | number>> = [];
   recaps.forEach((r, idx) => {
     const displayLatest = r.latestDate
       ? inputType === 'month'
@@ -1160,33 +1176,50 @@ export function generateRecapCsv(
           ? fmtWeek(r.latestDate)
           : r.latestDate
       : 'Belum pernah input';
-    rows.push(
-      [
-        idx + 1,
-        config.label,
-        taskDef?.label || taskKey,
-        periodLabel,
-        r.outlet,
-        r.person,
-        displayLatest,
-        r.hasAnyInput ? r.latestPm : '—',
-        r.avg.toFixed(1),
-        r.pend,
-        !r.hasAnyInput ? 'BELUM INPUT' : r.latestPend ? 'PENDING' : 'UPDATE',
-      ]
-        .map(escapeCsv)
-        .join(',')
-    );
+    rows.push([
+      idx + 1,
+      config.label,
+      taskDef?.label || taskKey,
+      periodLabel,
+      r.outlet,
+      r.person,
+      displayLatest,
+      r.hasAnyInput ? r.latestPm : '—',
+      Number(r.avg.toFixed(1)),
+      r.pend,
+      !r.hasAnyInput ? 'BELUM INPUT' : r.latestPend ? 'PENDING' : 'UPDATE',
+    ]);
   });
-  return rows.join('\n');
+  return { columns, rows };
 }
 
-export function generateVisitCsv(
+export function generateRecapCsv(
+  state: OutletStoreState,
+  days: string[],
+  config: RoleConfig,
+  taskKey: string,
+  upto: string,
+  today: string = todayIso(),
+  fromDate?: string
+): string {
+  const { columns, rows } = buildRecapTable(state, days, config, taskKey, upto, today, fromDate);
+  return [
+    columns.map(escapeCsv).join(','),
+    ...rows.map((r) =>
+      r
+        .map((cell, i) => (i === 8 && typeof cell === 'number' ? cell.toFixed(1) : cell))
+        .map(escapeCsv)
+        .join(',')
+    ),
+  ].join('\n');
+}
+
+export function buildVisitTable(
   state: OutletStoreState,
   days: string[],
   config: RoleConfig
-): string {
-  const header = [
+): TabularExportData {
+  const columns = [
     'Role',
     'PIC',
     'Tanggal Kerja',
@@ -1197,7 +1230,7 @@ export function generateVisitCsv(
     'Ke Jam',
     'Keterangan',
   ];
-  const rows: string[] = [header.map(escapeCsv).join(',')];
+  const rows: Array<Array<string | number>> = [];
   const personList = getPersonList(config.outlets);
 
   for (const person of personList) {
@@ -1206,46 +1239,50 @@ export function generateVisitCsv(
       const entries = v?.ok ? getVisitEntries(v) : [];
       if (v?.ok && entries.length > 0) {
         entries.forEach((entry, idx) => {
-          rows.push(
-            [
-              config.label,
-              person,
-              day,
-              'Ya',
-              idx === 0 ? entries.length : '',
-              entry.outlet || '-',
-              entry.f || '',
-              entry.t || '',
-              entry.n || '',
-            ]
-              .map(escapeCsv)
-              .join(',')
-          );
-        });
-      } else {
-        rows.push(
-          [
+          rows.push([
             config.label,
             person,
             day,
-            v?.ok ? 'Ya' : 'Tidak',
-            v?.ok ? 1 : 0,
-            v?.outlet || '',
-            v?.f || '',
-            v?.t || '',
-            v?.n || '',
-          ]
-            .map(escapeCsv)
-            .join(',')
-        );
+            'Ya',
+            idx === 0 ? entries.length : '',
+            entry.outlet || '-',
+            entry.f || '',
+            entry.t || '',
+            entry.n || '',
+          ]);
+        });
+      } else {
+        rows.push([
+          config.label,
+          person,
+          day,
+          v?.ok ? 'Ya' : 'Tidak',
+          v?.ok ? 1 : 0,
+          v?.outlet || '',
+          v?.f || '',
+          v?.t || '',
+          v?.n || '',
+        ]);
       }
     }
   }
-  return rows.join('\n');
+  return { columns, rows };
 }
 
-export function generateInputLogsCsv(logs: InputLogEntry[]): string {
-  const header = [
+export function generateVisitCsv(
+  state: OutletStoreState,
+  days: string[],
+  config: RoleConfig
+): string {
+  const { columns, rows } = buildVisitTable(state, days, config);
+  return [
+    columns.map(escapeCsv).join(','),
+    ...rows.map((r) => r.map(escapeCsv).join(',')),
+  ].join('\n');
+}
+
+export function buildInputLogsTable(logs: InputLogEntry[]): TabularExportData {
+  const columns = [
     'Waktu Input',
     'Nama User',
     'Email User',
@@ -1258,27 +1295,28 @@ export function generateInputLogsCsv(logs: InputLogEntry[]): string {
     'Jumlah Item',
     'Detail Penginputan',
   ];
-  const rows: string[] = [header.map(escapeCsv).join(',')];
-  for (const log of logs) {
-    rows.push(
-      [
-        fmtDateTimeWithSeconds(log.clientTs) || log.clientTs,
-        log.userName,
-        log.userEmail,
-        ROLE_LABELS[log.userRole] || log.userRole,
-        log.actionType === 'kunjungan' ? 'Kunjungan' : 'Input Harian',
-        log.roleLabel,
-        log.day,
-        log.pic,
-        log.outlet,
-        log.itemCount,
-        log.details,
-      ]
-        .map(escapeCsv)
-        .join(',')
-    );
-  }
-  return rows.join('\n');
+  const rows: Array<Array<string | number>> = logs.map((log) => [
+    fmtDateTimeWithSeconds(log.clientTs) || log.clientTs,
+    log.userName,
+    log.userEmail,
+    ROLE_LABELS[log.userRole] || log.userRole,
+    log.actionType === 'kunjungan' ? 'Kunjungan' : 'Input Harian',
+    log.roleLabel,
+    log.day,
+    log.pic,
+    log.outlet,
+    log.itemCount,
+    log.details,
+  ]);
+  return { columns, rows };
+}
+
+export function generateInputLogsCsv(logs: InputLogEntry[]): string {
+  const { columns, rows } = buildInputLogsTable(logs);
+  return [
+    columns.map(escapeCsv).join(','),
+    ...rows.map((r) => r.map(escapeCsv).join(',')),
+  ].join('\n');
 }
 
 export function downloadTextFile(filename: string, content: string, mimeType: string) {

@@ -1,9 +1,9 @@
 import {
-  Archive,
   BrainCircuit,
   ChevronLeft,
   ChevronRight,
   Download,
+  FileSpreadsheet,
   RefreshCw,
   RotateCcw,
   Search,
@@ -21,14 +21,12 @@ import {
   MlModuleGroup,
   MlModuleId,
   computeMlInsightsSuite,
-  mlTableToCsv,
 } from '../utils/mlInsights';
-import { buildZip, downloadBinaryFile } from '../utils/exportDataset';
+import { XlsxSheetInput, downloadXlsxWorkbook } from '../utils/exportXlsx';
 import {
   OPERATIONAL_ROLES,
   buildMonthsWorkingDays,
   currentMonthKey,
-  downloadTextFile,
   getPeopleMap,
   getPersonList,
   todayIso,
@@ -47,6 +45,7 @@ interface MlInsightsPanelProps {
   serverLogsProgress?: number;
   onLoadAllLogs?: () => Promise<void>;
   onOpenAdminTasks?: () => void;
+  focusedModuleId?: MlModuleId;
 }
 
 const GROUP_ORDER: Array<{ id: MlModuleGroup; label: string }> = [
@@ -71,6 +70,7 @@ export function MlInsightsPanel({
   serverLogsProgress = 0,
   onLoadAllLogs,
   onOpenAdminTasks,
+  focusedModuleId,
 }: MlInsightsPanelProps) {
   const today = todayIso();
   const curMonth = currentMonthKey(today);
@@ -165,9 +165,10 @@ export function MlInsightsPanel({
     ]
   );
 
+  const effectiveModuleId = focusedModuleId ?? activeModuleId;
   const activeModuleMeta =
-    ML_MODULE_DEFINITIONS.find((m) => m.id === activeModuleId) || ML_MODULE_DEFINITIONS[0];
-  const activeResult = suite.modules[activeModuleId];
+    ML_MODULE_DEFINITIONS.find((m) => m.id === effectiveModuleId) || ML_MODULE_DEFINITIONS[0];
+  const activeResult = suite.modules[effectiveModuleId];
 
   const filteredRows = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
@@ -203,65 +204,67 @@ export function MlInsightsPanel({
     setPage(1);
   };
 
-  const handleDownloadActiveCsv = () => {
+  const handleDownloadActiveXlsx = () => {
     if (filteredRows.length === 0) return;
-    downloadTextFile(
-      activeResult.filename,
-      mlTableToCsv(activeResult.columns, filteredRows),
-      'text/csv;charset=utf-8'
-    );
+    downloadXlsxWorkbook(activeResult.filename, [
+      {
+        name: `${activeModuleMeta.code} ${activeModuleMeta.shortTitle}`,
+        columns: activeResult.columns,
+        rows: filteredRows.map((r) => r.cells),
+      },
+    ]);
     setExportNotice(
-      `Hasil ML "${activeModuleMeta.shortTitle}" (${filteredRows.length} baris) berhasil diunduh.`
+      `Hasil ML "${activeModuleMeta.shortTitle}" (${filteredRows.length} baris) berhasil diunduh ke XLSX.`
     );
   };
 
-  const handleDownloadActionPlanCsv = () => {
+  const handleDownloadActionPlanXlsx = () => {
     const ap = suite.modules.action_plan;
     if (ap.rows.length === 0) return;
-    downloadTextFile(
-      ap.filename,
-      mlTableToCsv(ap.columns, ap.rows),
-      'text/csv;charset=utf-8'
-    );
+    downloadXlsxWorkbook(ap.filename, [
+      {
+        name: 'Action Plan Prioritas',
+        columns: ap.columns,
+        rows: ap.rows.map((r) => r.cells),
+      },
+    ]);
     setExportNotice(
-      `Action Plan Prioritas ML (${ap.rows.length} outlet) berhasil diunduh ke CSV.`
+      `Action Plan Prioritas ML (${ap.rows.length} outlet) berhasil diunduh ke XLSX.`
     );
   };
 
-  const handleDownloadAllMlZip = () => {
+  const handleDownloadAllMlXlsx = () => {
     const roleSlug = roleFilter === 'ALL' ? 'semua-role' : roleFilter;
-    const entries = ML_MODULE_DEFINITIONS.map((def) => {
+    const summarySheet: XlsxSheetInput = {
+      name: 'Ringkasan',
+      columns: ['Kode', 'Modul ML', 'Jumlah Baris', 'Deskripsi'],
+      rows: [
+        [
+          'INFO',
+          `Periode: ${suite.evaluationPeriodLabel}`,
+          inputLogs.length,
+          `Filter Role: ${roleFilter} · Log: ${serverLogsLoaded ? 'lengkap server' : 'realtime <= 300'}`,
+        ],
+        ...ML_MODULE_DEFINITIONS.map((def) => {
+          const modRes = suite.modules[def.id];
+          return [def.code, def.title, modRes.rows.length, modRes.subtitle];
+        }),
+      ],
+    };
+    const moduleSheets: XlsxSheetInput[] = ML_MODULE_DEFINITIONS.map((def) => {
       const modRes = suite.modules[def.id];
       return {
-        name: modRes.filename,
-        content: mlTableToCsv(modRes.columns, modRes.rows),
+        name: `${def.code} ${def.shortTitle}`,
+        columns: modRes.columns,
+        rows: modRes.rows.map((r) => r.cells),
       };
     });
-    const readmeLines = [
-      'UPDATE HARIAN OUTLET — EKSPOR SEMUA MODUL MACHINE LEARNING',
-      '=========================================================',
-      `Periode evaluasi : ${suite.evaluationPeriodLabel}`,
-      `Filter role      : ${roleFilter}`,
-      `Basis log input  : ${inputLogs.length} dokumen (${serverLogsLoaded ? 'lengkap dari server' : 'realtime <= 300'})`,
-      '',
-      'DAFTAR FILE CSV:',
-      ...ML_MODULE_DEFINITIONS.map((def) => {
-        const modRes = suite.modules[def.id];
-        return `- ${modRes.filename} (${modRes.rows.length} baris) — ${def.title}`;
-      }),
-    ];
-    entries.push({
-      name: 'README.txt',
-      content: `${readmeLines.join('\r\n')}\r\n`,
-    });
-    const zipBytes = buildZip(entries);
-    downloadBinaryFile(
-      `ml-semua-modul-${roleSlug}-${today}.zip`,
-      zipBytes,
-      'application/zip'
-    );
+    downloadXlsxWorkbook(`ml-semua-modul-${roleSlug}-${today}.xlsx`, [
+      summarySheet,
+      ...moduleSheets,
+    ]);
     setExportNotice(
-      `Paket ZIP berisi seluruh ${ML_MODULE_DEFINITIONS.length} modul ML + README.txt berhasil diunduh.`
+      `Workbook XLSX berisi seluruh ${ML_MODULE_DEFINITIONS.length} modul ML + Ringkasan berhasil diunduh.`
     );
   };
 
@@ -287,7 +290,8 @@ export function MlInsightsPanel({
         </div>
       )}
 
-      {/* Header & Dynamic Multi-Role Readiness */}
+      {/* Header & Dynamic Multi-Role Readiness (full overview only in multi-module mode) */}
+      {!focusedModuleId && (
       <section className="rounded-xl border border-slate-200 bg-white p-5 sm:p-6 dark:border-slate-800 dark:bg-slate-900">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="max-w-3xl">
@@ -320,20 +324,20 @@ export function MlInsightsPanel({
             )}
             <button
               type="button"
-              onClick={handleDownloadAllMlZip}
+              onClick={handleDownloadAllMlXlsx}
               className="inline-flex min-h-[40px] items-center gap-2 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-800 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
             >
-              <Archive className="h-4 w-4 shrink-0" />
-              <span>Unduh Semua Modul ML (ZIP)</span>
+              <FileSpreadsheet className="h-4 w-4 shrink-0" />
+              <span>Unduh Semua Modul ML (XLSX)</span>
             </button>
             <button
               type="button"
               disabled={suite.modules.action_plan.rows.length === 0}
-              onClick={handleDownloadActionPlanCsv}
+              onClick={handleDownloadActionPlanXlsx}
               className="inline-flex min-h-[40px] items-center gap-2 whitespace-nowrap rounded-lg bg-blue-700 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 dark:bg-blue-600 dark:hover:bg-blue-500 dark:disabled:bg-slate-800 dark:disabled:text-slate-500"
             >
               <Download className="h-4 w-4 shrink-0" />
-              <span>Unduh Action Plan ML (CSV)</span>
+              <span>Unduh Action Plan ML (XLSX)</span>
             </button>
           </div>
         </div>
@@ -446,6 +450,7 @@ export function MlInsightsPanel({
           </div>
         </div>
       </section>
+      )}
 
       {/* ML Scope Filters */}
       <section className="rounded-xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900">
@@ -664,76 +669,116 @@ export function MlInsightsPanel({
         </div>
       </section>
 
-      {/* 10 ML Modules Selector + Result Output */}
+      {/* ML Result Output (with optional 10-module selector when not focused) */}
       <section className="rounded-xl border border-slate-200 bg-white p-5 sm:p-6 dark:border-slate-800 dark:bg-slate-900">
-        {/* Module Selector Grouped Cleanly */}
-        <div className="space-y-4 border-b border-slate-100 pb-5 dark:border-slate-800">
-          {GROUP_ORDER.map((group) => {
-            const items = ML_MODULE_DEFINITIONS.filter((m) => m.group === group.id);
-            return (
-              <div key={group.id} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
-                <div className="w-44 shrink-0 text-xs font-semibold text-slate-500 dark:text-slate-400">
-                  {group.label}
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {items.map((mod) => {
-                    const active = mod.id === activeModuleId;
-                    const count = suite.modules[mod.id].rows.length;
-                    return (
-                      <button
-                        key={mod.id}
-                        type="button"
-                        onClick={() => {
-                          setActiveModuleId(mod.id);
-                          setPage(1);
-                        }}
-                        className={`inline-flex min-h-[38px] items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
-                          active
-                            ? 'border-blue-700 bg-blue-700 text-white dark:border-blue-500 dark:bg-blue-600'
-                            : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-200 dark:hover:bg-slate-800'
-                        }`}
-                      >
-                        <span className="font-mono text-[11px] opacity-75">{mod.code}.</span>
-                        <span>{mod.shortTitle}</span>
-                        <span
-                          className={`font-mono text-[11px] tabular-nums ${
-                            active ? 'text-blue-100' : 'text-slate-400 dark:text-slate-500'
+        {!focusedModuleId && (
+          <div className="space-y-4 border-b border-slate-100 pb-5 dark:border-slate-800">
+            {GROUP_ORDER.map((group) => {
+              const items = ML_MODULE_DEFINITIONS.filter((m) => m.group === group.id);
+              return (
+                <div key={group.id} className="flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
+                  <div className="w-44 shrink-0 text-xs font-semibold text-slate-500 dark:text-slate-400">
+                    {group.label}
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {items.map((mod) => {
+                      const active = mod.id === effectiveModuleId;
+                      const count = suite.modules[mod.id].rows.length;
+                      return (
+                        <button
+                          key={mod.id}
+                          type="button"
+                          onClick={() => {
+                            setActiveModuleId(mod.id);
+                            setPage(1);
+                          }}
+                          className={`inline-flex min-h-[38px] items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
+                            active
+                              ? 'border-blue-700 bg-blue-700 text-white dark:border-blue-500 dark:bg-blue-600'
+                              : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800/70 dark:text-slate-200 dark:hover:bg-slate-800'
                           }`}
                         >
-                          ({count})
-                        </span>
-                      </button>
-                    );
-                  })}
+                          <span className="font-mono text-[11px] opacity-75">{mod.code}.</span>
+                          <span>{mod.shortTitle}</span>
+                          <span
+                            className={`font-mono text-[11px] tabular-nums ${
+                              active ? 'text-blue-100' : 'text-slate-400 dark:text-slate-500'
+                            }`}
+                          >
+                            ({count})
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
+          </div>
+        )}
 
-        {/* Active Module Header + Takeaways + CSV Export */}
-        <div className="mt-5 flex flex-wrap items-start justify-between gap-4">
+        {/* Active Module Header + Takeaways + XLSX Export */}
+        <div className={`${focusedModuleId ? '' : 'mt-5'} flex flex-wrap items-start justify-between gap-4`}>
           <div className="max-w-3xl">
             <div className="text-xs font-medium text-blue-700 dark:text-blue-400">
-              {activeModuleMeta.groupLabel} · {activeModuleMeta.methodNote}
+              {activeModuleMeta.methodNote}
             </div>
             <h3 className="mt-1 text-base font-semibold text-slate-900 dark:text-slate-100">
-              {activeModuleMeta.code}. {activeModuleMeta.title}
+              {activeModuleMeta.title}
             </h3>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
               {activeResult.subtitle}
             </p>
+            {focusedModuleId && rolesWithoutConfig.length > 0 && onOpenAdminTasks && (
+              <button
+                type="button"
+                onClick={onOpenAdminTasks}
+                className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-blue-700 hover:underline dark:text-blue-400"
+              >
+                <SlidersHorizontal className="h-3.5 w-3.5" />
+                <span>
+                  Tambah tugas {rolesWithoutConfig.map((r) => r.label).join(' / ')} di Tugas & Outlet
+                </span>
+              </button>
+            )}
           </div>
 
-          <button
-            type="button"
-            disabled={filteredRows.length === 0}
-            onClick={handleDownloadActiveCsv}
-            className="inline-flex min-h-[40px] items-center gap-2 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-800 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-          >
-            <Download className="h-4 w-4 shrink-0" />
-            <span>Unduh CSV Modul Ini ({filteredRows.length} baris)</span>
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            {focusedModuleId && onLoadAllLogs && !serverLogsLoaded && (
+              <button
+                type="button"
+                disabled={serverLogsLoading}
+                onClick={() => void onLoadAllLogs()}
+                className="inline-flex min-h-[40px] items-center gap-2 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-wait disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+              >
+                <RefreshCw className={`h-3.5 w-3.5 shrink-0 ${serverLogsLoading ? 'animate-spin' : ''}`} />
+                <span>
+                  {serverLogsLoading
+                    ? `Memuat log (${serverLogsProgress})...`
+                    : 'Muat Seluruh Log Server'}
+                </span>
+              </button>
+            )}
+            {focusedModuleId && (
+              <button
+                type="button"
+                onClick={handleDownloadAllMlXlsx}
+                className="inline-flex min-h-[40px] items-center gap-2 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+              >
+                <FileSpreadsheet className="h-4 w-4 shrink-0" />
+                <span>Unduh Semua Modul ML (XLSX)</span>
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={filteredRows.length === 0}
+              onClick={handleDownloadActiveXlsx}
+              className="inline-flex min-h-[40px] items-center gap-2 whitespace-nowrap rounded-lg bg-blue-700 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 dark:bg-blue-600 dark:hover:bg-blue-500 dark:disabled:bg-slate-800 dark:disabled:text-slate-500"
+            >
+              <Download className="h-4 w-4 shrink-0" />
+              <span>Unduh XLSX ({filteredRows.length} baris)</span>
+            </button>
+          </div>
         </div>
 
         {/* Key Takeaways (Clean Typographic List) */}

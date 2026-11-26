@@ -791,7 +791,7 @@ export function computeMlInsightsSuite(params: ComputeMlSuiteParams): MlInsights
         ],
       };
     }),
-    filename: `ml-risiko-pending-${roleSlug}-${anchorDay}.csv`,
+    filename: `ml-risiko-pending-${roleSlug}-${anchorDay}.xlsx`,
     subtitle: `Target Prediksi: ${fmtDateLong(nextWorkDay)} (${nextWeekdayLabel}) · Basis: ${evaluationPeriodLabel}`,
     takeaways: riskSorted.length
       ? [
@@ -907,7 +907,7 @@ export function computeMlInsightsSuite(params: ComputeMlSuiteParams): MlInsights
       'Target Kecepatan Kejar',
     ],
     rows: eomRecords.map(({ key, tone, cells }) => ({ key, tone, cells })),
-    filename: `ml-kesiapan-closing-${roleSlug}-${evalMonthKey}.csv`,
+    filename: `ml-kesiapan-closing-${roleSlug}-${evalMonthKey}.xlsx`,
     subtitle: `Periode Closing: ${evalMonthKey} · Sisa ${remainingMonthWorkDays} hari kerja setelah ${fmtDate(anchorDay)}`,
     takeaways: eomRecords.length
       ? [
@@ -1012,7 +1012,7 @@ export function computeMlInsightsSuite(params: ComputeMlSuiteParams): MlInsights
       'Aksi Pencegahan',
     ],
     rows: depRows.map(({ key, tone, cells }) => ({ key, tone, cells })),
-    filename: `ml-efek-domino-tugas-${roleSlug}-${anchorDay}.csv`,
+    filename: `ml-efek-domino-tugas-${roleSlug}-${anchorDay}.xlsx`,
     subtitle: 'Menemukan tugas pemicu keterlambatan berantai (otomatis mendeteksi rumus ref_task & korelasi historis)',
     takeaways: depRows.length
       ? [
@@ -1169,7 +1169,7 @@ export function computeMlInsightsSuite(params: ComputeMlSuiteParams): MlInsights
       'Deteksi Anomali ML',
     ],
     rows: backfillRows.map(({ key, tone, cells }) => ({ key, tone, cells })),
-    filename: `ml-anomali-backfill-${roleSlug}-${anchorDay}.csv`,
+    filename: `ml-anomali-backfill-${roleSlug}-${anchorDay}.xlsx`,
     subtitle: 'Membandingkan tanggal kerja dengan timestamp input aktual WIB untuk mendeteksi kebiasaan menunda/rapel',
     takeaways: backfillRows.length
       ? [
@@ -1289,7 +1289,7 @@ export function computeMlInsightsSuite(params: ComputeMlSuiteParams): MlInsights
         o.problemTasks.length > 0 ? o.problemTasks.slice(0, 3).join(', ') : 'Semua Stabil',
       ],
     })),
-    filename: `ml-klaster-kesehatan-outlet-${roleSlug}-${anchorDay}.csv`,
+    filename: `ml-klaster-kesehatan-outlet-${roleSlug}-${anchorDay}.xlsx`,
     subtitle: 'Segmentasi K-Means 3-klaster & atribusi penyebab (masalah spesifik outlet vs pola kerja PIC)',
     takeaways: clusteredOutlets.length
       ? [
@@ -1416,7 +1416,7 @@ export function computeMlInsightsSuite(params: ComputeMlSuiteParams): MlInsights
         p.targetAdvice,
       ],
     })),
-    filename: `ml-proyeksi-kpi-pic-${roleSlug}-${anchorDay}.csv`,
+    filename: `ml-proyeksi-kpi-pic-${roleSlug}-${anchorDay}.xlsx`,
     subtitle: `Proyeksi ranking & simulasi target minimal kepatuhan ≥ ${targetKpi}%`,
     takeaways: picKpiList.length
       ? [
@@ -1533,7 +1533,7 @@ export function computeMlInsightsSuite(params: ComputeMlSuiteParams): MlInsights
       'Alasan Rekomendasi ML',
     ],
     rows: visitPlanRows.map(({ key, tone, cells }) => ({ key, tone, cells })),
-    filename: `ml-prioritas-kunjungan-${roleSlug}-${anchorDay}.csv`,
+    filename: `ml-prioritas-kunjungan-${roleSlug}-${anchorDay}.xlsx`,
     subtitle: 'Rekomendasi jadwal kunjungan minggu depan berdasarkan risiko tugas & jarak kunjungan terakhir',
     takeaways: visitPlanRows.length
       ? [
@@ -1595,7 +1595,7 @@ export function computeMlInsightsSuite(params: ComputeMlSuiteParams): MlInsights
       'Metodologi Evaluasi',
     ],
     rows: effectivenessRows.map(({ key, tone, cells }) => ({ key, tone, cells })),
-    filename: `ml-efektivitas-kunjungan-${roleSlug}-${anchorDay}.csv`,
+    filename: `ml-efektivitas-kunjungan-${roleSlug}-${anchorDay}.xlsx`,
     subtitle: 'Mengukur apakah kunjungan benar-benar menurunkan pending & memperbaiki skor (+/-) H+3 setelah kunjungan',
     takeaways: effectivenessRows.length
       ? [
@@ -1696,7 +1696,7 @@ export function computeMlInsightsSuite(params: ComputeMlSuiteParams): MlInsights
       'Tugas Paling Menurun',
     ],
     rows: trendRows.map(({ key, tone, cells }) => ({ key, tone, cells })),
-    filename: `ml-tren-performa-${roleSlug}-${anchorDay}.csv`,
+    filename: `ml-tren-performa-${roleSlug}-${anchorDay}.xlsx`,
     subtitle: `Perbandingan paruh awal vs paruh akhir periode (${safeEvalDays.length} hari kerja)`,
     takeaways: trendRows.length
       ? [
@@ -1817,7 +1817,7 @@ export function computeMlInsightsSuite(params: ComputeMlSuiteParams): MlInsights
       'Proyeksi Dampak',
     ],
     rows: actionItems.map(({ key, tone, cells }) => ({ key, tone, cells })),
-    filename: `ml-action-plan-prioritas-${roleSlug}-${anchorDay}.csv`,
+    filename: `ml-action-plan-prioritas-${roleSlug}-${anchorDay}.xlsx`,
     subtitle: `Daftar aksi terprioritas untuk ${nextWeekdayLabel}, ${fmtDateLong(nextWorkDay)} lintas tugas & kunjungan`,
     takeaways: actionItems.length
       ? [
@@ -1825,7 +1825,7 @@ export function computeMlInsightsSuite(params: ComputeMlSuiteParams): MlInsights
           actionItems[0]
             ? `Fokus utama #1: ${actionItems[0].cells[3]} (${actionItems[0].cells[2]}) — ${actionItems[0].cells[6]}.`
             : 'Semua outlet terkendali.',
-          'Gunakan tombol Unduh CSV untuk membagikan daftar tindak lanjut harian ini ke tim PIC.',
+          'Gunakan tombol Unduh XLSX untuk membagikan daftar tindak lanjut harian ini ke tim PIC.',
         ]
       : ['Belum ada data tugas/outlet pada role terpilih. Tambahkan tugas & outlet di menu Kelola Tugas & Outlet.'],
   };

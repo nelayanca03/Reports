@@ -333,7 +333,7 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
 
   let columns: string[] = [];
   let rawRows: PreviewRow[] = [];
-  let filename = `${reportId}-${roleSlug}-${today}.csv`;
+  let filename = `${reportId}-${roleSlug}-${today}.xlsx`;
   let subtitle = '';
 
   if (reportId === 'harian_pending' || reportId === 'harian_detail') {
@@ -342,7 +342,7 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
       ? ['Role', 'Tanggal Kerja', 'PIC', 'Outlet', 'Tugas Belum Update', 'Tgl Update Terakhir', 'Selisih (+/-)', 'Keterangan']
       : ['Role', 'Tanggal Kerja', 'PIC', 'Outlet', 'Tugas', 'Tgl Update', 'Sumber', 'Rumus', '+/-', 'Status', 'Keterangan'];
     subtitle = `Tanggal Kerja: ${harianLabel}`;
-    filename = `${onlyPending ? 'pending-harian' : 'detail-harian'}-${roleSlug}-${harianFileSlug}.csv`;
+    filename = `${onlyPending ? 'pending-harian' : 'detail-harian'}-${roleSlug}-${harianFileSlug}.xlsx`;
 
     for (const dayItem of harianDays) {
       for (const rId of targetRoleIds) {
@@ -440,7 +440,7 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
       'Outlet Dikunjungi',
     ];
     subtitle = `Ringkasan PIC · ${harianLabel}`;
-    filename = `ringkasan-pic-harian-${roleSlug}-${harianFileSlug}.csv`;
+    filename = `ringkasan-pic-harian-${roleSlug}-${harianFileSlug}.xlsx`;
 
     for (const dayItem of harianDays) {
       for (const rId of targetRoleIds) {
@@ -517,7 +517,7 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
       'Detail Penginputan',
     ];
     subtitle = `Log Aktivitas Tanggal Kerja ${harianLabel}`;
-    filename = `audit-log-harian-${roleSlug}-${harianFileSlug}.csv`;
+    filename = `audit-log-harian-${roleSlug}-${harianFileSlug}.xlsx`;
 
     for (const log of inputLogs) {
       if (hasCustomRange) {
@@ -560,7 +560,7 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
       'Total Pending',
     ];
     subtitle = weekOption ? weekOption.label : 'Minggu tidak tersedia';
-    filename = `matriks-mingguan-${roleSlug}-${weekOption?.startDay || today}.csv`;
+    filename = `matriks-mingguan-${roleSlug}-${weekOption?.startDay || today}.xlsx`;
 
     for (const rId of targetRoleIds) {
       const cfg = roleConfigs[rId];
@@ -606,7 +606,7 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
       'Keterangan Kunjungan',
     ];
     subtitle = weekOption ? weekOption.label : 'Minggu tidak tersedia';
-    filename = `kunjungan-mingguan-${roleSlug}-${weekOption?.startDay || today}.csv`;
+    filename = `kunjungan-mingguan-${roleSlug}-${weekOption?.startDay || today}.xlsx`;
 
     for (const rId of targetRoleIds) {
       const cfg = roleConfigs[rId];
@@ -653,7 +653,7 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
       'Total Kunjungan',
     ];
     subtitle = weekOption ? weekOption.label : 'Minggu tidak tersedia';
-    filename = `leaderboard-mingguan-${roleSlug}-${weekOption?.startDay || today}.csv`;
+    filename = `leaderboard-mingguan-${roleSlug}-${weekOption?.startDay || today}.xlsx`;
 
     const sortableRows: Array<{
       key: string;
@@ -751,7 +751,7 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
       'Rincian Kategori Kunjungan',
     ];
     subtitle = `Periode: ${periodLabel}`;
-    filename = `kpi-bulanan-pic-${roleSlug}-${hasCustomRange ? harianFileSlug : monthOption?.key || today}.csv`;
+    filename = `kpi-bulanan-pic-${roleSlug}-${hasCustomRange ? harianFileSlug : monthOption?.key || today}.xlsx`;
 
     for (const rId of targetRoleIds) {
       const cfg = roleConfigs[rId];
@@ -863,7 +863,7 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
     subtitle = hasCustomRange
       ? `Rekap Semua Tugas · ${periodLabel}`
       : `Rekap Semua Tugas s.d. ${fmtDateLong(uptoDay)}`;
-    filename = `rekap-semua-tugas-${roleSlug}-${hasCustomRange ? harianFileSlug : monthOption?.key || today}.csv`;
+    filename = `rekap-semua-tugas-${roleSlug}-${hasCustomRange ? harianFileSlug : monthOption?.key || today}.xlsx`;
 
     for (const rId of targetRoleIds) {
       const cfg = roleConfigs[rId];
@@ -918,7 +918,7 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
     const buckets = [...VISIT_CATEGORY_LIST, 'Custom / Lainnya'];
     columns = ['Role', 'Periode', 'PIC', 'Outlet', ...buckets, 'Total Kunjungan'];
     subtitle = `Periode: ${periodLabel}`;
-    filename = `kunjungan-per-kategori-${roleSlug}-${hasCustomRange ? harianFileSlug : monthOption?.key || today}.csv`;
+    filename = `kunjungan-per-kategori-${roleSlug}-${hasCustomRange ? harianFileSlug : monthOption?.key || today}.xlsx`;
 
     for (const rId of targetRoleIds) {
       const cfg = roleConfigs[rId];

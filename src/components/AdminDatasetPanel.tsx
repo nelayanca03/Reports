@@ -1,9 +1,7 @@
 import {
-  Archive,
   CheckSquare,
   Download,
   Eye,
-  FileCode2,
   FileSpreadsheet,
   RefreshCw,
   RotateCcw,
@@ -20,21 +18,15 @@ import {
   SavedRecord,
 } from '../types/outlet';
 import {
-  CSV_PRESET_OPTIONS,
-  CsvPresetId,
   DATASET_TABLE_DEFINITIONS,
   DatasetTableId,
   buildDataset,
-  buildDatasetReadme,
-  buildZip,
-  datasetTableToCsv,
-  downloadBinaryFile,
 } from '../utils/exportDataset';
+import { XlsxSheetInput, downloadXlsxWorkbook } from '../utils/exportXlsx';
 import {
   OPERATIONAL_ROLES,
   buildMonthsWorkingDays,
   currentMonthKey,
-  downloadTextFile,
   fmtMonth,
   getPeopleMap,
   getPersonList,
@@ -100,7 +92,6 @@ export function AdminDatasetPanel({
   const [periodPreset, setPeriodPreset] = useState<string>(activeMonth);
   const [dateFrom, setDateFrom] = useState<string>(defaultFrom);
   const [dateTo, setDateTo] = useState<string>(defaultTo);
-  const [csvPreset, setCsvPreset] = useState<CsvPresetId>('excel_id');
   const [selectedTables, setSelectedTables] = useState<DatasetTableId[]>(() =>
     DATASET_TABLE_DEFINITIONS.map((t) => t.id)
   );
@@ -238,7 +229,6 @@ export function AdminDatasetPanel({
     };
   }, [dataset]);
 
-  const csvOptions = CSV_PRESET_OPTIONS[csvPreset];
   const activeTable = dataset.tables[previewTableId] || dataset.tables.fact_task_harian;
   const previewRows = activeTable.rows.slice(0, PREVIEW_LIMIT);
 
@@ -277,65 +267,52 @@ export function AdminDatasetPanel({
 
   const fileSlug = `${roleFilter === 'ALL' ? 'semua-role' : roleFilter}-${dataset.periodStart || dateFrom}_sd_${dataset.periodEnd || dateTo}`;
 
-  const handleDownloadZip = () => {
+  const handleDownloadWorkbookXlsx = () => {
     if (selectedTables.length === 0) return;
     const orderedSelected = DATASET_TABLE_DEFINITIONS.map((d) => d.id).filter((id) =>
       selectedSet.has(id)
     );
-    const entries = orderedSelected.map((id) => ({
-      name: `${id}.csv`,
-      content: datasetTableToCsv(dataset.tables[id], csvOptions),
-    }));
-    entries.push({
-      name: 'README.txt',
-      content: buildDatasetReadme(dataset, orderedSelected, csvOptions),
-    });
-    const zipBytes = buildZip(entries);
-    downloadBinaryFile(`dataset-outlet-${fileSlug}.zip`, zipBytes, 'application/zip');
-    setNotice(
-      `Paket ZIP berisi ${orderedSelected.length} tabel CSV + README.txt berhasil diunduh.`
-    );
-  };
-
-  const handleDownloadSingleCsv = () => {
-    const csv = datasetTableToCsv(activeTable, csvOptions);
-    downloadTextFile(
-      `${activeTable.id}-${fileSlug}.csv`,
-      csv,
-      'text/csv;charset=utf-8'
-    );
-    setNotice(
-      `Tabel ${activeTable.id} (${activeTable.rows.length} baris) berhasil diunduh (${csvPreset === 'excel_id' ? 'Excel Indonesia' : 'Standar'}).`
-    );
-  };
-
-  const handleDownloadJson = () => {
-    const orderedSelected = DATASET_TABLE_DEFINITIONS.map((d) => d.id).filter((id) =>
-      selectedSet.has(id)
-    );
-    const payload = {
-      generatedAtIso: dataset.generatedAtIso,
-      periodStart: dataset.periodStart,
-      periodEnd: dataset.periodEnd,
-      workingDaysCount: dataset.workingDaysCount,
-      tables: Object.fromEntries(
-        orderedSelected.map((id) => [
-          id,
-          {
-            columns: dataset.tables[id].columns,
-            rowCount: dataset.tables[id].rows.length,
-            rows: dataset.tables[id].rows,
-          },
-        ])
-      ),
+    const readmeSheet: XlsxSheetInput = {
+      name: 'README',
+      columns: ['Sheet / Tabel', 'Jumlah Baris', 'Jumlah Kolom', 'Deskripsi', 'Daftar Kolom'],
+      rows: [
+        [
+          'INFO PERIODE',
+          dataset.workingDaysCount,
+          0,
+          `Periode ${dataset.periodStart || '-'} s.d. ${dataset.periodEnd || '-'} (Dibuat ${dataset.generatedAtIso})`,
+          'Tanggal ISO YYYY-MM-DD, angka numerik murni, flag 0/1, jam WIB (UTC+7)',
+        ],
+        ...orderedSelected.map((id) => {
+          const t = dataset.tables[id];
+          return [t.id, t.rows.length, t.columns.length, t.description, t.columns.join(', ')];
+        }),
+      ],
     };
-    downloadTextFile(
-      `dataset-outlet-${fileSlug}.json`,
-      JSON.stringify(payload, null, 2),
-      'application/json;charset=utf-8'
-    );
+    const dataSheets: XlsxSheetInput[] = orderedSelected.map((id) => {
+      const t = dataset.tables[id];
+      return {
+        name: t.id,
+        columns: t.columns,
+        rows: t.rows.map((row) => t.columns.map((col) => row[col] ?? '')),
+      };
+    });
+    downloadXlsxWorkbook(`dataset-outlet-${fileSlug}.xlsx`, [readmeSheet, ...dataSheets]);
     setNotice(
-      `Dataset JSON (${orderedSelected.length} tabel) berhasil diunduh.`
+      `Workbook XLSX berisi ${orderedSelected.length} sheet dataset + README berhasil diunduh.`
+    );
+  };
+
+  const handleDownloadSingleXlsx = () => {
+    downloadXlsxWorkbook(`${activeTable.id}-${fileSlug}.xlsx`, [
+      {
+        name: activeTable.id,
+        columns: activeTable.columns,
+        rows: activeTable.rows.map((row) => activeTable.columns.map((col) => row[col] ?? '')),
+      },
+    ]);
+    setNotice(
+      `Tabel ${activeTable.id} (${activeTable.rows.length} baris) berhasil diunduh ke XLSX.`
     );
   };
 
@@ -664,64 +641,29 @@ export function AdminDatasetPanel({
           </div>
         </div>
 
-        {/* CSV Format Preset + Action Buttons */}
+        {/* Export Action Buttons */}
         <div className="mt-4 flex flex-wrap items-center justify-between gap-4 border-t border-slate-100 pt-4 dark:border-slate-800">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-xs font-medium text-slate-500 dark:text-slate-400">
-              Preset CSV:
-            </span>
-            <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1 dark:border-slate-700 dark:bg-slate-800">
-              <button
-                type="button"
-                onClick={() => setCsvPreset('excel_id')}
-                className={`min-h-[32px] rounded-md px-3 py-1 text-xs font-semibold transition-colors ${
-                  csvPreset === 'excel_id'
-                    ? 'bg-blue-700 text-white dark:bg-blue-600'
-                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100'
-                }`}
-              >
-                Excel Indonesia (; · desimal , · BOM)
-              </button>
-              <button
-                type="button"
-                onClick={() => setCsvPreset('standard')}
-                className={`min-h-[32px] rounded-md px-3 py-1 text-xs font-semibold transition-colors ${
-                  csvPreset === 'standard'
-                    ? 'bg-blue-700 text-white dark:bg-blue-600'
-                    : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100'
-                }`}
-              >
-                Standar (, · desimal .)
-              </button>
-            </div>
+          <div className="text-xs text-slate-500 dark:text-slate-400">
+            Format ekspor: <span className="font-semibold text-slate-700 dark:text-slate-200">Microsoft Excel (.xlsx)</span> · angka numerik asli & header terbeku
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
             <button
               type="button"
               disabled={selectedTables.length === 0}
-              onClick={handleDownloadZip}
+              onClick={handleDownloadWorkbookXlsx}
               className="inline-flex min-h-[38px] items-center gap-2 whitespace-nowrap rounded-lg bg-blue-700 px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 dark:bg-blue-600 dark:hover:bg-blue-500 dark:disabled:bg-slate-800 dark:disabled:text-slate-500"
             >
-              <Archive className="h-4 w-4 shrink-0" />
-              <span>Unduh Paket ZIP ({selectedTables.length} tabel)</span>
+              <FileSpreadsheet className="h-4 w-4 shrink-0" />
+              <span>Unduh Workbook XLSX ({selectedTables.length} sheet)</span>
             </button>
             <button
               type="button"
-              onClick={handleDownloadSingleCsv}
+              onClick={handleDownloadSingleXlsx}
               className="inline-flex min-h-[38px] items-center gap-2 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-800 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
             >
-              <FileSpreadsheet className="h-4 w-4 shrink-0" />
-              <span>Unduh CSV Tabel Ini</span>
-            </button>
-            <button
-              type="button"
-              disabled={selectedTables.length === 0}
-              onClick={handleDownloadJson}
-              className="inline-flex min-h-[38px] items-center gap-2 whitespace-nowrap rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-800 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-45 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700"
-            >
-              <FileCode2 className="h-4 w-4 shrink-0" />
-              <span>Unduh JSON</span>
+              <Download className="h-4 w-4 shrink-0" />
+              <span>Unduh XLSX Tabel Ini</span>
             </button>
           </div>
         </div>
@@ -732,10 +674,10 @@ export function AdminDatasetPanel({
         <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
           <div>
             <h3 className="text-sm font-semibold text-slate-900 dark:text-slate-100">
-              Daftar Tabel Dataset ({selectedTables.length}/{DATASET_TABLE_DEFINITIONS.length} dipilih untuk ZIP/JSON)
+              Daftar Tabel Dataset ({selectedTables.length}/{DATASET_TABLE_DEFINITIONS.length} dipilih untuk Workbook XLSX)
             </h3>
             <p className="text-[11px] text-slate-500 dark:text-slate-400">
-              Centang tabel yang ingin disertakan dalam ZIP, atau klik nama tabel untuk pratinjau 12 baris pertama.
+              Centang tabel yang ingin disertakan sebagai sheet dalam file XLSX, atau klik nama tabel untuk pratinjau 12 baris pertama.
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -809,7 +751,7 @@ export function AdminDatasetPanel({
             <Eye className="h-4 w-4 text-blue-700 dark:text-blue-400" />
             <div>
               <h4 className="font-mono text-xs font-semibold text-slate-900 dark:text-slate-100">
-                Pratinjau: {activeTable.label}.csv
+                Pratinjau: {activeTable.label}.xlsx
               </h4>
               <p className="text-[11px] text-slate-500 dark:text-slate-400">
                 Menampilkan {previewRows.length} dari {activeTable.rows.length} baris · {activeTable.columns.length} kolom
@@ -819,11 +761,11 @@ export function AdminDatasetPanel({
 
           <button
             type="button"
-            onClick={handleDownloadSingleCsv}
+            onClick={handleDownloadSingleXlsx}
             className="inline-flex min-h-[34px] items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
           >
             <Download className="h-3.5 w-3.5" />
-            <span>Unduh {activeTable.label}.csv</span>
+            <span>Unduh {activeTable.label}.xlsx</span>
           </button>
         </div>
 

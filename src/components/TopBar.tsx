@@ -13,7 +13,7 @@ interface TopBarProps {
   theme: 'light' | 'dark';
   onToggleTheme: () => void;
   onOpenMobileMenu: () => void;
-  onQuickExportCsv: () => void;
+  onQuickExportXlsx: () => void;
 }
 
 const VIEW_TITLES: Record<AppView, string> = {
@@ -38,7 +38,7 @@ export function TopBar({
   theme,
   onToggleTheme,
   onOpenMobileMenu,
-  onQuickExportCsv,
+  onQuickExportXlsx,
 }: TopBarProps) {
   const isAdminView =
     activeView === 'admin_tasks' ||
@@ -124,11 +124,11 @@ export function TopBar({
         {isAdmin && !isAdminView && activeView !== 'calendar' && activeView !== 'export' && (
           <button
             type="button"
-            onClick={onQuickExportCsv}
+            onClick={onQuickExportXlsx}
             className="flex min-h-[40px] shrink-0 items-center gap-2 whitespace-nowrap rounded-lg bg-blue-700 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:bg-blue-600 dark:hover:bg-blue-500"
           >
             <Download className="h-4 w-4 shrink-0" />
-            <span>Ekspor CSV</span>
+            <span>Ekspor XLSX</span>
           </button>
         )}
       </div>

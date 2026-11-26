@@ -72,7 +72,6 @@ export function KunjunganView({
     }
   }
 
-  const [draftOk, setDraftOk] = useState<boolean>(false);
   const [draftEntries, setDraftEntries] = useState<VisitEntry[]>([]);
   const [customModeByRow, setCustomModeByRow] = useState<Record<string, boolean>>({});
   const [isDirty, setIsDirty] = useState<boolean>(false);
@@ -119,7 +118,6 @@ export function KunjunganView({
     const entries = getVisitEntries(savedVisit);
     setSyncedContextKey(contextKey);
     setSyncedVisitRef(store.visit[contextKey]);
-    setDraftOk(savedVisit.ok);
     setDraftEntries(savedVisit.ok ? entries : []);
     setCustomModeByRow((prev) => {
       if (contextChanged) return {};
@@ -192,34 +190,14 @@ export function KunjunganView({
   const canEditSelectedCell =
     isPicOwner && !isSunday(activeDay) && activeDay === today && isTodayWorkingDay;
 
-  const incompleteRows = draftOk
-    ? draftEntries.filter((e) => !e.outlet.trim() || !e.f.trim() || !e.t.trim())
-    : [];
-  const hasIncompleteRows = incompleteRows.length > 0 || (draftOk && draftEntries.length === 0);
+  const incompleteRows = draftEntries.filter(
+    (e) => !e.outlet.trim() || !e.f.trim() || !e.t.trim()
+  );
+  const hasIncompleteRows = incompleteRows.length > 0;
   const canSave = canEditSelectedCell && isDirty && !hasIncompleteRows && !saving;
-
-  const handleToggleVisited = (checked: boolean) => {
-    setSavedNotice(null);
-    setDraftOk(checked);
-    if (checked && draftEntries.length === 0) {
-      setDraftEntries([
-        {
-          id: makeVisitRowId(),
-          outlet: defaultOutletForPerson,
-          f: '',
-          t: '',
-          n: '',
-        },
-      ]);
-    } else if (!checked) {
-      setDraftEntries([]);
-    }
-    setIsDirty(checked || savedVisit.ok);
-  };
 
   const handleUpdateRow = (id: string, patch: Partial<VisitEntry>) => {
     setSavedNotice(null);
-    setDraftOk(true);
     setDraftEntries((prev) =>
       prev.map((row) =>
         row.id === id
@@ -236,12 +214,11 @@ export function KunjunganView({
 
   const handleAddRow = () => {
     setSavedNotice(null);
-    setDraftOk(true);
     setDraftEntries((prev) => [
       ...prev,
       {
         id: makeVisitRowId(),
-        outlet: '',
+        outlet: prev.length === 0 ? defaultOutletForPerson : '',
         f: '',
         t: '',
         n: '',
@@ -254,12 +231,7 @@ export function KunjunganView({
     setSavedNotice(null);
     const filtered = draftEntries.filter((r) => r.id !== id);
     setDraftEntries(filtered);
-    if (filtered.length === 0) {
-      setDraftOk(false);
-      setIsDirty(savedVisit.ok);
-    } else {
-      setIsDirty(true);
-    }
+    setIsDirty(filtered.length > 0 || savedVisit.ok);
   };
 
   const handleSave = async () => {
@@ -268,18 +240,19 @@ export function KunjunganView({
     setSaveError(null);
     setSavedNotice(null);
     try {
+      const hasEntries = draftEntries.length > 0;
       const first = draftEntries[0];
       await onSaveVisitDay(activePerson, activeDay, {
-        ok: draftOk && draftEntries.length > 0,
+        ok: hasEntries,
         outlet: first?.outlet || '',
         f: first?.f || '',
         t: first?.t || '',
         n: first?.n || '',
-        entries: draftOk ? draftEntries : [],
+        entries: hasEntries ? draftEntries : [],
       });
       setIsDirty(false);
       setSavedNotice(
-        draftOk && draftEntries.length > 0
+        hasEntries
           ? `Kunjungan ${activePerson} (${fmtDateLong(activeDay)}) tersimpan (${draftEntries.length}x).`
           : `Kunjungan ${activePerson} (${fmtDateLong(activeDay)}) dihapus.`
       );
@@ -474,34 +447,25 @@ export function KunjunganView({
         )}
 
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-          <label
-            className={`inline-flex min-h-[42px] items-center gap-3 rounded-lg border border-slate-200 px-3.5 py-2 text-sm font-medium transition-colors dark:border-slate-700 ${
-              canEditSelectedCell
-                ? 'cursor-pointer bg-slate-50 text-slate-800 hover:bg-slate-100 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700/70'
-                : 'cursor-not-allowed bg-slate-200/80 text-slate-400 dark:bg-slate-800/50 dark:text-slate-500'
-            }`}
-          >
-            <input
-              type="checkbox"
-              disabled={!canEditSelectedCell}
-              checked={draftOk}
-              onChange={(e) => handleToggleVisited(e.target.checked)}
-              className="h-4 w-4 rounded border-slate-300 text-blue-700 focus:ring-blue-600 disabled:cursor-not-allowed disabled:opacity-50"
-            />
-            <span>Sudah dikunjungi ({draftEntries.length} kunjungan)</span>
-          </label>
-
-          <div className="flex flex-wrap items-center gap-2.5">
+          <div className="flex flex-wrap items-center gap-2.5 text-xs">
+            <span className="font-medium text-slate-600 dark:text-slate-300">
+              {draftEntries.length > 0
+                ? `${draftEntries.length} kunjungan tercatat di draft`
+                : 'Belum ada kunjungan'}
+            </span>
             {savedNotice && !isDirty && (
-              <span className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
-                {savedNotice}
+              <span className="font-medium text-emerald-700 dark:text-emerald-400">
+                · {savedNotice}
               </span>
             )}
             {isDirty && canEditSelectedCell && (
-              <span className="text-xs font-medium text-blue-700 dark:text-blue-400">
-                Belum disimpan
+              <span className="font-medium text-blue-700 dark:text-blue-400">
+                · Belum disimpan
               </span>
             )}
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2.5">
             {canEditSelectedCell && (
               <button
                 type="button"

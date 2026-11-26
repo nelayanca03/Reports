@@ -7,13 +7,13 @@ import {
   OperationalRoleId,
   RoleConfig,
 } from '../types/outlet';
+import { downloadXlsxWorkbook } from '../utils/exportXlsx';
 import {
   OPERATIONAL_ROLES,
   ROLE_LABELS,
-  downloadTextFile,
+  buildInputLogsTable,
   fmtDateLong,
   fmtDateTimeWithSeconds,
-  generateInputLogsCsv,
   todayIso,
 } from '../utils/outletLogic';
 
@@ -155,11 +155,10 @@ export function AdminLogsView({ logs, accounts, roleConfigs }: AdminLogsViewProp
   };
 
   const handleExportLogs = () => {
-    downloadTextFile(
-      `log-history-penginputan-${todayIso()}.csv`,
-      generateInputLogsCsv(filteredLogs),
-      'text/csv;charset=utf-8'
-    );
+    const table = buildInputLogsTable(filteredLogs);
+    downloadXlsxWorkbook(`log-history-penginputan-${todayIso()}.xlsx`, [
+      { name: 'Log Penginputan', columns: table.columns, rows: table.rows },
+    ]);
   };
 
   return (
@@ -193,7 +192,7 @@ export function AdminLogsView({ logs, accounts, roleConfigs }: AdminLogsViewProp
               className="inline-flex min-h-[38px] items-center gap-1.5 whitespace-nowrap rounded-lg bg-blue-700 px-3.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-blue-800 disabled:opacity-50 dark:bg-blue-600 dark:hover:bg-blue-500"
             >
               <Download className="h-3.5 w-3.5" />
-              <span>Ekspor CSV ({filteredLogs.length})</span>
+              <span>Ekspor XLSX ({filteredLogs.length})</span>
             </button>
           </div>
         </div>

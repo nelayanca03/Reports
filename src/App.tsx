@@ -30,12 +30,12 @@ const RekapRankingView = lazy(() =>
 import { BOOTSTRAPPED_ADMIN_EMAIL } from './firebase';
 import { useAuthAndRoleData } from './hooks/useAuthAndRoleData';
 import { AppView } from './types/outlet';
+import { downloadXlsxWorkbook } from './utils/exportXlsx';
 import {
+  buildDailyFleetTable,
+  buildRecapTable,
+  buildVisitTable,
   currentMonthKey,
-  downloadTextFile,
-  generateDailyFleetCsv,
-  generateRecapCsv,
-  generateVisitCsv,
   getPeopleMap,
   getPersonList,
   nearestWorkingDay,
@@ -258,7 +258,7 @@ export default function App() {
     setActiveView('input');
   };
 
-  const handleQuickExportCsv = () => {
+  const handleQuickExportXlsx = () => {
     if (!isAdmin) return;
     const exportToday = todayIso();
     if (safeActiveView === 'rekap') {
@@ -275,26 +275,39 @@ export default function App() {
             : effectiveRekapRangeFrom
           : undefined;
       const fileSlug = from ? `${from}_sd_${upto}` : upto;
-      downloadTextFile(
-        `ranking-${activeConfig.roleId}-${effectiveSelectedTask}-${fileSlug}.csv`,
-        generateRecapCsv(store, days, activeConfig, effectiveSelectedTask, upto, exportToday, from),
-        'text/csv;charset=utf-8'
+      const table = buildRecapTable(
+        store,
+        days,
+        activeConfig,
+        effectiveSelectedTask,
+        upto,
+        exportToday,
+        from
+      );
+      downloadXlsxWorkbook(
+        `ranking-${activeConfig.roleId}-${effectiveSelectedTask}-${fileSlug}.xlsx`,
+        [{ name: 'Ranking', columns: table.columns, rows: table.rows }]
       );
       return;
     }
     if (safeActiveView === 'kunj') {
-      downloadTextFile(
-        `kunjungan-${activeConfig.roleId}-${exportToday}.csv`,
-        generateVisitCsv(store, days, activeConfig),
-        'text/csv;charset=utf-8'
-      );
+      const table = buildVisitTable(store, days, activeConfig);
+      downloadXlsxWorkbook(`kunjungan-${activeConfig.roleId}-${exportToday}.xlsx`, [
+        { name: 'Kunjungan', columns: table.columns, rows: table.rows },
+      ]);
       return;
     }
-    downloadTextFile(
-      `update-${activeConfig.roleId}-${effectiveSelectedDay}.csv`,
-      generateDailyFleetCsv(store, days, activeConfig, effectiveSelectedDay, exportToday, isAdmin),
-      'text/csv;charset=utf-8'
+    const table = buildDailyFleetTable(
+      store,
+      days,
+      activeConfig,
+      effectiveSelectedDay,
+      exportToday,
+      isAdmin
     );
+    downloadXlsxWorkbook(`update-${activeConfig.roleId}-${effectiveSelectedDay}.xlsx`, [
+      { name: 'Update Harian', columns: table.columns, rows: table.rows },
+    ]);
   };
 
   return (
@@ -328,7 +341,7 @@ export default function App() {
           theme={theme}
           onToggleTheme={toggleTheme}
           onOpenMobileMenu={() => setMobileMenuOpen(true)}
-          onQuickExportCsv={handleQuickExportCsv}
+          onQuickExportXlsx={handleQuickExportXlsx}
         />
 
         <main

@@ -143,15 +143,17 @@ export function computeAutoDiscPending(
   memoDate: string,
   workingDay: string
 ): string {
-  const workingMonth = workingDay.slice(0, 7);
-  const workingYear = workingDay.slice(0, 4);
+  const cleanWorkingDay = (workingDay || '').trim();
+  const workingMonth = cleanWorkingDay.slice(0, 7);
+  const workingYear = cleanWorkingDay.slice(0, 4);
   const prevMonth = shiftMonthKey(workingMonth, -1);
 
-  if (!memoDate) {
+  const cleanMemo = (memoDate || '').trim();
+  if (!cleanMemo) {
     return formatPhotoMonthUpper(prevMonth, workingYear);
   }
 
-  const memoMonth = memoDate.slice(0, 7);
+  const memoMonth = cleanMemo.slice(0, 7);
   if (!/^\d{4}-\d{2}$/.test(memoMonth)) {
     return '-';
   }
@@ -203,7 +205,6 @@ export function buildPhotoOutletBlocks(params: {
   days: string[];
   targetDay: string;
   today?: string;
-  discPendingOverrides?: Record<string, string>;
 }): PhotoOutletBlock[] {
   const {
     outlets,
@@ -212,7 +213,6 @@ export function buildPhotoOutletBlocks(params: {
     days,
     targetDay,
     today = todayIso(),
-    discPendingOverrides = {},
   } = params;
 
   const workingMonth = targetDay.slice(0, 7);
@@ -238,14 +238,11 @@ export function buildPhotoOutletBlocks(params: {
           today
         );
         autoDiscPending = computeAutoDiscPending(memoCalc.d, targetDay);
-        const override = discPendingOverrides[outlet];
-        const discPendingVal =
-          override && override !== '__AUTO__' ? override : autoDiscPending;
 
         lines.push({
           kind: 'simple',
           label: 'DISC PENDING',
-          value: discPendingVal || '-',
+          value: autoDiscPending || '-',
         });
       }
 

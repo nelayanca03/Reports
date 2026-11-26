@@ -9,7 +9,6 @@ import {
   buildPhotoOutletBlocks,
   canvasToPngBlob,
   detectStockDiscrepancyTasks,
-  formatPhotoMonthUpper,
   renderResultPhotoCanvas,
 } from '../utils/exportResultPhoto';
 import {
@@ -19,7 +18,6 @@ import {
   getPersonList,
   isOutletDayFilled,
   resolveAccountPic,
-  shiftMonthKey,
   todayIso,
 } from '../utils/outletLogic';
 
@@ -63,9 +61,6 @@ export function ExportResultPhotoModal({
   );
   const [photoDay, setPhotoDay] = useState(initialDay || days[days.length - 1] || todayIso());
   const [selectedOutlets, setSelectedOutlets] = useState<string[]>([]);
-  const [discPendingOverrides, setDiscPendingOverrides] = useState<
-    Record<string, string>
-  >({});
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'error'>('idle');
   const [copyMessage, setCopyMessage] = useState<string>('');
   const [prevOpenSyncKey, setPrevOpenSyncKey] = useState<string>('');
@@ -96,7 +91,6 @@ export function ExportResultPhotoModal({
     setPhotoPerson(nextPic);
     setPhotoDay(nextDay);
     setSelectedOutlets(initialSelection);
-    setDiscPendingOverrides({});
     setCopyStatus('idle');
     setCopyMessage('');
   } else if (!open && prevOpenSyncKey !== '') {
@@ -115,7 +109,6 @@ export function ExportResultPhotoModal({
       isOutletDayFilled(store, config.tasks, o, photoDay)
     );
     setSelectedOutlets(filled.length > 0 ? filled : picOutlets.slice(0, 1));
-    setDiscPendingOverrides({});
     setCopyStatus('idle');
   };
 
@@ -159,17 +152,8 @@ export function ExportResultPhotoModal({
       days,
       targetDay: photoDay,
       today,
-      discPendingOverrides,
     });
-  }, [
-    orderedSelectedOutlets,
-    config,
-    store,
-    days,
-    photoDay,
-    today,
-    discPendingOverrides,
-  ]);
+  }, [orderedSelectedOutlets, config, store, days, photoDay, today]);
 
   const previewDataUrl = useMemo(() => {
     if (!open || blocks.length === 0) return '';
@@ -181,11 +165,6 @@ export function ExportResultPhotoModal({
   }, [open, blocks]);
 
   if (!open) return null;
-
-  const workingMonth = photoDay.slice(0, 7);
-  const workingYear = photoDay.slice(0, 4);
-  const prevMonth1 = formatPhotoMonthUpper(shiftMonthKey(workingMonth, -1), workingYear);
-  const prevMonth2 = formatPhotoMonthUpper(shiftMonthKey(workingMonth, -2), workingYear);
 
   const handleDownloadPng = async () => {
     if (blocks.length === 0) return;
@@ -387,40 +366,22 @@ export function ExportResultPhotoModal({
             {memoTask && blocks.length > 0 && (
               <div className="border-t border-slate-200/80 pt-3 sm:col-span-2 dark:border-slate-700/70">
                 <div className="mb-2 text-[11px] font-medium text-slate-500 dark:text-slate-400">
-                  Keterangan DISC PENDING (Otomatis dari Memo Discrepancy, dapat disesuaikan bila perlu):
+                  Keterangan DISC PENDING (otomatis dari Memo Penyelesaian Discrepancy · H-1 bulan = -, H-2 bulan dst. = bulan tertunda):
                 </div>
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-3">
-                  {blocks.map((b) => {
-                    const currentVal = discPendingOverrides[b.outlet] ?? '__AUTO__';
-                    return (
-                      <div
-                        key={b.outlet}
-                        className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 dark:border-slate-700 dark:bg-slate-900"
-                      >
-                        <span className="text-xs font-semibold text-slate-700 dark:text-slate-200">
-                          {b.outlet}
-                        </span>
-                        <select
-                          aria-label={`DISC PENDING ${b.outlet}`}
-                          value={currentVal}
-                          onChange={(e) =>
-                            setDiscPendingOverrides((prev) => ({
-                              ...prev,
-                              [b.outlet]: e.target.value,
-                            }))
-                          }
-                          className="rounded border border-slate-200 bg-slate-50 px-2 py-1 text-xs font-medium text-slate-800 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-                        >
-                          <option value="__AUTO__">
-                            Otomatis ({b.autoDiscPending})
-                          </option>
-                          <option value="-">- (Tidak ada)</option>
-                          <option value={prevMonth1}>{prevMonth1}</option>
-                          <option value={prevMonth2}>{prevMonth2}</option>
-                        </select>
-                      </div>
-                    );
-                  })}
+                <div className="flex flex-wrap gap-2">
+                  {blocks.map((b) => (
+                    <div
+                      key={b.outlet}
+                      className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs dark:border-slate-700 dark:bg-slate-900"
+                    >
+                      <span className="font-semibold text-slate-700 dark:text-slate-200">
+                        {b.outlet}
+                      </span>
+                      <span className="font-mono text-slate-600 dark:text-slate-300">
+                        {b.autoDiscPending}
+                      </span>
+                    </div>
+                  ))}
                 </div>
               </div>
             )}
