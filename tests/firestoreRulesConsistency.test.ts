@@ -2,9 +2,19 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { describe, it } from 'node:test';
+import { APP_CONFIG } from '../src/config/appConfig';
 
 const ROOT_DIR = path.resolve(import.meta.dirname, '..');
 const rulesText = fs.readFileSync(path.join(ROOT_DIR, 'firestore.rules'), 'utf8');
+const specText = fs.readFileSync(path.join(ROOT_DIR, 'security_spec.md'), 'utf8');
+const appConfigJson = JSON.parse(
+  fs.readFileSync(path.join(ROOT_DIR, 'app.config.json'), 'utf8')
+) as {
+  ownerEmail: string;
+  defaultStartDate: string;
+  defaultWorkingDays: number;
+  minWorkspaceMonth: string;
+};
 const blueprint = JSON.parse(
   fs.readFileSync(path.join(ROOT_DIR, 'firebase-blueprint.json'), 'utf8')
 ) as {
@@ -25,7 +35,7 @@ function rulesEmailDocId(email: string): string {
     .toLowerCase()
     .replace(/@/g, '_at_')
     .replace(/\./g, '_dot_')
-    .replace(/[^a-z0-9_\-]/g, '_');
+    .replace(/[^a-z0-9_-]/g, '_');
 }
 
 describe('firestore.rules structural invariants & blueprint sync', () => {
@@ -53,6 +63,19 @@ describe('firestore.rules structural invariants & blueprint sync', () => {
     assert.match(rulesText, /function canAccountViewCalendarEvent\(/);
     assert.match(rulesText, /duration\.value\(17, 'h'\)/);
     assert.match(rulesText, /duration\.value\(31, 'h'\)/);
+  });
+
+  it('keeps app.config.json synchronized with APP_CONFIG, firestore.rules, and security_spec.md', () => {
+    const expectedOwner = appConfigJson.ownerEmail.trim().toLowerCase();
+    assert.equal(APP_CONFIG.ownerEmail, expectedOwner);
+    assert.equal(APP_CONFIG.defaultStartDate, appConfigJson.defaultStartDate);
+    assert.equal(APP_CONFIG.defaultWorkingDays, appConfigJson.defaultWorkingDays);
+    assert.equal(APP_CONFIG.minWorkspaceMonth, appConfigJson.minWorkspaceMonth);
+    assert.match(
+      rulesText,
+      new RegExp(`request\\.auth\\.token\\.email\\.lower\\(\\) == '${expectedOwner.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}'`)
+    );
+    assert.ok(specText.includes(expectedOwner), 'security_spec.md should reference ownerEmail from app.config.json');
   });
 
   it('keeps client emailToAccountId identical to firestore.rules emailDocId', () => {
@@ -95,3 +118,4 @@ describe('firestore.rules structural invariants & blueprint sync', () => {
     }
   });
 });
+

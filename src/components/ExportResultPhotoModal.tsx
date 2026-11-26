@@ -1,5 +1,5 @@
 import { Check, Copy, Download, Image as ImageIcon, X } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   AccountProfile,
   OutletStoreState,
@@ -66,18 +66,15 @@ export function ExportResultPhotoModal({
   const [discPendingOverrides, setDiscPendingOverrides] = useState<
     Record<string, string>
   >({});
-  const [previewDataUrl, setPreviewDataUrl] = useState<string>('');
   const [copyStatus, setCopyStatus] = useState<'idle' | 'copied' | 'error'>('idle');
   const [copyMessage, setCopyMessage] = useState<string>('');
+  const [prevOpenSyncKey, setPrevOpenSyncKey] = useState<string>('');
 
-  const outletsForPic = useMemo(
-    () => peopleMap[photoPerson] || [],
-    [peopleMap, photoPerson]
-  );
-
-  // Reset defaults whenever modal opens or PIC/day changes via open trigger
-  useEffect(() => {
-    if (!open) return;
+  const openSyncKey = open
+    ? `${lockedPic}|${initialPerson}|${initialOutlet}|${initialDay}`
+    : '';
+  if (open && openSyncKey !== prevOpenSyncKey) {
+    setPrevOpenSyncKey(openSyncKey);
     const nextPic = lockedPic || initialPerson || personList[0] || '';
     const nextDay = initialDay || days[days.length - 1] || todayIso();
     const picOutlets = peopleMap[nextPic] || [];
@@ -86,7 +83,12 @@ export function ExportResultPhotoModal({
     );
     const initialSelection =
       filled.length > 0
-        ? Array.from(new Set([...filled, ...(initialOutlet && picOutlets.includes(initialOutlet) ? [initialOutlet] : [])]))
+        ? Array.from(
+            new Set([
+              ...filled,
+              ...(initialOutlet && picOutlets.includes(initialOutlet) ? [initialOutlet] : []),
+            ])
+          )
         : initialOutlet && picOutlets.includes(initialOutlet)
           ? [initialOutlet]
           : picOutlets.slice(0, 1);
@@ -97,7 +99,14 @@ export function ExportResultPhotoModal({
     setDiscPendingOverrides({});
     setCopyStatus('idle');
     setCopyMessage('');
-  }, [open, lockedPic, initialPerson, initialOutlet, initialDay, personList, peopleMap, days, store, config.tasks]);
+  } else if (!open && prevOpenSyncKey !== '') {
+    setPrevOpenSyncKey('');
+  }
+
+  const outletsForPic = useMemo(
+    () => peopleMap[photoPerson] || [],
+    [peopleMap, photoPerson]
+  );
 
   const handleChangePic = (nextPic: string) => {
     setPhotoPerson(nextPic);
@@ -162,16 +171,12 @@ export function ExportResultPhotoModal({
     discPendingOverrides,
   ]);
 
-  useEffect(() => {
-    if (!open || blocks.length === 0) {
-      setPreviewDataUrl('');
-      return;
-    }
+  const previewDataUrl = useMemo(() => {
+    if (!open || blocks.length === 0) return '';
     try {
-      const canvas = renderResultPhotoCanvas(blocks);
-      setPreviewDataUrl(canvas.toDataURL('image/png'));
+      return renderResultPhotoCanvas(blocks).toDataURL('image/png');
     } catch {
-      setPreviewDataUrl('');
+      return '';
     }
   }, [open, blocks]);
 

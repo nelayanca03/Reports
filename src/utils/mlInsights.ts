@@ -407,7 +407,7 @@ function run3ClusterKMeans(points: OutletClusterPoint[]): number[] {
     [...norm[orderedIdx[n - 1]]],
   ];
 
-  let assignments = new Array<number>(n).fill(0);
+  const assignments = new Array<number>(n).fill(0);
 
   for (let iter = 0; iter < 18; iter++) {
     let changed = false;

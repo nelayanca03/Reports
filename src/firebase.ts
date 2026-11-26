@@ -2,6 +2,7 @@ import { initializeApp } from 'firebase/app';
 import { GoogleAuthProvider, getAuth } from 'firebase/auth';
 import { doc, getDocFromServer, getFirestore } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
+import { APP_CONFIG } from './config/appConfig';
 
 const app = initializeApp(firebaseConfig);
 
@@ -10,7 +11,7 @@ export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 
-export const BOOTSTRAPPED_ADMIN_EMAIL = 'nelayanca03@gmail.com';
+export const BOOTSTRAPPED_ADMIN_EMAIL = APP_CONFIG.ownerEmail;
 
 export function emailToAccountId(email: string): string {
   return email

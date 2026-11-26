@@ -14,7 +14,7 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react';
-import { ChangeEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, useMemo, useRef, useState } from 'react';
 import {
   InputLogEntry,
   OperationalRoleId,
@@ -104,10 +104,8 @@ export function AdminExportTools({
   const [statusFilter, setStatusFilter] = useState<'ALL' | 'UPDATE' | 'PENDING'>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [previewPage, setPreviewPage] = useState<number>(1);
-
-  useEffect(() => {
-    setRoleFilter(config.roleId);
-  }, [config.roleId]);
+  const [prevConfigRoleId, setPrevConfigRoleId] = useState<OperationalRoleId>(config.roleId);
+  const [prevActiveMonth, setPrevActiveMonth] = useState<string>(activeMonth);
 
   const scopedDays = useMemo(
     () => buildMonthsWorkingDays(selectableMonths),
@@ -117,7 +115,14 @@ export function AdminExportTools({
   const weekOptions = useMemo(() => buildWeekOptions(scopedDays), [scopedDays]);
   const monthOptions = useMemo(() => buildMonthOptions(scopedDays), [scopedDays]);
 
-  useEffect(() => {
+  if (prevConfigRoleId !== config.roleId) {
+    setPrevConfigRoleId(config.roleId);
+    setRoleFilter(config.roleId);
+    setPreviewPage(1);
+  }
+
+  if (prevActiveMonth !== activeMonth) {
+    setPrevActiveMonth(activeMonth);
     const curMonth = currentMonthKey(today);
     const nextDay =
       activeMonth === curMonth
@@ -143,42 +148,35 @@ export function AdminExportTools({
     if (matchingWeek) {
       setSelectedWeekKey(matchingWeek.key);
     }
-  }, [activeMonth, days, today, monthOptions, weekOptions]);
+    setPreviewPage(1);
+  }
 
-  useEffect(() => {
-    if (scopedDays.length > 0 && !scopedDays.includes(targetDay)) {
-      setTargetDay(nearestWorkingDay(scopedDays, yesterdayIso()));
-    }
-  }, [scopedDays, targetDay]);
+  const effectiveTargetDay =
+    scopedDays.length > 0 && !scopedDays.includes(targetDay)
+      ? nearestWorkingDay(scopedDays, yesterdayIso())
+      : targetDay;
 
-  useEffect(() => {
-    if (weekOptions.length > 0 && !weekOptions.some((w) => w.key === selectedWeekKey)) {
-      const matchingWeek =
-        weekOptions.find((w) => w.days.includes(today) || w.days.includes(defaultDay)) ||
-        weekOptions[weekOptions.length - 1];
-      setSelectedWeekKey(matchingWeek.key);
-    }
+  const activeWeekOption = useMemo(() => {
+    const found = weekOptions.find((w) => w.key === selectedWeekKey);
+    if (found) return found;
+    return (
+      weekOptions.find((w) => w.days.includes(today) || w.days.includes(defaultDay)) ||
+      weekOptions[weekOptions.length - 1]
+    );
   }, [weekOptions, selectedWeekKey, today, defaultDay]);
 
-  useEffect(() => {
-    if (monthOptions.length > 0 && !monthOptions.some((m) => m.key === selectedMonthKey)) {
-      const matchingMonth =
-        monthOptions.find((m) => m.key === activeMonth) ||
-        monthOptions.find((m) => m.key === today.slice(0, 7)) ||
-        monthOptions[0];
-      setSelectedMonthKey(matchingMonth.key);
-    }
+  const activeMonthOption = useMemo(() => {
+    const found = monthOptions.find((m) => m.key === selectedMonthKey);
+    if (found) return found;
+    return (
+      monthOptions.find((m) => m.key === activeMonth) ||
+      monthOptions.find((m) => m.key === today.slice(0, 7)) ||
+      monthOptions[0]
+    );
   }, [monthOptions, selectedMonthKey, activeMonth, today]);
 
-  const activeWeekOption = useMemo(
-    () => weekOptions.find((w) => w.key === selectedWeekKey) || weekOptions[0],
-    [weekOptions, selectedWeekKey]
-  );
-
-  const activeMonthOption = useMemo(
-    () => monthOptions.find((m) => m.key === selectedMonthKey) || monthOptions[0],
-    [monthOptions, selectedMonthKey]
-  );
+  const effectiveWeekKey = activeWeekOption?.key || '';
+  const effectiveMonthKey = activeMonthOption?.key || '';
 
   const periodReportOptions = useMemo(
     () => EXPORT_REPORT_OPTIONS.filter((opt) => opt.period === period),
@@ -195,7 +193,7 @@ export function AdminExportTools({
     setPreviewPage(1);
   };
 
-  const { picOptions, outletOptions } = useMemo(() => {
+  const { picOptions, outletOptions, effectivePicFilter } = useMemo(() => {
     const rIds =
       roleFilter === 'ALL' ? OPERATIONAL_ROLES.map((r) => r.id) : [roleFilter];
     const pics = new Set<string>();
@@ -205,9 +203,13 @@ export function AdminExportTools({
       for (const p of getPersonList(cfg.outlets)) {
         pics.add(p);
       }
+    }
+    const validPic = picFilter !== 'ALL' && pics.has(picFilter) ? picFilter : 'ALL';
+    for (const rId of rIds) {
+      const cfg = roleConfigs[rId];
       const pMap = getPeopleMap(cfg.outlets);
-      if (picFilter !== 'ALL') {
-        for (const o of pMap[picFilter] || []) {
+      if (validPic !== 'ALL') {
+        for (const o of pMap[validPic] || []) {
           outlets.add(o);
         }
       } else {
@@ -219,38 +221,12 @@ export function AdminExportTools({
     return {
       picOptions: Array.from(pics).sort(),
       outletOptions: Array.from(outlets).sort(),
+      effectivePicFilter: validPic,
     };
   }, [roleConfigs, roleFilter, picFilter]);
 
-  useEffect(() => {
-    if (picFilter !== 'ALL' && !picOptions.includes(picFilter)) {
-      setPicFilter('ALL');
-    }
-  }, [picOptions, picFilter]);
-
-  useEffect(() => {
-    if (outletFilter !== 'ALL' && !outletOptions.includes(outletFilter)) {
-      setOutletFilter('ALL');
-    }
-  }, [outletOptions, outletFilter]);
-
-  useEffect(() => {
-    setPreviewPage(1);
-  }, [
-    period,
-    reportId,
-    roleFilter,
-    dateMode,
-    targetDay,
-    rangeFrom,
-    rangeTo,
-    selectedWeekKey,
-    selectedMonthKey,
-    picFilter,
-    outletFilter,
-    statusFilter,
-    searchQuery,
-  ]);
+  const effectiveOutletFilter =
+    outletFilter !== 'ALL' && !outletOptions.includes(outletFilter) ? 'ALL' : outletFilter;
 
   const activeReportMeta =
     EXPORT_REPORT_OPTIONS.find((o) => o.id === reportId) || periodReportOptions[0];
@@ -267,14 +243,14 @@ export function AdminExportTools({
         inputLogs,
         availableDays: scopedDays,
         today,
-        targetDay,
+        targetDay: effectiveTargetDay,
         dateMode: effectiveDateMode,
         rangeFrom,
         rangeTo,
         weekOption: activeWeekOption,
         monthOption: activeMonthOption,
-        picFilter,
-        outletFilter,
+        picFilter: effectivePicFilter,
+        outletFilter: effectiveOutletFilter,
         statusFilter,
         searchQuery,
       }),
@@ -286,14 +262,14 @@ export function AdminExportTools({
       inputLogs,
       scopedDays,
       today,
-      targetDay,
+      effectiveTargetDay,
       effectiveDateMode,
       rangeFrom,
       rangeTo,
       activeWeekOption,
       activeMonthOption,
-      picFilter,
-      outletFilter,
+      effectivePicFilter,
+      effectiveOutletFilter,
       statusFilter,
       searchQuery,
     ]
@@ -306,8 +282,8 @@ export function AdminExportTools({
   const previewRows = report.rows.slice(previewStart, previewEnd);
 
   const hasSubFilters =
-    picFilter !== 'ALL' ||
-    outletFilter !== 'ALL' ||
+    effectivePicFilter !== 'ALL' ||
+    effectiveOutletFilter !== 'ALL' ||
     statusFilter !== 'ALL' ||
     Boolean(searchQuery.trim());
 
@@ -534,6 +510,7 @@ export function AdminExportTools({
                     onClick={() => {
                       setReportId(opt.id);
                       if (!opt.supportsStatusFilter) setStatusFilter('ALL');
+                      setPreviewPage(1);
                     }}
                     className={`rounded-lg border p-3.5 text-left transition-colors ${
                       active
@@ -569,7 +546,10 @@ export function AdminExportTools({
                     <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 dark:border-slate-700 dark:bg-slate-900">
                       <button
                         type="button"
-                        onClick={() => setDateMode('single')}
+                        onClick={() => {
+                          setDateMode('single');
+                          setPreviewPage(1);
+                        }}
                         className={`min-h-[28px] rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
                           dateMode === 'single'
                             ? 'bg-blue-700 text-white dark:bg-blue-600'
@@ -580,7 +560,10 @@ export function AdminExportTools({
                       </button>
                       <button
                         type="button"
-                        onClick={() => setDateMode('range')}
+                        onClick={() => {
+                          setDateMode('range');
+                          setPreviewPage(1);
+                        }}
                         className={`min-h-[28px] rounded-md px-2.5 py-1 text-[11px] font-semibold transition-colors ${
                           dateMode === 'range'
                             ? 'bg-blue-700 text-white dark:bg-blue-600'
@@ -619,9 +602,10 @@ export function AdminExportTools({
                   <select
                     id="export-role-filter"
                     value={roleFilter}
-                    onChange={(e) =>
-                      setRoleFilter(e.target.value as 'ALL' | OperationalRoleId)
-                    }
+                    onChange={(e) => {
+                      setRoleFilter(e.target.value as 'ALL' | OperationalRoleId);
+                      setPreviewPage(1);
+                    }}
                     className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                   >
                     <option value="ALL">Semua Role (Gabungan)</option>
@@ -650,6 +634,7 @@ export function AdminExportTools({
                         onChange={(e) => {
                           const val = e.target.value || days[0] || today;
                           setRangeFrom(val > today ? today : val);
+                          setPreviewPage(1);
                         }}
                         className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                       />
@@ -669,6 +654,7 @@ export function AdminExportTools({
                         onChange={(e) => {
                           const val = e.target.value || today;
                           setRangeTo(val > today ? today : val);
+                          setPreviewPage(1);
                         }}
                         className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                       />
@@ -691,10 +677,11 @@ export function AdminExportTools({
                         id="export-time-filter"
                         type="date"
                         max={today}
-                        value={targetDay}
+                        value={effectiveTargetDay}
                         onChange={(e) => {
                           const val = e.target.value || defaultDay;
                           setTargetDay(val > today ? today : val);
+                          setPreviewPage(1);
                         }}
                         className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                       />
@@ -702,8 +689,11 @@ export function AdminExportTools({
                     {period === 'mingguan' && (
                       <select
                         id="export-time-filter"
-                        value={selectedWeekKey}
-                        onChange={(e) => setSelectedWeekKey(e.target.value)}
+                        value={effectiveWeekKey}
+                        onChange={(e) => {
+                          setSelectedWeekKey(e.target.value);
+                          setPreviewPage(1);
+                        }}
                         className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                       >
                         {weekOptions.map((w) => (
@@ -716,8 +706,11 @@ export function AdminExportTools({
                     {period === 'bulanan' && (
                       <select
                         id="export-time-filter"
-                        value={selectedMonthKey}
-                        onChange={(e) => setSelectedMonthKey(e.target.value)}
+                        value={effectiveMonthKey}
+                        onChange={(e) => {
+                          setSelectedMonthKey(e.target.value);
+                          setPreviewPage(1);
+                        }}
                         className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                       >
                         {monthOptions.map((m) => (
@@ -739,8 +732,11 @@ export function AdminExportTools({
                   </label>
                   <select
                     id="export-pic-filter"
-                    value={picFilter}
-                    onChange={(e) => setPicFilter(e.target.value)}
+                    value={effectivePicFilter}
+                    onChange={(e) => {
+                      setPicFilter(e.target.value);
+                      setPreviewPage(1);
+                    }}
                     className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                   >
                     <option value="ALL">Semua PIC ({picOptions.length})</option>
@@ -761,8 +757,11 @@ export function AdminExportTools({
                   </label>
                   <select
                     id="export-outlet-filter"
-                    value={outletFilter}
-                    onChange={(e) => setOutletFilter(e.target.value)}
+                    value={effectiveOutletFilter}
+                    onChange={(e) => {
+                      setOutletFilter(e.target.value);
+                      setPreviewPage(1);
+                    }}
                     className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
                   >
                     <option value="ALL">Semua Outlet ({outletOptions.length})</option>
@@ -785,9 +784,10 @@ export function AdminExportTools({
                     id="export-status-filter"
                     disabled={!activeReportMeta.supportsStatusFilter}
                     value={statusFilter}
-                    onChange={(e) =>
-                      setStatusFilter(e.target.value as 'ALL' | 'UPDATE' | 'PENDING')
-                    }
+                    onChange={(e) => {
+                      setStatusFilter(e.target.value as 'ALL' | 'UPDATE' | 'PENDING');
+                      setPreviewPage(1);
+                    }}
                     className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-900 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:disabled:bg-slate-800/50 dark:disabled:text-slate-500"
                   >
                     <option value="ALL">Semua Status</option>
@@ -809,7 +809,10 @@ export function AdminExportTools({
                       id="export-search-filter"
                       type="text"
                       value={searchQuery}
-                      onChange={(e) => setSearchQuery(e.target.value)}
+                      onChange={(e) => {
+                        setSearchQuery(e.target.value);
+                        setPreviewPage(1);
+                      }}
                       placeholder="Cari di preview..."
                       className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white pr-2.5 pl-8 text-xs text-slate-900 placeholder:text-slate-400 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500"
                     />

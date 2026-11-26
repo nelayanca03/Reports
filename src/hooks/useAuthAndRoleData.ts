@@ -105,12 +105,11 @@ export function useAuthAndRoleData() {
     ]
   );
 
-  useEffect(() => {
-    if (authStatus !== 'ready' || !currentAccount) return;
-    if (!selectableMonths.includes(activeMonth)) {
-      const cur = currentMonthKey(todayIso());
-      setActiveMonth(selectableMonths.includes(cur) ? cur : selectableMonths[0] || cur);
-    }
+  const resolvedActiveMonth = useMemo(() => {
+    if (authStatus !== 'ready' || !currentAccount) return activeMonth;
+    if (selectableMonths.includes(activeMonth)) return activeMonth;
+    const cur = currentMonthKey(todayIso());
+    return selectableMonths.includes(cur) ? cur : selectableMonths[0] || cur;
   }, [authStatus, currentAccount, selectableMonths, activeMonth]);
 
   const bootstrapOwnerEnvironment = useCallback(async (user: User) => {
@@ -297,7 +296,7 @@ export function useAuthAndRoleData() {
     authStatus,
     currentAccount,
     effectiveRoleId,
-    activeMonth,
+    activeMonth: resolvedActiveMonth,
     selectableMonths,
     roleConfigs,
     setRoleConfigs,
@@ -370,7 +369,7 @@ export function useAuthAndRoleData() {
   } = useAdminManagementActions({
     currentAccount,
     effectiveRoleId,
-    activeMonth,
+    activeMonth: resolvedActiveMonth,
     roleConfigs,
   });
 
@@ -394,7 +393,7 @@ export function useAuthAndRoleData() {
     currentAccount,
     activeRoleId: effectiveRoleId,
     setActiveRoleId,
-    activeMonth,
+    activeMonth: resolvedActiveMonth,
     setActiveMonth,
     selectableMonths,
     roleConfigs,

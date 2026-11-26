@@ -22,6 +22,7 @@ import {
   VisitItem,
   VisitPersonStats,
 } from '../types/outlet';
+import { APP_CONFIG } from '../config/appConfig';
 
 export const ROLE_LABELS: Record<AccountRole, string> = {
   admin: 'Admin',
@@ -36,9 +37,9 @@ export const OPERATIONAL_ROLES: Array<{ id: OperationalRoleId; label: string }> 
   { id: 'accounting', label: 'Accounting' },
 ];
 
-export const DEFAULT_START = '2026-11-02';
-export const DEFAULT_NDAYS = 25;
-export const MIN_WORKSPACE_MONTH = '2026-11';
+export const DEFAULT_START = APP_CONFIG.defaultStartDate;
+export const DEFAULT_NDAYS = APP_CONFIG.defaultWorkingDays;
+export const MIN_WORKSPACE_MONTH = APP_CONFIG.minWorkspaceMonth;
 export const LEGACY_STORAGE_KEY = 'disc-v1';
 
 export const STOCK_ACCOUNTING_TASKS: TaskDefinition[] = [
@@ -1576,7 +1577,7 @@ export function formatCalendarRecurrenceLabel(
   if (freq === 'none') return 'Tidak berulang';
 
   const interval = normalizeCalendarInterval(event.repeatInterval);
-  let base = '';
+  let base: string;
   if (freq === 'daily') {
     base = interval === 1 ? 'Setiap hari' : `Setiap ${interval} hari`;
   } else if (freq === 'weekly') {

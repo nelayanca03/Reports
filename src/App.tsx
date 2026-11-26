@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useState } from 'react';
 import { LoginView } from './components/LoginView';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
@@ -103,114 +103,128 @@ export default function App() {
   const [dailyModalJumpTrigger, setDailyModalJumpTrigger] = useState<number>(0);
 
   const accountId = currentAccount?.id || '';
-  const lastSyncedAccountIdRef = useRef<string>('');
+  const [prevAccountId, setPrevAccountId] = useState<string>('');
+  const [prevActiveMonth, setPrevActiveMonth] = useState<string>(activeMonth);
 
-  // Sync valid person/outlet/task/day when role config or account changes
-  useEffect(() => {
-    const personList = getPersonList(activeConfig.outlets);
-    const peopleMap = getPeopleMap(activeConfig.outlets);
+  const personList = getPersonList(activeConfig.outlets);
+  const peopleMap = getPeopleMap(activeConfig.outlets);
 
-    if (!accountId) {
-      lastSyncedAccountIdRef.current = '';
-    }
-    const accountChanged = Boolean(accountId && lastSyncedAccountIdRef.current !== accountId);
-    if (accountChanged) {
-      lastSyncedAccountIdRef.current = accountId;
-    }
-
-    if (personList.length > 0) {
-      const ownPic = resolveAccountPic(currentAccount, activeConfig.outlets);
-      let nextPerson = selectedPerson;
-      if (accountChanged || !nextPerson || !personList.includes(nextPerson)) {
-        nextPerson =
-          ownPic && personList.includes(ownPic)
-            ? ownPic
-            : personList[0];
-        if (nextPerson !== selectedPerson) {
-          setSelectedPerson(nextPerson);
-        }
-      }
-
-      const outletsForPerson = peopleMap[nextPerson] || [];
-      if (
-        outletsForPerson.length > 0 &&
-        (accountChanged || !outletsForPerson.includes(selectedOutlet))
-      ) {
-        if (outletsForPerson[0] !== selectedOutlet) {
-          setSelectedOutlet(outletsForPerson[0]);
-        }
+  if (prevAccountId !== accountId) {
+    setPrevAccountId(accountId);
+    if (accountId) {
+      setActiveView('calendar');
+      if (personList.length > 0) {
+        const ownPic = resolveAccountPic(currentAccount, activeConfig.outlets);
+        const nextPerson =
+          ownPic && personList.includes(ownPic) ? ownPic : personList[0];
+        setSelectedPerson(nextPerson);
+        setSelectedOutlet((peopleMap[nextPerson] || [])[0] || '');
+      } else {
+        setSelectedPerson('');
+        setSelectedOutlet('');
       }
     } else {
-      if (selectedPerson) setSelectedPerson('');
-      if (selectedOutlet) setSelectedOutlet('');
+      setSelectedPerson('');
+      setSelectedOutlet('');
     }
-  }, [accountId, activeConfig.outlets, currentAccount, selectedPerson, selectedOutlet]);
+  }
 
-  useEffect(() => {
-    if (
-      activeConfig.tasks.length > 0 &&
-      !activeConfig.tasks.some((t) => t.key === selectedTask)
-    ) {
-      setSelectedTask(activeConfig.tasks[0].key);
-    }
-  }, [activeConfig.tasks, selectedTask]);
-
-  useEffect(() => {
-    if (days.length === 0) return;
+  if (prevActiveMonth !== activeMonth && days.length > 0) {
+    setPrevActiveMonth(activeMonth);
     const today = todayIso();
     const curMonth = currentMonthKey(today);
-    if (!days.includes(selectedDay)) {
-      setSelectedDay(
-        activeMonth === curMonth
-          ? nearestWorkingDay(days, yesterdayIso())
-          : activeMonth < curMonth
-            ? days[days.length - 1]
-            : days[0]
-      );
-    }
-    if (recapDate.slice(0, 7) !== activeMonth) {
-      setRecapDate(
-        activeMonth === curMonth
-          ? today
-          : activeMonth < curMonth
-            ? days[days.length - 1]
-            : days[0]
-      );
-    }
-    if (rekapRangeFrom.slice(0, 7) !== activeMonth) {
-      setRekapRangeFrom(days[0]);
-    }
-    if (rekapRangeTo.slice(0, 7) !== activeMonth) {
-      setRekapRangeTo(
-        activeMonth === curMonth
-          ? today
-          : activeMonth < curMonth
-            ? days[days.length - 1]
-            : days[0]
-      );
-    }
-  }, [days, selectedDay, activeMonth, recapDate, rekapRangeFrom, rekapRangeTo]);
+    setSelectedDay(
+      activeMonth === curMonth
+        ? nearestWorkingDay(days, yesterdayIso())
+        : activeMonth < curMonth
+          ? days[days.length - 1]
+          : days[0]
+    );
+    setRecapDate(
+      activeMonth === curMonth
+        ? today
+        : activeMonth < curMonth
+          ? days[days.length - 1]
+          : days[0]
+    );
+    setRekapRangeFrom(days[0]);
+    setRekapRangeTo(
+      activeMonth === curMonth
+        ? today
+        : activeMonth < curMonth
+          ? days[days.length - 1]
+          : days[0]
+    );
+  }
 
-  // Reset to Kalender when user logs in
-  useEffect(() => {
-    if (authStatus === 'ready' && accountId) {
-      setActiveView('calendar');
-    }
-  }, [authStatus, accountId]);
+  const effectiveSelectedPerson =
+    personList.length === 0
+      ? ''
+      : personList.includes(selectedPerson)
+        ? selectedPerson
+        : (() => {
+            const ownPic = resolveAccountPic(currentAccount, activeConfig.outlets);
+            return ownPic && personList.includes(ownPic) ? ownPic : personList[0];
+          })();
 
-  useEffect(() => {
-    if (
-      currentAccount &&
-      currentAccount.role !== 'admin' &&
-      (activeView === 'rekap' ||
-        activeView === 'export' ||
-        activeView === 'admin_tasks' ||
-        activeView === 'admin_accounts' ||
-        activeView === 'admin_logs')
-    ) {
-      setActiveView('calendar');
-    }
-  }, [currentAccount, activeView]);
+  const outletsForEffectivePerson = peopleMap[effectiveSelectedPerson] || [];
+  const effectiveSelectedOutlet =
+    outletsForEffectivePerson.length === 0
+      ? ''
+      : outletsForEffectivePerson.includes(selectedOutlet)
+        ? selectedOutlet
+        : outletsForEffectivePerson[0];
+
+  const effectiveSelectedTask =
+    activeConfig.tasks.length > 0 &&
+    !activeConfig.tasks.some((t) => t.key === selectedTask)
+      ? activeConfig.tasks[0].key
+      : selectedTask;
+
+  const today = todayIso();
+  const curMonth = currentMonthKey(today);
+  const effectiveSelectedDay =
+    days.length === 0 || days.includes(selectedDay)
+      ? selectedDay
+      : activeMonth === curMonth
+        ? nearestWorkingDay(days, yesterdayIso())
+        : activeMonth < curMonth
+          ? days[days.length - 1]
+          : days[0];
+
+  const effectiveRecapDate =
+    days.length === 0 || recapDate.slice(0, 7) === activeMonth
+      ? recapDate
+      : activeMonth === curMonth
+        ? today
+        : activeMonth < curMonth
+          ? days[days.length - 1]
+          : days[0];
+
+  const effectiveRekapRangeFrom =
+    days.length === 0 || rekapRangeFrom.slice(0, 7) === activeMonth
+      ? rekapRangeFrom
+      : days[0];
+
+  const effectiveRekapRangeTo =
+    days.length === 0 || rekapRangeTo.slice(0, 7) === activeMonth
+      ? rekapRangeTo
+      : activeMonth === curMonth
+        ? today
+        : activeMonth < curMonth
+          ? days[days.length - 1]
+          : days[0];
+
+  const safeActiveView: AppView =
+    currentAccount &&
+    currentAccount.role !== 'admin' &&
+    (activeView === 'rekap' ||
+      activeView === 'export' ||
+      activeView === 'admin_tasks' ||
+      activeView === 'admin_accounts' ||
+      activeView === 'admin_logs')
+      ? 'calendar'
+      : activeView;
 
   // Gate entry on login & account authorization
   if (authStatus !== 'ready' || !currentAccount) {
@@ -229,7 +243,6 @@ export default function App() {
 
   const isAdmin = currentAccount.role === 'admin';
   const isPrimaryAdmin = currentAccount.email.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL;
-  const peopleMap = getPeopleMap(activeConfig.outlets);
 
   const handleChangePerson = (person: string) => {
     setSelectedPerson(person);
@@ -247,39 +260,39 @@ export default function App() {
 
   const handleQuickExportCsv = () => {
     if (!isAdmin) return;
-    const today = todayIso();
-    if (activeView === 'rekap') {
+    const exportToday = todayIso();
+    if (safeActiveView === 'rekap') {
       const upto =
         rekapDateMode === 'range'
-          ? rekapRangeTo > today
-            ? today
-            : rekapRangeTo
-          : recapDate;
+          ? effectiveRekapRangeTo > exportToday
+            ? exportToday
+            : effectiveRekapRangeTo
+          : effectiveRecapDate;
       const from =
         rekapDateMode === 'range'
-          ? rekapRangeFrom > upto
+          ? effectiveRekapRangeFrom > upto
             ? upto
-            : rekapRangeFrom
+            : effectiveRekapRangeFrom
           : undefined;
       const fileSlug = from ? `${from}_sd_${upto}` : upto;
       downloadTextFile(
-        `ranking-${activeConfig.roleId}-${selectedTask}-${fileSlug}.csv`,
-        generateRecapCsv(store, days, activeConfig, selectedTask, upto, today, from),
+        `ranking-${activeConfig.roleId}-${effectiveSelectedTask}-${fileSlug}.csv`,
+        generateRecapCsv(store, days, activeConfig, effectiveSelectedTask, upto, exportToday, from),
         'text/csv;charset=utf-8'
       );
       return;
     }
-    if (activeView === 'kunj') {
+    if (safeActiveView === 'kunj') {
       downloadTextFile(
-        `kunjungan-${activeConfig.roleId}-${today}.csv`,
+        `kunjungan-${activeConfig.roleId}-${exportToday}.csv`,
         generateVisitCsv(store, days, activeConfig),
         'text/csv;charset=utf-8'
       );
       return;
     }
     downloadTextFile(
-      `update-${activeConfig.roleId}-${selectedDay}.csv`,
-      generateDailyFleetCsv(store, days, activeConfig, selectedDay, today, isAdmin),
+      `update-${activeConfig.roleId}-${effectiveSelectedDay}.csv`,
+      generateDailyFleetCsv(store, days, activeConfig, effectiveSelectedDay, exportToday, isAdmin),
       'text/csv;charset=utf-8'
     );
   };
@@ -291,11 +304,11 @@ export default function App() {
         activeRoleId={activeRoleId}
         onChangeRoleId={(rId) => {
           setActiveRoleId(rId);
-          if (activeView === 'admin_tasks' || activeView === 'admin_accounts') {
+          if (safeActiveView === 'admin_tasks' || safeActiveView === 'admin_accounts') {
             setActiveView('input');
           }
         }}
-        activeView={activeView}
+        activeView={safeActiveView}
         onSelectView={setActiveView}
         firebaseStorage={firebaseStorage}
         mobileOpen={mobileMenuOpen}
@@ -305,7 +318,7 @@ export default function App() {
 
       <div className="flex min-w-0 flex-1 flex-col">
         <TopBar
-          activeView={activeView}
+          activeView={safeActiveView}
           roleLabel={activeConfig.label}
           isAdmin={isAdmin}
           activeMonth={activeMonth}
@@ -320,7 +333,7 @@ export default function App() {
 
         <main
           className={
-            activeView === 'calendar'
+            safeActiveView === 'calendar'
               ? 'flex w-full flex-1 flex-col p-3 sm:p-4'
               : 'mx-auto w-full max-w-[1200px] flex-1 p-4 sm:p-6'
           }
@@ -332,7 +345,7 @@ export default function App() {
               </div>
             }
           >
-            {activeView === 'calendar' && (
+            {safeActiveView === 'calendar' && (
               <KalenderView
                 account={currentAccount}
                 events={calendarEvents}
@@ -342,7 +355,7 @@ export default function App() {
               />
             )}
 
-            {activeView === 'input' && (
+            {safeActiveView === 'input' && (
               <InputHarianView
                 account={currentAccount}
                 currentUserUid={firebaseUser?.uid || ''}
@@ -353,9 +366,9 @@ export default function App() {
                 savedRecords={savedRecords}
                 days={days}
                 isAdmin={isAdmin}
-                selectedPerson={selectedPerson}
-                selectedOutlet={selectedOutlet}
-                selectedDay={selectedDay}
+                selectedPerson={effectiveSelectedPerson}
+                selectedOutlet={effectiveSelectedOutlet}
+                selectedDay={effectiveSelectedDay}
                 jumpTrigger={dailyModalJumpTrigger}
                 onChangePerson={handleChangePerson}
                 onChangeOutlet={setSelectedOutlet}
@@ -368,16 +381,16 @@ export default function App() {
               />
             )}
 
-            {activeView === 'rekap' && isAdmin && (
+            {safeActiveView === 'rekap' && isAdmin && (
               <RekapRankingView
                 config={activeConfig}
                 store={store}
                 days={days}
-                selectedTask={selectedTask}
-                recapDate={recapDate}
+                selectedTask={effectiveSelectedTask}
+                recapDate={effectiveRecapDate}
                 recapDateMode={rekapDateMode}
-                rangeFrom={rekapRangeFrom}
-                rangeTo={rekapRangeTo}
+                rangeFrom={effectiveRekapRangeFrom}
+                rangeTo={effectiveRekapRangeTo}
                 onChangeTask={setSelectedTask}
                 onChangeRecapDate={setRecapDate}
                 onChangeRecapDateMode={setRekapDateMode}
@@ -387,20 +400,20 @@ export default function App() {
               />
             )}
 
-            {activeView === 'kunj' && (
+            {safeActiveView === 'kunj' && (
               <KunjunganView
                 account={currentAccount}
                 isAdmin={isAdmin}
                 config={activeConfig}
                 store={store}
                 days={days}
-                selectedPerson={selectedPerson}
+                selectedPerson={effectiveSelectedPerson}
                 onSaveVisitDay={saveVisitDay}
                 onJumpToInput={handleJumpToInput}
               />
             )}
 
-            {activeView === 'export' && isAdmin && (
+            {safeActiveView === 'export' && isAdmin && (
               <AdminExportTools
                 alwaysExpanded
                 config={activeConfig}
@@ -411,14 +424,14 @@ export default function App() {
                 days={days}
                 activeMonth={activeMonth}
                 selectableMonths={selectableMonths}
-                selectedDay={selectedDay}
+                selectedDay={effectiveSelectedDay}
                 onImportStore={importWorkspaceData}
                 onResetAllData={resetRoleWorkspace}
                 onOpenAdminTasks={() => setActiveView('admin_tasks')}
               />
             )}
 
-            {activeView === 'admin_tasks' && isAdmin && (
+            {safeActiveView === 'admin_tasks' && isAdmin && (
               <AdminTasksOutletsView
                 roleConfigs={roleConfigs}
                 initialRoleId={activeRoleId}
@@ -429,7 +442,7 @@ export default function App() {
               />
             )}
 
-            {activeView === 'admin_accounts' && isAdmin && (
+            {safeActiveView === 'admin_accounts' && isAdmin && (
               <AdminAccountsView
                 accounts={managedAccounts}
                 roleConfigs={roleConfigs}
@@ -439,7 +452,7 @@ export default function App() {
               />
             )}
 
-            {activeView === 'admin_logs' && isAdmin && (
+            {safeActiveView === 'admin_logs' && isAdmin && (
               <AdminLogsView
                 logs={inputLogs}
                 accounts={managedAccounts}

@@ -200,7 +200,7 @@ export function AdminTasksOutletsView({
     e.preventDefault();
     const cleanLabel = taskLabel.trim();
     if (!cleanLabel) return;
-    let baseKey = slugifyKey(cleanLabel) || `tugas_${config.tasks.length + 1}`;
+    const baseKey = slugifyKey(cleanLabel) || `tugas_${config.tasks.length + 1}`;
     let finalKey = baseKey;
     let counter = 2;
     while (config.tasks.some((t) => t.key === finalKey)) {

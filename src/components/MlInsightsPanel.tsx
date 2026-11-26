@@ -7,7 +7,7 @@ import {
   Search,
   SlidersHorizontal,
 } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   InputLogEntry,
   OperationalRoleId,
@@ -86,13 +86,16 @@ export function MlInsightsPanel({
   const [activeModuleId, setActiveModuleId] = useState<MlModuleId>('action_plan');
   const [page, setPage] = useState<number>(1);
   const [exportNotice, setExportNotice] = useState<string | null>(null);
+  const [prevActiveMonth, setPrevActiveMonth] = useState<string>(activeMonth);
 
-  useEffect(() => {
+  if (prevActiveMonth !== activeMonth) {
+    setPrevActiveMonth(activeMonth);
     setDateFrom(monthDefaultFrom);
     setDateTo(monthDefaultTo);
-  }, [activeMonth, monthDefaultFrom, monthDefaultTo]);
+    setPage(1);
+  }
 
-  const { picOptions, outletOptions } = useMemo(() => {
+  const { picOptions, outletOptions, effectivePicFilter } = useMemo(() => {
     const rIds =
       roleFilter === 'ALL' ? OPERATIONAL_ROLES.map((r) => r.id) : [roleFilter];
     const pics = new Set<string>();
@@ -100,9 +103,13 @@ export function MlInsightsPanel({
     for (const rId of rIds) {
       const cfg = roleConfigs[rId];
       for (const p of getPersonList(cfg.outlets)) pics.add(p);
+    }
+    const validPic = picFilter !== 'ALL' && pics.has(picFilter) ? picFilter : 'ALL';
+    for (const rId of rIds) {
+      const cfg = roleConfigs[rId];
       const pMap = getPeopleMap(cfg.outlets);
-      if (picFilter !== 'ALL') {
-        for (const o of pMap[picFilter] || []) outlets.add(o);
+      if (validPic !== 'ALL') {
+        for (const o of pMap[validPic] || []) outlets.add(o);
       } else {
         for (const item of cfg.outlets) outlets.add(item.code);
       }
@@ -110,20 +117,12 @@ export function MlInsightsPanel({
     return {
       picOptions: Array.from(pics).sort(),
       outletOptions: Array.from(outlets).sort(),
+      effectivePicFilter: validPic,
     };
   }, [roleConfigs, roleFilter, picFilter]);
 
-  useEffect(() => {
-    if (picFilter !== 'ALL' && !picOptions.includes(picFilter)) {
-      setPicFilter('ALL');
-    }
-  }, [picOptions, picFilter]);
-
-  useEffect(() => {
-    if (outletFilter !== 'ALL' && !outletOptions.includes(outletFilter)) {
-      setOutletFilter('ALL');
-    }
-  }, [outletOptions, outletFilter]);
+  const effectiveOutletFilter =
+    outletFilter !== 'ALL' && !outletOptions.includes(outletFilter) ? 'ALL' : outletFilter;
 
   const suite = useMemo(
     () =>
@@ -136,8 +135,8 @@ export function MlInsightsPanel({
         today,
         dateFrom,
         dateTo,
-        picFilter,
-        outletFilter,
+        picFilter: effectivePicFilter,
+        outletFilter: effectiveOutletFilter,
         kpiTargetPct,
       }),
     [
@@ -149,8 +148,8 @@ export function MlInsightsPanel({
       today,
       dateFrom,
       dateTo,
-      picFilter,
-      outletFilter,
+      effectivePicFilter,
+      effectiveOutletFilter,
       kpiTargetPct,
     ]
   );
@@ -167,19 +166,6 @@ export function MlInsightsPanel({
     );
   }, [activeResult.rows, searchQuery]);
 
-  useEffect(() => {
-    setPage(1);
-  }, [
-    activeModuleId,
-    roleFilter,
-    dateFrom,
-    dateTo,
-    picFilter,
-    outletFilter,
-    kpiTargetPct,
-    searchQuery,
-  ]);
-
   const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
   const safePage = Math.min(page, totalPages);
   const startIdx = filteredRows.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE;
@@ -188,8 +174,8 @@ export function MlInsightsPanel({
 
   const hasFilters =
     roleFilter !== 'ALL' ||
-    picFilter !== 'ALL' ||
-    outletFilter !== 'ALL' ||
+    effectivePicFilter !== 'ALL' ||
+    effectiveOutletFilter !== 'ALL' ||
     kpiTargetPct !== 90 ||
     dateFrom !== monthDefaultFrom ||
     dateTo !== monthDefaultTo ||
@@ -406,6 +392,7 @@ export function MlInsightsPanel({
                 onClick={() => {
                   setDateFrom(scopedDays[0]);
                   setDateTo(today);
+                  setPage(1);
                 }}
                 className="text-xs font-medium text-blue-700 hover:underline dark:text-blue-400"
               >
@@ -415,7 +402,10 @@ export function MlInsightsPanel({
             {roleFilter !== activeRoleId && (
               <button
                 type="button"
-                onClick={() => setRoleFilter(activeRoleId)}
+                onClick={() => {
+                  setRoleFilter(activeRoleId);
+                  setPage(1);
+                }}
                 className="text-xs font-medium text-slate-600 hover:underline dark:text-slate-300"
               >
                 Fokus {roleConfigs[activeRoleId].label}
@@ -445,7 +435,10 @@ export function MlInsightsPanel({
             <select
               id="ml-role-filter"
               value={roleFilter}
-              onChange={(e) => setRoleFilter(e.target.value as 'ALL' | OperationalRoleId)}
+              onChange={(e) => {
+                setRoleFilter(e.target.value as 'ALL' | OperationalRoleId);
+                setPage(1);
+              }}
               className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
             >
               <option value="ALL">Semua Role (Gabungan)</option>
@@ -472,6 +465,7 @@ export function MlInsightsPanel({
               onChange={(e) => {
                 const v = e.target.value || days[0] || today;
                 setDateFrom(v > today ? today : v);
+                setPage(1);
               }}
               className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
             />
@@ -492,6 +486,7 @@ export function MlInsightsPanel({
               onChange={(e) => {
                 const v = e.target.value || today;
                 setDateTo(v > today ? today : v);
+                setPage(1);
               }}
               className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
             />
@@ -506,8 +501,11 @@ export function MlInsightsPanel({
             </label>
             <select
               id="ml-pic-filter"
-              value={picFilter}
-              onChange={(e) => setPicFilter(e.target.value)}
+              value={effectivePicFilter}
+              onChange={(e) => {
+                setPicFilter(e.target.value);
+                setPage(1);
+              }}
               className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
             >
               <option value="ALL">Semua PIC ({picOptions.length})</option>
@@ -528,8 +526,11 @@ export function MlInsightsPanel({
             </label>
             <select
               id="ml-outlet-filter"
-              value={outletFilter}
-              onChange={(e) => setOutletFilter(e.target.value)}
+              value={effectiveOutletFilter}
+              onChange={(e) => {
+                setOutletFilter(e.target.value);
+                setPage(1);
+              }}
               className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
             >
               <option value="ALL">Semua Outlet ({outletOptions.length})</option>
@@ -551,7 +552,10 @@ export function MlInsightsPanel({
             <select
               id="ml-kpi-target"
               value={kpiTargetPct}
-              onChange={(e) => setKpiTargetPct(Number(e.target.value))}
+              onChange={(e) => {
+                setKpiTargetPct(Number(e.target.value));
+                setPage(1);
+              }}
               className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-xs font-medium text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
             >
               {[80, 85, 90, 95, 100].map((v) => (
@@ -575,7 +579,10 @@ export function MlInsightsPanel({
                 id="ml-search"
                 type="text"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setPage(1);
+                }}
                 placeholder="Outlet, PIC, tugas..."
                 className="min-h-[38px] w-full rounded-lg border border-slate-200 bg-white pr-2.5 pl-8 text-xs text-slate-900 placeholder:text-slate-400 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:placeholder:text-slate-500"
               />
@@ -603,7 +610,10 @@ export function MlInsightsPanel({
                       <button
                         key={mod.id}
                         type="button"
-                        onClick={() => setActiveModuleId(mod.id)}
+                        onClick={() => {
+                          setActiveModuleId(mod.id);
+                          setPage(1);
+                        }}
                         className={`inline-flex min-h-[38px] items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
                           active
                             ? 'border-blue-700 bg-blue-700 text-white dark:border-blue-500 dark:bg-blue-600'

@@ -1,5 +1,5 @@
 import { ChevronLeft, ChevronRight, Download, History, RotateCcw, Search } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   AccountProfile,
   InputLogActionType,
@@ -36,20 +36,6 @@ export function AdminLogsView({ logs, accounts, roleConfigs }: AdminLogsViewProp
   const [dateFrom, setDateFrom] = useState<string>('');
   const [dateTo, setDateTo] = useState<string>('');
   const [currentPage, setCurrentPage] = useState<number>(1);
-
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [
-    searchQuery,
-    userFilter,
-    roleFilter,
-    actionFilter,
-    outletFilter,
-    dateMode,
-    dateExact,
-    dateFrom,
-    dateTo,
-  ]);
 
   const userOptions = useMemo(() => {
     const map = new Map<string, string>();
@@ -226,7 +212,10 @@ export function AdminLogsView({ logs, accounts, roleConfigs }: AdminLogsViewProp
                 id="log-search"
                 type="text"
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={(e) => {
+                  setSearchQuery(e.target.value);
+                  setCurrentPage(1);
+                }}
                 placeholder="Nama user, email, outlet, atau detail..."
                 className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-slate-50 pr-3 pl-9 text-xs text-slate-900 placeholder:text-slate-400 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:placeholder:text-slate-500"
               />
@@ -243,7 +232,10 @@ export function AdminLogsView({ logs, accounts, roleConfigs }: AdminLogsViewProp
             <select
               id="log-user-filter"
               value={userFilter}
-              onChange={(e) => setUserFilter(e.target.value)}
+              onChange={(e) => {
+                setUserFilter(e.target.value);
+                setCurrentPage(1);
+              }}
               className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
             >
               <option value="ALL">Semua User ({userOptions.length})</option>
@@ -265,7 +257,10 @@ export function AdminLogsView({ logs, accounts, roleConfigs }: AdminLogsViewProp
             <select
               id="log-role-filter"
               value={roleFilter}
-              onChange={(e) => setRoleFilter(e.target.value)}
+              onChange={(e) => {
+                setRoleFilter(e.target.value);
+                setCurrentPage(1);
+              }}
               className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
             >
               <option value="ALL">Semua Role</option>
@@ -287,7 +282,10 @@ export function AdminLogsView({ logs, accounts, roleConfigs }: AdminLogsViewProp
             <select
               id="log-action-filter"
               value={actionFilter}
-              onChange={(e) => setActionFilter(e.target.value as 'ALL' | InputLogActionType)}
+              onChange={(e) => {
+                setActionFilter(e.target.value as 'ALL' | InputLogActionType);
+                setCurrentPage(1);
+              }}
               className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
             >
               <option value="ALL">Semua Aktivitas</option>
@@ -306,7 +304,10 @@ export function AdminLogsView({ logs, accounts, roleConfigs }: AdminLogsViewProp
             <select
               id="log-outlet-filter"
               value={outletFilter}
-              onChange={(e) => setOutletFilter(e.target.value)}
+              onChange={(e) => {
+                setOutletFilter(e.target.value);
+                setCurrentPage(1);
+              }}
               className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
             >
               <option value="ALL">Semua Outlet ({outletOptions.length})</option>
@@ -329,7 +330,10 @@ export function AdminLogsView({ logs, accounts, roleConfigs }: AdminLogsViewProp
               <div className="inline-flex rounded-md border border-slate-200 bg-slate-100 p-0.5 dark:border-slate-700 dark:bg-slate-800">
                 <button
                   type="button"
-                  onClick={() => setDateMode('single')}
+                  onClick={() => {
+                    setDateMode('single');
+                    setCurrentPage(1);
+                  }}
                   className={`rounded px-2 py-0.5 text-[11px] font-semibold transition-colors ${
                     dateMode === 'single'
                       ? 'bg-white text-blue-700 shadow-xs dark:bg-slate-900 dark:text-blue-400'
@@ -340,7 +344,10 @@ export function AdminLogsView({ logs, accounts, roleConfigs }: AdminLogsViewProp
                 </button>
                 <button
                   type="button"
-                  onClick={() => setDateMode('range')}
+                  onClick={() => {
+                    setDateMode('range');
+                    setCurrentPage(1);
+                  }}
                   className={`rounded px-2 py-0.5 text-[11px] font-semibold transition-colors ${
                     dateMode === 'range'
                       ? 'bg-white text-blue-700 shadow-xs dark:bg-slate-900 dark:text-blue-400'
@@ -357,7 +364,10 @@ export function AdminLogsView({ logs, accounts, roleConfigs }: AdminLogsViewProp
                 id="log-date-exact"
                 type="date"
                 value={dateExact}
-                onChange={(e) => setDateExact(e.target.value)}
+                onChange={(e) => {
+                  setDateExact(e.target.value);
+                  setCurrentPage(1);
+                }}
                 className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
               />
             ) : (
@@ -367,7 +377,10 @@ export function AdminLogsView({ logs, accounts, roleConfigs }: AdminLogsViewProp
                   type="date"
                   aria-label="Tanggal Kerja Dari"
                   value={dateFrom}
-                  onChange={(e) => setDateFrom(e.target.value)}
+                  onChange={(e) => {
+                    setDateFrom(e.target.value);
+                    setCurrentPage(1);
+                  }}
                   className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
                 />
                 <input
@@ -375,7 +388,10 @@ export function AdminLogsView({ logs, accounts, roleConfigs }: AdminLogsViewProp
                   type="date"
                   aria-label="Tanggal Kerja Sampai"
                   value={dateTo}
-                  onChange={(e) => setDateTo(e.target.value)}
+                  onChange={(e) => {
+                    setDateTo(e.target.value);
+                    setCurrentPage(1);
+                  }}
                   className="min-h-[40px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 font-mono text-xs text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
                 />
               </div>
