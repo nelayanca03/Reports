@@ -16,6 +16,7 @@ import { OperationType, auth, db, handleFirestoreError } from '../firebase';
 import {
   AccountProfile,
   AccountRole,
+  AdminResetSecurityRecord,
   CalendarBannerMedia,
   CalendarEvent,
   FirebaseStorageStats,
@@ -109,6 +110,7 @@ export function useWorkspaceListeners({
   const [legacySlice, setLegacySlice] = useState<WorkspaceSlice>(EMPTY_SLICE);
   const [monthlySlices, setMonthlySlices] = useState<Record<string, WorkspaceSlice>>({});
   const [managedAccounts, setManagedAccounts] = useState<AccountProfile[]>([]);
+  const [resetSecurity, setResetSecurity] = useState<AdminResetSecurityRecord | null>(null);
   const [inputLogs, setInputLogs] = useState<InputLogEntry[]>([]);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
   const [calendarBanners, setCalendarBanners] = useState<CalendarBannerMedia[]>([]);
@@ -539,6 +541,44 @@ export function useWorkspaceListeners({
       )
     );
 
+    const resetSecPath = 'adminRegistry/resetSecurity';
+    unsubs.push(
+      onSnapshot(
+        doc(db, 'adminRegistry', 'resetSecurity'),
+        (snap) => {
+          if (snap.exists()) {
+            const d = snap.data();
+            const passwordHash = typeof d.passwordHash === 'string' ? d.passwordHash : '';
+            const salt = typeof d.salt === 'string' ? d.salt : '';
+            const iterations =
+              typeof d.iterations === 'number' &&
+              Number.isInteger(d.iterations) &&
+              d.iterations > 0
+                ? d.iterations
+                : 100000;
+            const updatedAtIso =
+              d.updatedAt instanceof Timestamp
+                ? d.updatedAt.toDate().toISOString()
+                : undefined;
+            if (/^[0-9a-f]{64}$/.test(passwordHash) && /^[0-9a-f]{32}$/.test(salt)) {
+              setResetSecurity({
+                passwordHash,
+                salt,
+                iterations,
+                updatedBy: String(d.updatedBy || ''),
+                updatedAtIso,
+              });
+            } else {
+              setResetSecurity(null);
+            }
+          } else {
+            setResetSecurity(null);
+          }
+        },
+        (error) => handleFirestoreError(error, OperationType.GET, resetSecPath)
+      )
+    );
+
     const logsQuery = query(collection(db, 'inputLogs'), orderBy('createdAt', 'desc'), limit(300));
     unsubs.push(
       onSnapshot(
@@ -723,6 +763,7 @@ export function useWorkspaceListeners({
     workspaceData,
     adminAllWorkspaces,
     managedAccounts,
+    resetSecurity,
     inputLogs,
     calendarEvents,
     calendarBanners,

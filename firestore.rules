@@ -153,6 +153,17 @@ service cloud.firestore {
         && data.updatedBy == request.auth.uid;
     }
 
+    function isValidAdminResetSecurity(data) {
+      return data.keys().hasAll(['passwordHash', 'salt', 'iterations', 'updatedAt', 'updatedBy'])
+        && data.keys().hasOnly(['passwordHash', 'salt', 'iterations', 'updatedAt', 'updatedBy'])
+        && data.passwordHash is string && data.passwordHash.size() == 64 && data.passwordHash.matches('^[0-9a-f]{64}$')
+        && data.salt is string && data.salt.size() == 32 && data.salt.matches('^[0-9a-f]{32}$')
+        && data.iterations is int && data.iterations == 100000
+        && data.updatedAt is timestamp
+        && data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128
+        && data.updatedBy == request.auth.uid;
+    }
+
     function isValidRoleConfig(data) {
       return data.keys().hasAll(['roleId', 'label', 'start', 'ndays', 'tasks', 'outlets', 'updatedAt', 'updatedBy'])
         && data.keys().hasOnly(['roleId', 'label', 'start', 'ndays', 'openUntilMonth', 'unlockedPastMonths', 'tasks', 'outlets', 'outletsByPic', 'dayAdjustments', 'updatedAt', 'updatedBy'])
@@ -463,21 +474,35 @@ service cloud.firestore {
     }
 
     match /adminRegistry/{registryId} {
-      allow get: if isVerifiedUser() && isValidId(registryId) && registryId == 'accounts' && isAdmin();
+      allow get: if isVerifiedUser()
+        && isValidId(registryId)
+        && (registryId == 'accounts' || registryId == 'resetSecurity')
+        && isAdmin();
       allow list: if false;
       allow create: if isVerifiedUser()
         && isValidId(registryId)
-        && registryId == 'accounts'
-        && isValidAdminDirectory(incoming())
+        && (
+          (registryId == 'accounts' && isValidAdminDirectory(incoming()))
+          || (registryId == 'resetSecurity' && isValidAdminResetSecurity(incoming()))
+        )
         && isAdmin()
         && incoming().updatedAt == request.time;
       allow update: if isVerifiedUser()
         && isValidId(registryId)
-        && registryId == 'accounts'
-        && isValidAdminDirectory(incoming())
+        && (
+          (
+            registryId == 'accounts'
+            && isValidAdminDirectory(incoming())
+            && incoming().diff(existing()).affectedKeys().hasOnly(['accounts', 'updatedAt', 'updatedBy'])
+          )
+          || (
+            registryId == 'resetSecurity'
+            && isValidAdminResetSecurity(incoming())
+            && incoming().diff(existing()).affectedKeys().hasOnly(['passwordHash', 'salt', 'iterations', 'updatedAt', 'updatedBy'])
+          )
+        )
         && isAdmin()
-        && incoming().updatedAt == request.time
-        && incoming().diff(existing()).affectedKeys().hasOnly(['accounts', 'updatedAt', 'updatedBy']);
+        && incoming().updatedAt == request.time;
       allow delete: if false;
     }
 
@@ -552,7 +577,8 @@ service cloud.firestore {
         && isValidInputLog(incoming())
         && canCreateInputLogAuth(incoming().roleId, incoming().pic)
         && incoming().createdAt == request.time;
-      allow update, delete: if false;
+      allow update: if false;
+      allow delete: if isVerifiedUser() && isValidId(logId) && isAdmin();
     }
 
     function isValidCalendarStartTime(t) {
@@ -697,7 +723,8 @@ service cloud.firestore {
 
     match /recordCounters/{counterId} {
       allow get: if isVerifiedUser() && isValidCounterId(counterId) && canGetRecordCounter(counterId);
-      allow list, delete: if false;
+      allow list: if false;
+      allow delete: if isVerifiedUser() && isValidCounterId(counterId) && isAdmin();
       allow create: if isVerifiedUser()
         && isValidCounterId(counterId)
         && isValidRecordCounter(incoming())

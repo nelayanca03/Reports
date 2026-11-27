@@ -288,6 +288,7 @@ export function useAuthAndRoleData() {
     workspaceData,
     adminAllWorkspaces,
     managedAccounts,
+    resetSecurity,
     inputLogs,
     calendarEvents,
     calendarBanners,
@@ -369,10 +370,13 @@ export function useAuthAndRoleData() {
     deleteAccount,
     importWorkspaceData,
     resetRoleWorkspace,
+    saveResetPassword,
+    resetAllUserInputData,
   } = useAdminManagementActions({
     currentAccount,
     effectiveRoleId,
     activeMonth: resolvedActiveMonth,
+    selectableMonths,
     roleConfigs,
   });
 
@@ -408,6 +412,7 @@ export function useAuthAndRoleData() {
     store: workspaceData,
     allWorkspaces: adminAllWorkspaces,
     managedAccounts,
+    resetSecurity,
     inputLogs,
     calendarEvents,
     calendarBanners,
@@ -431,6 +436,8 @@ export function useAuthAndRoleData() {
     deleteAccount,
     importWorkspaceData,
     resetRoleWorkspace,
+    saveResetPassword,
+    resetAllUserInputData,
     createCalendarEvent,
     updateCalendarEvent,
     deleteCalendarEvent,

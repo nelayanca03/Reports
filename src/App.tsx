@@ -63,6 +63,7 @@ export default function App() {
     store,
     allWorkspaces,
     managedAccounts,
+    resetSecurity,
     inputLogs,
     calendarEvents,
     calendarBanners,
@@ -83,6 +84,8 @@ export default function App() {
     deleteAccount,
     importWorkspaceData,
     resetRoleWorkspace,
+    saveResetPassword,
+    resetAllUserInputData,
     createCalendarEvent,
     updateCalendarEvent,
     deleteCalendarEvent,
@@ -517,8 +520,12 @@ export default function App() {
                 activeMonth={activeMonth}
                 selectableMonths={selectableMonths}
                 selectedDay={effectiveSelectedDay}
+                isPrimaryAdmin={isPrimaryAdmin}
+                resetSecurity={resetSecurity}
                 onImportStore={importWorkspaceData}
                 onResetAllData={resetRoleWorkspace}
+                onSaveResetPassword={saveResetPassword}
+                onResetAllUserInputData={resetAllUserInputData}
                 onOpenAdminTasks={() => setActiveView('admin_tasks')}
               />
             )}

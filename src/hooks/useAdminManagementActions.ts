@@ -1,11 +1,17 @@
 import {
+  DocumentReference,
+  collection,
   deleteDoc,
   deleteField,
   doc,
   getDoc,
+  getDocs,
+  limit,
+  query,
   serverTimestamp,
   setDoc,
   updateDoc,
+  writeBatch,
 } from 'firebase/firestore';
 import { useCallback } from 'react';
 import { OperationType, auth, db, emailToAccountId, handleFirestoreError } from '../firebase';
@@ -13,6 +19,7 @@ import {
   AccountProfile,
   AccountRole,
   EntryItem,
+  FullUserResetSummary,
   OperationalRoleId,
   OutletStoreState,
   RecordPrefix,
@@ -21,11 +28,15 @@ import {
 } from '../types/outlet';
 import {
   DEFAULT_ROLE_CONFIGS,
+  LEGACY_STORAGE_KEY,
+  MIN_WORKSPACE_MONTH,
   buildOutletsByPicMap,
   currentMonthKey,
   parseDayAdjustments,
+  shiftMonthKey,
   todayIso,
 } from '../utils/outletLogic';
+import { createResetPasswordRecord } from '../utils/resetPasswordCrypto';
 
 export function parseUnlockedPastMonths(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
@@ -42,6 +53,7 @@ interface UseAdminManagementActionsParams {
   currentAccount: AccountProfile | null;
   effectiveRoleId: OperationalRoleId;
   activeMonth: string;
+  selectableMonths: string[];
   roleConfigs: Record<OperationalRoleId, RoleConfig>;
 }
 
@@ -49,6 +61,7 @@ export function useAdminManagementActions({
   currentAccount,
   effectiveRoleId,
   activeMonth,
+  selectableMonths,
   roleConfigs,
 }: UseAdminManagementActionsParams) {
   const saveRoleConfig = useCallback(async (roleId: OperationalRoleId, nextConfig: RoleConfig) => {
@@ -388,6 +401,244 @@ export function useAdminManagementActions({
     }
   }, [effectiveRoleId, activeMonth]);
 
+  const saveResetPassword = useCallback(
+    async (newPassword: string) => {
+      const uid = auth.currentUser?.uid;
+      if (!uid || currentAccount?.role !== 'admin') {
+        throw new Error('Hanya Admin yang dapat mengatur password reset.');
+      }
+      const payload = await createResetPasswordRecord(newPassword);
+      const ref = doc(db, 'adminRegistry', 'resetSecurity');
+      const path = 'adminRegistry/resetSecurity';
+      try {
+        const snap = await getDoc(ref);
+        if (snap.exists()) {
+          await updateDoc(ref, {
+            ...payload,
+            updatedAt: serverTimestamp(),
+            updatedBy: uid,
+          });
+        } else {
+          await setDoc(ref, {
+            ...payload,
+            updatedAt: serverTimestamp(),
+            updatedBy: uid,
+          });
+        }
+      } catch (error) {
+        handleFirestoreError(error, OperationType.WRITE, path);
+      }
+    },
+    [currentAccount?.role]
+  );
+
+  const resetAllUserInputData = useCallback(
+    async (onProgress?: (step: string) => void): Promise<FullUserResetSummary> => {
+      const uid = auth.currentUser?.uid;
+      if (!uid || currentAccount?.role !== 'admin') {
+        throw new Error('Hanya Admin yang dapat mereset seluruh data input user.');
+      }
+
+      const roleIds: OperationalRoleId[] = ['stock_accounting', 'gl', 'accounting'];
+      const seenMonths = new Set<string>([activeMonth, ...selectableMonths]);
+      const seenCounters = new Set<string>();
+
+      let workspacesCleared = 0;
+      let monthlyDocsDeleted = 0;
+      let savedRecordsDeleted = 0;
+      let countersDeleted = 0;
+      let inputLogsDeleted = 0;
+
+      const deleteRefsInBatches = async (refs: DocumentReference[], pathLabel: string) => {
+        for (let i = 0; i < refs.length; i += 400) {
+          const chunk = refs.slice(i, i + 400);
+          const batch = writeBatch(db);
+          for (const r of chunk) {
+            batch.delete(r);
+          }
+          try {
+            await batch.commit();
+          } catch (error) {
+            handleFirestoreError(error, OperationType.DELETE, pathLabel);
+          }
+        }
+      };
+
+      // 1. Delete all savedRecords (paginated batches)
+      onProgress?.('Menghapus data tersimpan & kode referensi...');
+      for (let page = 0; page < 500; page++) {
+        let snap;
+        try {
+          snap = await getDocs(query(collection(db, 'savedRecords'), limit(400)));
+        } catch (error) {
+          handleFirestoreError(error, OperationType.LIST, 'savedRecords');
+        }
+        if (snap.empty) break;
+
+        const batch = writeBatch(db);
+        for (const docSnap of snap.docs) {
+          const d = docSnap.data();
+          if (typeof d.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.date)) {
+            seenMonths.add(d.date.slice(0, 7));
+          }
+          if (
+            (d.prefix === 'SA' || d.prefix === 'GL') &&
+            typeof d.yymm === 'string' &&
+            /^\d{4}$/.test(d.yymm)
+          ) {
+            seenCounters.add(`${d.prefix}_${d.yymm}`);
+          }
+          batch.delete(docSnap.ref);
+        }
+        try {
+          await batch.commit();
+        } catch (error) {
+          handleFirestoreError(error, OperationType.DELETE, 'savedRecords');
+        }
+        savedRecordsDeleted += snap.size;
+        onProgress?.(`Menghapus data tersimpan (${savedRecordsDeleted} data)...`);
+        if (snap.size < 400) break;
+      }
+
+      // 2. Delete all inputLogs (paginated batches)
+      onProgress?.('Menghapus log aktivitas input...');
+      for (let page = 0; page < 500; page++) {
+        let snap;
+        try {
+          snap = await getDocs(query(collection(db, 'inputLogs'), limit(400)));
+        } catch (error) {
+          handleFirestoreError(error, OperationType.LIST, 'inputLogs');
+        }
+        if (snap.empty) break;
+
+        const batch = writeBatch(db);
+        for (const docSnap of snap.docs) {
+          const d = docSnap.data();
+          if (typeof d.day === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.day)) {
+            seenMonths.add(d.day.slice(0, 7));
+          }
+          batch.delete(docSnap.ref);
+        }
+        try {
+          await batch.commit();
+        } catch (error) {
+          handleFirestoreError(error, OperationType.DELETE, 'inputLogs');
+        }
+        inputLogsDeleted += snap.size;
+        onProgress?.(`Menghapus log aktivitas (${inputLogsDeleted} log)...`);
+        if (snap.size < 400) break;
+      }
+
+      // 3. Build full set of candidate months from MIN_WORKSPACE_MONTH through +12 months ahead
+      const endSweepMonth = shiftMonthKey(currentMonthKey(todayIso()), 12);
+      let cursorMonth = MIN_WORKSPACE_MONTH;
+      let guard = 0;
+      while (cursorMonth <= endSweepMonth && guard < 240) {
+        seenMonths.add(cursorMonth);
+        cursorMonth = shiftMonthKey(cursorMonth, 1);
+        guard += 1;
+      }
+      const candidateMonths = Array.from(seenMonths)
+        .filter((m) => /^\d{4}-\d{2}$/.test(m))
+        .sort();
+
+      // 4. Clear legacy roleWorkspaces for all 3 operational roles
+      onProgress?.('Membersihkan workspace utama semua divisi...');
+      for (const rId of roleIds) {
+        const legacyPath = `roleWorkspaces/${rId}`;
+        const legacyRef = doc(db, 'roleWorkspaces', rId);
+        try {
+          const legacySnap = await getDoc(legacyRef);
+          if (legacySnap.exists()) {
+            await updateDoc(legacyRef, {
+              ent: {},
+              visit: {},
+              updatedAt: serverTimestamp(),
+              updatedBy: uid,
+            });
+            workspacesCleared += 1;
+          }
+        } catch (error) {
+          handleFirestoreError(error, OperationType.WRITE, legacyPath);
+        }
+      }
+
+      // 5. Delete all existing roleMonthlyWorkspaces docs across all roles & candidate months
+      onProgress?.('Menghapus data input harian & kunjungan semua bulan...');
+      const monthlyDocIds: string[] = [];
+      for (const rId of roleIds) {
+        for (const mKey of candidateMonths) {
+          monthlyDocIds.push(`${rId}_${mKey}`);
+        }
+      }
+      const existingMonthlyRefs: DocumentReference[] = [];
+      for (let i = 0; i < monthlyDocIds.length; i += 25) {
+        const chunk = monthlyDocIds.slice(i, i + 25);
+        try {
+          const snaps = await Promise.all(
+            chunk.map((id) => getDoc(doc(db, 'roleMonthlyWorkspaces', id)))
+          );
+          for (const s of snaps) {
+            if (s.exists()) {
+              existingMonthlyRefs.push(s.ref);
+            }
+          }
+        } catch (error) {
+          handleFirestoreError(error, OperationType.GET, 'roleMonthlyWorkspaces');
+        }
+      }
+      if (existingMonthlyRefs.length > 0) {
+        await deleteRefsInBatches(existingMonthlyRefs, 'roleMonthlyWorkspaces');
+        monthlyDocsDeleted = existingMonthlyRefs.length;
+      }
+
+      // 6. Delete all existing recordCounters so reference numbering restarts at 0001
+      onProgress?.('Mereset urutan nomor kode referensi SA & GL...');
+      for (const mKey of candidateMonths) {
+        const yymm = mKey.slice(2, 4) + mKey.slice(5, 7);
+        seenCounters.add(`SA_${yymm}`);
+        seenCounters.add(`GL_${yymm}`);
+      }
+      const counterIds = Array.from(seenCounters).filter((id) => /^(SA|GL)_\d{4}$/.test(id));
+      const existingCounterRefs: DocumentReference[] = [];
+      for (let i = 0; i < counterIds.length; i += 25) {
+        const chunk = counterIds.slice(i, i + 25);
+        try {
+          const snaps = await Promise.all(
+            chunk.map((id) => getDoc(doc(db, 'recordCounters', id)))
+          );
+          for (const s of snaps) {
+            if (s.exists()) {
+              existingCounterRefs.push(s.ref);
+            }
+          }
+        } catch (error) {
+          handleFirestoreError(error, OperationType.GET, 'recordCounters');
+        }
+      }
+      if (existingCounterRefs.length > 0) {
+        await deleteRefsInBatches(existingCounterRefs, 'recordCounters');
+        countersDeleted = existingCounterRefs.length;
+      }
+
+      // 7. Clear any stale legacy local cache in browser
+      try {
+        localStorage.removeItem(LEGACY_STORAGE_KEY);
+      } catch {
+        // ignore storage access issues
+      }
+
+      return {
+        workspacesCleared,
+        monthlyDocsDeleted,
+        savedRecordsDeleted,
+        countersDeleted,
+        inputLogsDeleted,
+      };
+    },
+    [currentAccount?.role, activeMonth, selectableMonths]
+  );
+
   return {
     saveRoleConfig,
     saveOpenUntilMonthAllRoles,
@@ -398,5 +649,7 @@ export function useAdminManagementActions({
     deleteAccount,
     importWorkspaceData,
     resetRoleWorkspace,
+    saveResetPassword,
+    resetAllUserInputData,
   };
 }

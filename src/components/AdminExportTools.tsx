@@ -17,7 +17,9 @@ import {
 import { ChangeEvent, useCallback, useMemo, useRef, useState } from 'react';
 import {
   AccountProfile,
+  AdminResetSecurityRecord,
   CalendarEvent,
+  FullUserResetSummary,
   InputLogEntry,
   OperationalRoleId,
   OutletStoreState,
@@ -51,6 +53,7 @@ import {
   yesterdayIso,
 } from '../utils/outletLogic';
 import { AdminDatasetPanel } from './AdminDatasetPanel';
+import { AdminFullResetSection } from './admin/AdminFullResetSection';
 import { ConfirmModal } from './ConfirmModal';
 import { MlInsightsPanel } from './MlInsightsPanel';
 import { DateRangeFilterPopover } from './records/DateRangeFilterPopover';
@@ -69,8 +72,12 @@ interface AdminExportToolsProps {
   selectableMonths: string[];
   selectedDay: string;
   alwaysExpanded?: boolean;
+  isPrimaryAdmin?: boolean;
+  resetSecurity?: AdminResetSecurityRecord | null;
   onImportStore: (incoming: OutletStoreState) => Promise<void>;
   onResetAllData: () => Promise<void>;
+  onSaveResetPassword?: (newPassword: string) => Promise<void>;
+  onResetAllUserInputData?: (onProgress?: (step: string) => void) => Promise<FullUserResetSummary>;
   onOpenAdminTasks?: () => void;
 }
 
@@ -94,7 +101,7 @@ type DirectoryEntry =
     }
   | {
       id: string;
-      kind: 'dataset' | 'backup' | 'reset';
+      kind: 'dataset' | 'backup' | 'reset' | 'reset_all';
       category: string;
       label: string;
       description: string;
@@ -189,6 +196,14 @@ function buildReportDirectoryRows(activeMonthLabel: string, roleLabel: string): 
           label: `Reset Data Bulan ${activeMonthLabel}`,
           description: `Hapus seluruh entri harian dan kunjungan pada bulan ${activeMonthLabel} untuk ${roleLabel}.`,
         },
+        {
+          id: 'tool:reset_all',
+          kind: 'reset_all',
+          category: 'Dataset & Cadangan',
+          label: 'Reset Semua Data Input User',
+          description:
+            'Hapus permanen seluruh data yang sudah diinput oleh user di semua divisi dan semua bulan (dilindungi password Admin).',
+        },
       ],
     },
   ];
@@ -247,8 +262,12 @@ export function AdminExportTools({
   selectableMonths,
   selectedDay,
   alwaysExpanded = false,
+  isPrimaryAdmin = false,
+  resetSecurity = null,
   onImportStore,
   onResetAllData,
+  onSaveResetPassword,
+  onResetAllUserInputData,
   onOpenAdminTasks,
 }: AdminExportToolsProps) {
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -677,7 +696,11 @@ export function AdminExportTools({
                                   type="button"
                                   onClick={() => handleOpenEntry(item)}
                                   title={item.description}
-                                  className="text-left text-sm leading-snug text-blue-700 transition-colors hover:text-blue-900 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 dark:text-blue-400 dark:hover:text-blue-300"
+                                  className={`text-left text-sm leading-snug transition-colors hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-blue-600 ${
+                                    item.kind === 'reset_all'
+                                      ? 'font-medium text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-300'
+                                      : 'text-blue-700 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300'
+                                  }`}
                                 >
                                   {item.label}
                                 </button>
@@ -1281,6 +1304,20 @@ export function AdminExportTools({
                 }}
               />
             </>
+          )}
+
+          {/* 6. RESET SEMUA DATA INPUT USER (PASSWORD PROTECTED) */}
+          {selectedEntry.kind === 'reset_all' && onSaveResetPassword && onResetAllUserInputData && (
+            <AdminFullResetSection
+              isPrimaryAdmin={isPrimaryAdmin}
+              resetSecurity={resetSecurity}
+              onSaveResetPassword={onSaveResetPassword}
+              onResetAllUserInputData={onResetAllUserInputData}
+              onResetCompleted={() => {
+                setServerLogs(null);
+                setServerLogsTruncated(false);
+              }}
+            />
           )}
         </>
       )}

@@ -224,6 +224,22 @@ export interface SavedRecord {
   updatedAtIso?: string;
 }
 
+export interface AdminResetSecurityRecord {
+  passwordHash: string;
+  salt: string;
+  iterations: number;
+  updatedBy: string;
+  updatedAtIso?: string;
+}
+
+export interface FullUserResetSummary {
+  workspacesCleared: number;
+  monthlyDocsDeleted: number;
+  savedRecordsDeleted: number;
+  countersDeleted: number;
+  inputLogsDeleted: number;
+}
+
 export type AppView =
   | 'calendar'
   | 'input'

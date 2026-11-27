@@ -57,7 +57,7 @@ describe('firestore.rules structural invariants & blueprint sync', () => {
     );
     assert.match(
       rulesText,
-      /match \/recordCounters\/\{counterId\}[\s\S]*?allow list, delete: if false;/
+      /match \/recordCounters\/\{counterId\}[\s\S]*?allow list: if false;[\s\S]*?allow delete: if isVerifiedUser\(\) && isValidCounterId\(counterId\) && isAdmin\(\);/
     );
   });
 
@@ -98,6 +98,7 @@ describe('firestore.rules structural invariants & blueprint sync', () => {
     const checks: Array<[string, string]> = [
       ['isValidAccount', 'Account'],
       ['isValidAdminDirectory', 'AdminAccountDirectory'],
+      ['isValidAdminResetSecurity', 'AdminResetSecurity'],
       ['isValidRoleConfig', 'RoleConfig'],
       ['isValidRoleWorkspace', 'RoleWorkspace'],
       ['isValidRoleMonthlyWorkspace', 'RoleMonthlyWorkspace'],

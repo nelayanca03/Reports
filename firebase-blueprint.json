@@ -79,6 +79,43 @@
       },
       "required": ["accounts", "updatedAt", "updatedBy"]
     },
+    "AdminResetSecurity": {
+      "title": "AdminResetSecurity",
+      "description": "Admin-only salted PBKDF2-SHA256 password hash protecting full user-data resets",
+      "type": "object",
+      "properties": {
+        "passwordHash": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "minLength": 64,
+          "maxLength": 64,
+          "description": "Hex-encoded PBKDF2-SHA256 derived password hash"
+        },
+        "salt": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{32}$",
+          "minLength": 32,
+          "maxLength": 32,
+          "description": "Hex-encoded 128-bit random salt"
+        },
+        "iterations": {
+          "type": "integer",
+          "description": "PBKDF2 iteration count (100000)"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last password update"
+        },
+        "updatedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "UID of admin who set or updated the reset password"
+        }
+      },
+      "required": ["passwordHash", "salt", "iterations", "updatedAt", "updatedBy"]
+    },
     "RoleConfig": {
       "title": "RoleConfig",
       "description": "Tasks and outlet assignments configured by Admin for an operational role",
@@ -626,7 +663,7 @@
     },
     "/adminRegistry/{registryId}": {
       "schema": { "$ref": "#/entities/AdminAccountDirectory" },
-      "description": "Admin-only directory document listing all managed accounts"
+      "description": "Admin-only registry documents: accounts directory (accounts) and PBKDF2 reset password hash (resetSecurity)"
     },
     "/roleConfigs/{roleId}": {
       "schema": { "$ref": "#/entities/RoleConfig" },
