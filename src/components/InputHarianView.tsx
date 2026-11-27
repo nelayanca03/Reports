@@ -50,6 +50,9 @@ interface InputHarianViewProps {
   selectedOutlet: string;
   selectedDay: string;
   jumpTrigger?: number;
+  editingRecord?: SavedRecord | null;
+  onEditRecordInDaily?: (record: SavedRecord) => void;
+  onClearEditingRecord?: () => void;
   onChangePerson: (person: string) => void;
   onChangeOutlet: (outlet: string) => void;
   onChangeDay: (day: string) => void;
@@ -93,6 +96,9 @@ export function InputHarianView({
   selectedOutlet,
   selectedDay,
   jumpTrigger = 0,
+  editingRecord = null,
+  onEditRecordInDaily,
+  onClearEditingRecord,
   onChangePerson,
   onChangeOutlet,
   onChangeDay,
@@ -330,17 +336,27 @@ export function InputHarianView({
       const summary = `[Input Harian] ${summaryItems.join(' · ')}`.slice(0, 200);
       const notes = noteLines.join('\n').slice(0, 1000);
 
-      const existingDailyRecord = savedRecords.find(
-        (r) =>
-          r.department === department &&
-          r.date === selectedDay &&
-          r.outlet.toUpperCase() === activeOutlet.toUpperCase() &&
-          r.summary.startsWith('[Input Harian]') &&
-          (canManageRecords ||
-            (currentUserUid
-              ? r.createdBy === currentUserUid
-              : r.createdByEmail.toLowerCase() === account.email.toLowerCase()))
-      );
+      const matchingEditingRecord =
+        editingRecord &&
+        editingRecord.department === department &&
+        editingRecord.date === selectedDay &&
+        editingRecord.outlet.toUpperCase() === activeOutlet.toUpperCase()
+          ? editingRecord
+          : null;
+
+      const existingDailyRecord =
+        matchingEditingRecord ||
+        savedRecords.find(
+          (r) =>
+            r.department === department &&
+            r.date === selectedDay &&
+            r.outlet.toUpperCase() === activeOutlet.toUpperCase() &&
+            r.summary.startsWith('[Input Harian]') &&
+            (canManageRecords ||
+              (currentUserUid
+                ? r.createdBy === currentUserUid
+                : r.createdByEmail.toLowerCase() === account.email.toLowerCase()))
+        );
 
       if (existingDailyRecord) {
         await onUpdateSavedRecord(existingDailyRecord.id, {
@@ -372,6 +388,7 @@ export function InputHarianView({
           : `Data ${activeOutlet} (${fmtDateLong(selectedDay)}) tersimpan.`
       );
       setDailyModalOpen(false);
+      onClearEditingRecord?.();
     } catch (err) {
       setSaveError(
         `Data harian tersimpan, namun gagal membuat/memperbarui Kode Referensi. ${formatSaveError(err, 'Kode Referensi')}`
@@ -434,7 +451,19 @@ export function InputHarianView({
             ? () => {
                 setSavedNotice(null);
                 setSaveError(null);
+                onClearEditingRecord?.();
                 setDailyModalOpen(true);
+              }
+            : undefined
+        }
+        onOpenEditDaily={isAdmin ? onEditRecordInDaily : undefined}
+        canEditRecordInDaily={
+          isAdmin
+            ? (record) => {
+                const targetCfg = roleConfigs[record.department];
+                return Boolean(
+                  targetCfg && targetCfg.tasks.length > 0 && targetCfg.outlets.length > 0
+                );
               }
             : undefined
         }
@@ -501,6 +530,13 @@ export function InputHarianView({
         <>
           <InputHarianDailyModal
             open={dailyModalOpen}
+            editingRecordRefCode={
+              editingRecord &&
+              editingRecord.date === selectedDay &&
+              editingRecord.outlet.toUpperCase() === activeOutlet.toUpperCase()
+                ? editingRecord.refCode
+                : null
+            }
             saving={saving}
             saveError={saveError}
             account={account}
@@ -528,7 +564,10 @@ export function InputHarianView({
             updateCount={updateCount}
             pendingCount={pendingCount}
             calculatedTasks={calculatedTasks}
-            onClose={() => setDailyModalOpen(false)}
+            onClose={() => {
+              setDailyModalOpen(false);
+              onClearEditingRecord?.();
+            }}
             onChangeDay={onChangeDay}
             onChangePerson={onChangePerson}
             onChangeOutlet={onChangeOutlet}

@@ -42,6 +42,8 @@ interface SavedRecordsSectionProps {
   roleConfigs: Record<OperationalRoleId, RoleConfig>;
   records: SavedRecord[];
   onOpenAddDaily?: () => void;
+  onOpenEditDaily?: (record: SavedRecord) => void;
+  canEditRecordInDaily?: (record: SavedRecord) => boolean;
   onOpenExportPhoto?: () => void;
   onOpenExportPhotoForRecord?: (record: SavedRecord) => void;
   onCreateRecord: (input: {
@@ -72,6 +74,8 @@ export function SavedRecordsSection({
   roleConfigs,
   records,
   onOpenAddDaily,
+  onOpenEditDaily,
+  canEditRecordInDaily,
   onOpenExportPhoto,
   onOpenExportPhotoForRecord,
   onCreateRecord,
@@ -228,6 +232,10 @@ export function SavedRecordsSection({
   const openEditModal = (rec: SavedRecord) => {
     if (!canManage) return;
     setViewingRecord(null);
+    if (onOpenEditDaily && (!canEditRecordInDaily || canEditRecordInDaily(rec))) {
+      onOpenEditDaily(rec);
+      return;
+    }
     setEditingRecord(rec);
     setFormDate(rec.date);
     setFormOutlet(rec.outlet);

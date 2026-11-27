@@ -2,6 +2,7 @@ import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import { FormEvent, MouseEvent, useEffect, useMemo, useState } from 'react';
 import {
   AccountProfile,
+  CalendarBannerMedia,
   CalendarEvent,
   CalendarRecurrenceFreq,
   OperationalRoleId,
@@ -22,6 +23,7 @@ import {
   toIsoUtc,
   todayIso,
 } from '../utils/outletLogic';
+import { KalenderBannerImage } from './kalender/KalenderBannerImage';
 import { KalenderDayPopup } from './kalender/KalenderDayPopup';
 import { KalenderDetailModal } from './kalender/KalenderDetailModal';
 import { KalenderFormModal } from './kalender/KalenderFormModal';
@@ -41,19 +43,41 @@ export type { CalendarEventFormPayload };
 interface KalenderViewProps {
   account: AccountProfile;
   events: CalendarEvent[];
+  bannerImages: CalendarBannerMedia[];
   onCreateEvent: (input: CalendarEventFormPayload) => Promise<string>;
   onUpdateEvent: (eventId: string, input: CalendarEventFormPayload) => Promise<void>;
   onDeleteEvent: (eventId: string) => Promise<void>;
+  onAddBannerImage: (input: {
+    imageDataUrl: string;
+    caption?: string;
+    fileName?: string;
+    sortOrder?: number;
+  }) => Promise<string>;
+  onUpdateBannerImage: (
+    mediaId: string,
+    input: {
+      imageDataUrl: string;
+      caption?: string;
+      fileName?: string;
+      sortOrder?: number;
+    }
+  ) => Promise<void>;
+  onDeleteBannerImage: (mediaId: string) => Promise<void>;
 }
 
 export function KalenderView({
   account,
   events,
+  bannerImages,
   onCreateEvent,
   onUpdateEvent,
   onDeleteEvent,
+  onAddBannerImage,
+  onUpdateBannerImage,
+  onDeleteBannerImage,
 }: KalenderViewProps) {
   const today = todayIso();
+  const isAdmin = account.role === 'admin';
   const canManage = account.role === 'admin' || account.role === 'accounting';
 
   const [viewMode, setViewMode] = useState<CalendarViewMode>('month');
@@ -496,6 +520,14 @@ export function KalenderView({
           setCursorDate(dayIso);
           setViewMode('day');
         }}
+      />
+
+      <KalenderBannerImage
+        isAdmin={isAdmin}
+        banners={bannerImages}
+        onAddBanner={onAddBannerImage}
+        onUpdateBanner={onUpdateBannerImage}
+        onDeleteBanner={onDeleteBannerImage}
       />
 
       {dayPopup && (

@@ -16,6 +16,7 @@ import { OperationType, auth, db, handleFirestoreError } from '../firebase';
 import {
   AccountProfile,
   AccountRole,
+  CalendarBannerMedia,
   CalendarEvent,
   FirebaseStorageStats,
   InputLogEntry,
@@ -110,6 +111,7 @@ export function useWorkspaceListeners({
   const [managedAccounts, setManagedAccounts] = useState<AccountProfile[]>([]);
   const [inputLogs, setInputLogs] = useState<InputLogEntry[]>([]);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
+  const [calendarBanners, setCalendarBanners] = useState<CalendarBannerMedia[]>([]);
   const [savedRecords, setSavedRecords] = useState<SavedRecord[]>([]);
   const [adminWorkspaceBytes, setAdminWorkspaceBytes] = useState<Record<string, number>>({});
   const [adminLegacySlices, setAdminLegacySlices] = useState<
@@ -358,6 +360,47 @@ export function useWorkspaceListeners({
       )
     );
 
+    const mediaQuery = query(collection(db, 'calendarMedia'), limit(30));
+    unsubs.push(
+      onSnapshot(
+        mediaQuery,
+        (snap) => {
+          const list: CalendarBannerMedia[] = [];
+          for (const docSnap of snap.docs) {
+            const d = docSnap.data();
+            const imageDataUrl = typeof d.imageDataUrl === 'string' ? d.imageDataUrl : '';
+            if (!imageDataUrl.startsWith('data:image/')) continue;
+            const updatedAtIso =
+              d.updatedAt instanceof Timestamp
+                ? d.updatedAt.toDate().toISOString()
+                : undefined;
+            const sortOrder =
+              typeof d.sortOrder === 'number' && Number.isFinite(d.sortOrder)
+                ? Math.max(0, Math.floor(d.sortOrder))
+                : 0;
+            list.push({
+              id: docSnap.id,
+              imageDataUrl,
+              caption: typeof d.caption === 'string' ? d.caption : '',
+              fileName: typeof d.fileName === 'string' ? d.fileName : '',
+              sortOrder,
+              updatedBy: String(d.updatedBy || ''),
+              updatedByName: String(d.updatedByName || ''),
+              updatedAtIso,
+            });
+          }
+          list.sort(
+            (a, b) =>
+              (a.sortOrder ?? 0) - (b.sortOrder ?? 0) ||
+              (a.updatedAtIso || '').localeCompare(b.updatedAtIso || '') ||
+              a.id.localeCompare(b.id)
+          );
+          setCalendarBanners(list);
+        },
+        (error) => handleFirestoreError(error, OperationType.LIST, 'calendarMedia')
+      )
+    );
+
     return () => {
       unsubs.forEach((u) => u());
     };
@@ -381,6 +424,7 @@ export function useWorkspaceListeners({
               const unlockedPastMonths = parseUnlockedPastMonths(d.unlockedPastMonths);
               const parsedOutlets = Array.isArray(d.outlets) ? d.outlets : [];
               const parsedOutletsByPic = parseOutletsByPic(d.outletsByPic);
+              const parsedDayAdjustments = parseDayAdjustments(d.dayAdjustments);
               const expectedOutletsByPic = buildOutletsByPicMap(parsedOutlets);
               if (!areOutletsByPicEqual(parsedOutletsByPic, expectedOutletsByPic) && auth.currentUser?.uid) {
                 void updateDoc(doc(db, 'roleConfigs', rId), {
@@ -405,6 +449,9 @@ export function useWorkspaceListeners({
                   outletsByPic: areOutletsByPicEqual(parsedOutletsByPic, expectedOutletsByPic)
                     ? parsedOutletsByPic || expectedOutletsByPic
                     : expectedOutletsByPic,
+                  ...(parsedDayAdjustments.length > 0
+                    ? { dayAdjustments: parsedDayAdjustments }
+                    : {}),
                 },
               }));
             }
@@ -643,6 +690,11 @@ export function useWorkspaceListeners({
       totalDocs += 1;
     }
 
+    for (const bannerItem of calendarBanners) {
+      usedBytes += estimateFirestoreDocBytes(`calendarMedia/${bannerItem.id}`, bannerItem);
+      totalDocs += 1;
+    }
+
     const limitBytes = FIRESTORE_SPARK_LIMIT_BYTES;
     const remainingBytes = Math.max(0, limitBytes - usedBytes);
     const usedPercent = Math.min(100, (usedBytes / limitBytes) * 100);
@@ -662,6 +714,7 @@ export function useWorkspaceListeners({
     inputLogs,
     totalInputLogCount,
     calendarEvents,
+    calendarBanners,
     savedRecords,
   ]);
 
@@ -672,6 +725,7 @@ export function useWorkspaceListeners({
     managedAccounts,
     inputLogs,
     calendarEvents,
+    calendarBanners,
     savedRecords,
     firebaseStorage,
   };

@@ -194,6 +194,17 @@ export interface CalendarEvent {
   updatedAtIso?: string;
 }
 
+export interface CalendarBannerMedia {
+  id: string;
+  imageDataUrl: string;
+  caption: string;
+  fileName: string;
+  sortOrder?: number;
+  updatedBy: string;
+  updatedByName: string;
+  updatedAtIso?: string;
+}
+
 export interface SavedRecord {
   id: string;
   refCode: string;

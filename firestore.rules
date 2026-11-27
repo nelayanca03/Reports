@@ -800,5 +800,44 @@ service cloud.firestore {
         && incoming().diff(existing()).affectedKeys().hasOnly(['date', 'pic', 'outlet', 'summary', 'notes', 'updatedAt', 'updatedBy']);
       allow delete: if isVerifiedUser() && isValidRecordId(recordId) && isAccountingOrAdmin();
     }
+
+    function isValidCalendarMedia(data) {
+      return data.keys().hasAll([
+          'imageDataUrl', 'caption', 'fileName', 'updatedAt', 'updatedBy', 'updatedByName'
+        ])
+        && data.keys().hasOnly([
+          'imageDataUrl', 'caption', 'fileName', 'sortOrder', 'updatedAt', 'updatedBy', 'updatedByName'
+        ])
+        && data.imageDataUrl is string
+        && data.imageDataUrl.size() >= 22
+        && data.imageDataUrl.size() <= 750000
+        && data.imageDataUrl[0:32].matches('^data:image/(png|jpeg|jpg|webp|gif);base64,.*')
+        && data.caption is string && data.caption.size() <= 200
+        && data.fileName is string && data.fileName.size() <= 120
+        && (!('sortOrder' in data) || (data.sortOrder is int && data.sortOrder >= 0 && data.sortOrder <= 100000))
+        && data.updatedAt is timestamp
+        && data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128
+        && data.updatedBy == request.auth.uid
+        && data.updatedByName is string && data.updatedByName.size() >= 1 && data.updatedByName.size() <= 80;
+    }
+
+    match /calendarMedia/{mediaId} {
+      allow get: if isVerifiedUser() && isValidId(mediaId) && hasActiveAccount();
+      allow list: if isVerifiedUser() && hasActiveAccount();
+      allow create: if isVerifiedUser()
+        && isValidId(mediaId)
+        && isValidCalendarMedia(incoming())
+        && isAdmin()
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidId(mediaId)
+        && isValidCalendarMedia(incoming())
+        && isAdmin()
+        && incoming().updatedAt == request.time
+        && incoming().diff(existing()).affectedKeys().hasOnly([
+          'imageDataUrl', 'caption', 'fileName', 'sortOrder', 'updatedAt', 'updatedBy', 'updatedByName'
+        ]);
+      allow delete: if isVerifiedUser() && isValidId(mediaId) && isAdmin();
+    }
   }
 }

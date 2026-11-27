@@ -29,15 +29,17 @@ const RekapRankingView = lazy(() =>
 );
 import { BOOTSTRAPPED_ADMIN_EMAIL } from './firebase';
 import { useAuthAndRoleData } from './hooks/useAuthAndRoleData';
-import { AppView } from './types/outlet';
+import { AppView, OperationalRoleId, SavedRecord } from './types/outlet';
 import { downloadXlsxWorkbook } from './utils/exportXlsx';
 import {
   buildDailyFleetTable,
+  buildMonthWorkingDays,
   buildRecapTable,
   buildVisitTable,
   currentMonthKey,
   getPeopleMap,
   getPersonList,
+  mergeWorkspaceStates,
   nearestWorkingDay,
   resolveAccountPic,
   todayIso,
@@ -63,6 +65,7 @@ export default function App() {
     managedAccounts,
     inputLogs,
     calendarEvents,
+    calendarBanners,
     savedRecords,
     firebaseStorage,
     theme,
@@ -83,6 +86,9 @@ export default function App() {
     createCalendarEvent,
     updateCalendarEvent,
     deleteCalendarEvent,
+    addCalendarBanner,
+    updateCalendarBanner,
+    deleteCalendarBanner,
     createSavedRecord,
     updateSavedRecord,
     deleteSavedRecord,
@@ -103,6 +109,7 @@ export default function App() {
   const [rekapRangeFrom, setRekapRangeFrom] = useState<string>(() => days[0] || todayIso());
   const [rekapRangeTo, setRekapRangeTo] = useState<string>(() => todayIso());
   const [dailyModalJumpTrigger, setDailyModalJumpTrigger] = useState<number>(0);
+  const [editingDailyRecord, setEditingDailyRecord] = useState<SavedRecord | null>(null);
 
   const accountId = currentAccount?.id || '';
   const [prevAccountId, setPrevAccountId] = useState<string>('');
@@ -253,9 +260,62 @@ export default function App() {
   };
 
   const handleJumpToInput = (person: string, outlet: string, day: string) => {
+    setEditingDailyRecord(null);
     setSelectedPerson(person);
     setSelectedOutlet(outlet);
     setSelectedDay(days.includes(day) ? day : nearestWorkingDay(days, day));
+    setDailyModalJumpTrigger((n) => n + 1);
+    setActiveView('input');
+  };
+
+  const handleEditSavedRecordInDaily = (record: SavedRecord) => {
+    if (!isAdmin) return;
+    const targetRole: OperationalRoleId = record.department;
+    const targetConfig = roleConfigs[targetRole];
+    if (!targetConfig || targetConfig.tasks.length === 0 || targetConfig.outlets.length === 0) {
+      return;
+    }
+
+    const targetMonth = /^\d{4}-\d{2}-\d{2}$/.test(record.date)
+      ? record.date.slice(0, 7)
+      : activeMonth;
+
+    if (targetRole !== activeRoleId) {
+      setActiveRoleId(targetRole);
+    }
+    if (targetMonth !== activeMonth) {
+      setPrevActiveMonth(targetMonth);
+      setActiveMonth(targetMonth);
+    }
+
+    const targetOutlets = targetConfig.outlets;
+    const matchedOutletEntry = targetOutlets.find(
+      (o) => o.code.trim().toUpperCase() === record.outlet.trim().toUpperCase()
+    );
+    const targetPersonList = getPersonList(targetOutlets);
+    const matchedPic =
+      matchedOutletEntry?.person ||
+      targetPersonList.find((p) => p.trim().toUpperCase() === record.pic.trim().toUpperCase()) ||
+      targetPersonList[0] ||
+      '';
+    const targetPeopleMap = getPeopleMap(targetOutlets);
+    const resolvedOutlet =
+      matchedOutletEntry?.code ||
+      (targetPeopleMap[matchedPic] || []).find(
+        (o) => o.trim().toUpperCase() === record.outlet.trim().toUpperCase()
+      ) ||
+      (targetPeopleMap[matchedPic] || [])[0] ||
+      '';
+
+    const targetDays = buildMonthWorkingDays(targetMonth);
+    const resolvedDay = targetDays.includes(record.date)
+      ? record.date
+      : nearestWorkingDay(targetDays, record.date);
+
+    setSelectedPerson(matchedPic);
+    setSelectedOutlet(resolvedOutlet);
+    setSelectedDay(resolvedDay);
+    setEditingDailyRecord(record);
     setDailyModalJumpTrigger((n) => n + 1);
     setActiveView('input');
   };
@@ -364,9 +424,13 @@ export default function App() {
               <KalenderView
                 account={currentAccount}
                 events={calendarEvents}
+                bannerImages={calendarBanners}
                 onCreateEvent={createCalendarEvent}
                 onUpdateEvent={updateCalendarEvent}
                 onDeleteEvent={deleteCalendarEvent}
+                onAddBannerImage={addCalendarBanner}
+                onUpdateBannerImage={updateCalendarBanner}
+                onDeleteBannerImage={deleteCalendarBanner}
               />
             )}
 
@@ -377,7 +441,14 @@ export default function App() {
                 activeRoleId={activeRoleId}
                 config={activeConfig}
                 roleConfigs={roleConfigs}
-                store={store}
+                store={
+                  isAdmin
+                    ? {
+                        ...mergeWorkspaceStates(allWorkspaces[activeRoleId], store),
+                        start: store.start,
+                      }
+                    : store
+                }
                 savedRecords={savedRecords}
                 days={days}
                 isAdmin={isAdmin}
@@ -385,6 +456,9 @@ export default function App() {
                 selectedOutlet={effectiveSelectedOutlet}
                 selectedDay={effectiveSelectedDay}
                 jumpTrigger={dailyModalJumpTrigger}
+                editingRecord={editingDailyRecord}
+                onEditRecordInDaily={handleEditSavedRecordInDaily}
+                onClearEditingRecord={() => setEditingDailyRecord(null)}
                 onChangePerson={handleChangePerson}
                 onChangeOutlet={setSelectedOutlet}
                 onChangeDay={setSelectedDay}

@@ -380,10 +380,128 @@ export function useCalendarAndRecordsActions({
     [currentAccount]
   );
 
+  const addCalendarBanner = useCallback(
+    async (input: {
+      imageDataUrl: string;
+      caption?: string;
+      fileName?: string;
+      sortOrder?: number;
+    }) => {
+      const uid = auth.currentUser?.uid;
+      if (!uid || !currentAccount) {
+        throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
+      }
+      if (currentAccount.role !== 'admin') {
+        throw new Error('Hanya Admin yang dapat menambahkan gambar kalender.');
+      }
+      const dataUrl = (input.imageDataUrl || '').trim();
+      if (!/^data:image\/(png|jpeg|jpg|webp|gif);base64,/.test(dataUrl)) {
+        throw new Error('Format gambar tidak didukung. Gunakan PNG, JPG, WEBP, atau GIF.');
+      }
+      if (dataUrl.length > 750000) {
+        throw new Error('Ukuran gambar masih terlalu besar setelah kompresi. Pilih gambar yang lebih kecil.');
+      }
+      const sortOrder =
+        typeof input.sortOrder === 'number' && Number.isFinite(input.sortOrder)
+          ? Math.max(0, Math.min(100000, Math.floor(input.sortOrder)))
+          : 0;
+      const mediaId = `img_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const path = `calendarMedia/${mediaId}`;
+      try {
+        await setDoc(doc(db, 'calendarMedia', mediaId), {
+          imageDataUrl: dataUrl,
+          caption: (input.caption || '').trim().slice(0, 200),
+          fileName: (input.fileName || 'kalender-gambar.jpg').trim().slice(0, 120),
+          sortOrder,
+          updatedAt: serverTimestamp(),
+          updatedBy: uid,
+          updatedByName: (currentAccount.name || currentAccount.email || 'Admin').slice(0, 80),
+        });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.CREATE, path);
+      }
+      return mediaId;
+    },
+    [currentAccount]
+  );
+
+  const updateCalendarBanner = useCallback(
+    async (
+      mediaId: string,
+      input: {
+        imageDataUrl: string;
+        caption?: string;
+        fileName?: string;
+        sortOrder?: number;
+      }
+    ) => {
+      const uid = auth.currentUser?.uid;
+      if (!uid || !currentAccount) {
+        throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
+      }
+      if (currentAccount.role !== 'admin') {
+        throw new Error('Hanya Admin yang dapat mengubah gambar kalender.');
+      }
+      const cleanId = mediaId.trim();
+      if (!cleanId) {
+        throw new Error('ID gambar tidak valid.');
+      }
+      const dataUrl = (input.imageDataUrl || '').trim();
+      if (!/^data:image\/(png|jpeg|jpg|webp|gif);base64,/.test(dataUrl)) {
+        throw new Error('Format gambar tidak didukung. Gunakan PNG, JPG, WEBP, atau GIF.');
+      }
+      if (dataUrl.length > 750000) {
+        throw new Error('Ukuran gambar masih terlalu besar setelah kompresi. Pilih gambar yang lebih kecil.');
+      }
+      const payload: Record<string, unknown> = {
+        imageDataUrl: dataUrl,
+        caption: (input.caption || '').trim().slice(0, 200),
+        fileName: (input.fileName || 'kalender-gambar.jpg').trim().slice(0, 120),
+        updatedAt: serverTimestamp(),
+        updatedBy: uid,
+        updatedByName: (currentAccount.name || currentAccount.email || 'Admin').slice(0, 80),
+      };
+      if (typeof input.sortOrder === 'number' && Number.isFinite(input.sortOrder)) {
+        payload.sortOrder = Math.max(0, Math.min(100000, Math.floor(input.sortOrder)));
+      }
+      const path = `calendarMedia/${cleanId}`;
+      try {
+        await updateDoc(doc(db, 'calendarMedia', cleanId), payload);
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, path);
+      }
+    },
+    [currentAccount]
+  );
+
+  const deleteCalendarBanner = useCallback(
+    async (mediaId: string) => {
+      const uid = auth.currentUser?.uid;
+      if (!uid || !currentAccount) {
+        throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
+      }
+      if (currentAccount.role !== 'admin') {
+        throw new Error('Hanya Admin yang dapat menghapus gambar kalender.');
+      }
+      const cleanId = mediaId.trim();
+      if (!cleanId) return;
+      const path = `calendarMedia/${cleanId}`;
+      try {
+        await deleteDoc(doc(db, 'calendarMedia', cleanId));
+      } catch (error) {
+        handleFirestoreError(error, OperationType.DELETE, path);
+      }
+    },
+    [currentAccount]
+  );
+
   return {
     createCalendarEvent,
     updateCalendarEvent,
     deleteCalendarEvent,
+    addCalendarBanner,
+    updateCalendarBanner,
+    deleteCalendarBanner,
     createSavedRecord,
     updateSavedRecord,
     deleteSavedRecord,

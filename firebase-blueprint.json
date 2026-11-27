@@ -565,6 +565,58 @@
         "createdByEmail",
         "createdByName"
       ]
+    },
+    "CalendarMedia": {
+      "title": "CalendarMedia",
+      "description": "Admin-managed images displayed below the calendar, viewable read-only by all active users",
+      "type": "object",
+      "properties": {
+        "imageDataUrl": {
+          "type": "string",
+          "minLength": 22,
+          "maxLength": 750000,
+          "description": "Compressed base64 image data URL (png/jpeg/webp/gif)"
+        },
+        "caption": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Optional short caption shown beneath the calendar image"
+        },
+        "fileName": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Original uploaded image file name"
+        },
+        "sortOrder": {
+          "type": "integer",
+          "description": "Optional display order index for sorting multiple calendar images"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Server timestamp of last update"
+        },
+        "updatedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128,
+          "description": "UID of admin who uploaded or replaced the image"
+        },
+        "updatedByName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "description": "Display name of admin who updated the image"
+        }
+      },
+      "required": [
+        "imageDataUrl",
+        "caption",
+        "fileName",
+        "updatedAt",
+        "updatedBy",
+        "updatedByName"
+      ]
     }
   },
   "firestore": {
@@ -603,6 +655,10 @@
     "/savedRecords/{recordId}": {
       "schema": { "$ref": "#/entities/SavedRecord" },
       "description": "Saved outlet records indexed by permanent SA/GL reference code"
+    },
+    "/calendarMedia/{mediaId}": {
+      "schema": { "$ref": "#/entities/CalendarMedia" },
+      "description": "Admin-managed gallery images displayed below the calendar, read-only for all active users"
     }
   }
 }

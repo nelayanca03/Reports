@@ -25,6 +25,7 @@ export interface CalculatedTaskRowItem {
 
 interface InputHarianDailyModalProps {
   open: boolean;
+  editingRecordRefCode?: string | null;
   saving: boolean;
   saveError: string | null;
   account: AccountProfile;
@@ -70,6 +71,7 @@ interface InputHarianDailyModalProps {
 
 export function InputHarianDailyModal({
   open,
+  editingRecordRefCode = null,
   saving,
   saveError,
   account,
@@ -127,9 +129,17 @@ export function InputHarianDailyModal({
               id="daily-input-modal-title"
               className="text-base font-semibold text-slate-900 dark:text-slate-100"
             >
-              Tambah Update Daily · {config.label}
+              {editingRecordRefCode ? 'Edit Update Daily' : 'Tambah Update Daily'} · {config.label}
             </h2>
             <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+              {editingRecordRefCode ? (
+                <>
+                  <span className="font-mono font-semibold text-blue-700 dark:text-blue-400">
+                    {editingRecordRefCode}
+                  </span>
+                  {' · '}
+                </>
+              ) : null}
               {activeOutlet} · {formatPicTitle(activePerson)} · {fmtDateWeekdayLong(selectedDay)}
             </p>
           </div>
@@ -388,7 +398,7 @@ export function InputHarianDailyModal({
                   className="inline-flex min-h-[40px] shrink-0 items-center gap-2 whitespace-nowrap rounded-lg bg-blue-700 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-blue-800 disabled:cursor-not-allowed disabled:bg-slate-200 disabled:text-slate-400 dark:bg-blue-600 dark:hover:bg-blue-500 dark:disabled:bg-slate-800 dark:disabled:text-slate-500"
                 >
                   <Save className="h-4 w-4 shrink-0" />
-                  <span>{saving ? 'Menyimpan...' : 'Save'}</span>
+                  <span>{saving ? 'Menyimpan...' : editingRecordRefCode ? 'Simpan Perubahan' : 'Save'}</span>
                 </button>
               </div>
             </div>

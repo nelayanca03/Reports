@@ -53,6 +53,10 @@ describe('firestore.rules structural invariants & blueprint sync', () => {
     }
     assert.match(
       rulesText,
+      /match \/calendarMedia\/\{mediaId\}[\s\S]*?allow list: if isVerifiedUser\(\) && hasActiveAccount\(\);[\s\S]*?allow delete: if isVerifiedUser\(\) && isValidId\(mediaId\) && isAdmin\(\);/
+    );
+    assert.match(
+      rulesText,
       /match \/recordCounters\/\{counterId\}[\s\S]*?allow list, delete: if false;/
     );
   });
@@ -101,6 +105,7 @@ describe('firestore.rules structural invariants & blueprint sync', () => {
       ['isValidCalendarEvent', 'CalendarEvent'],
       ['isValidRecordCounter', 'RecordCounter'],
       ['isValidSavedRecord', 'SavedRecord'],
+      ['isValidCalendarMedia', 'CalendarMedia'],
     ];
 
     for (const [fnName, entityName] of checks) {
