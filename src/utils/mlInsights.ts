@@ -15,6 +15,7 @@ import {
   escapeCsv,
   fmtDate,
   fmtDateLong,
+  getEffectiveWorkingDaysForPerson,
   getPersonList,
   getSelectableMonths,
   getTaskInputType,
@@ -619,8 +620,15 @@ export function computeMlInsightsSuite(params: ComputeMlSuiteParams): MlInsights
       if (picFilter !== 'ALL' && person !== picFilter) continue;
       if (outletFilter !== 'ALL' && outlet !== outletFilter) continue;
 
+      const personEvalDays = getEffectiveWorkingDaysForPerson(
+        safeEvalDays,
+        cfg.dayAdjustments,
+        person
+      );
+      if (personEvalDays.length === 0) continue;
+
       for (const task of cfg.tasks) {
-        const calcs = safeEvalDays.map((d) =>
+        const calcs = personEvalDays.map((d) =>
           calcTask(ws, allRoleDays.length ? allRoleDays : safeEvalDays, cfg.tasks, outlet, d, task.key, today)
         );
         if (!calcs.length) continue;
@@ -636,7 +644,7 @@ export function computeMlInsightsSuite(params: ComputeMlSuiteParams): MlInsights
         const backfillRate = ownCalcs.length > 0 ? backfillCount / ownCalcs.length : 0;
 
         // Same-weekday historical pending rate
-        const sameDowCalcs = calcs.filter((_, i) => parseUtcDate(safeEvalDays[i]).getUTCDay() === nextWeekdayDow);
+        const sameDowCalcs = calcs.filter((_, i) => parseUtcDate(personEvalDays[i]).getUTCDay() === nextWeekdayDow);
         const sameDowPendRate = sameDowCalcs.length
           ? sameDowCalcs.filter((c) => c.pend).length / sameDowCalcs.length
           : pendingRate;

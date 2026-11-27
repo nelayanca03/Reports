@@ -17,6 +17,7 @@ import {
   diffWorkingDays,
   escapeCsvCell,
   expandCalendarEventsForRange,
+  getAdjustmentForPersonDay,
   getPersonList,
   getSelectableMonths,
   getTaskInputType,
@@ -289,6 +290,7 @@ export function buildDataset(params: BuildDatasetParams): BuiltDataset {
         let streak = 0;
         const inputType = getTaskInputType(task);
         for (const d of allDaysUpToMax) {
+          if (getAdjustmentForPersonDay(cfg.dayAdjustments, person, d)) continue;
           const c = calcTask(ws, baseWorkingDays, cfg.tasks, outlet, d, task.key, today);
           streak = c.pend ? streak + 1 : 0;
           if (!evalDaysSet.has(d)) continue;
@@ -336,6 +338,7 @@ export function buildDataset(params: BuildDatasetParams): BuiltDataset {
     const personList = getPersonList(scopedOutlets);
     for (const d of evalDays) {
       for (const person of personList) {
+        if (getAdjustmentForPersonDay(cfg.dayAdjustments, person, d)) continue;
         const picOutlets = scopedOutlets
           .filter((o) => o.person === person)
           .map((o) => o.code);
@@ -358,7 +361,8 @@ export function buildDataset(params: BuildDatasetParams): BuiltDataset {
               task.key,
               d,
               today,
-              d
+              d,
+              cfg.dayAdjustments
             );
             const c = calcTask(ws, baseWorkingDays, cfg.tasks, outlet, d, task.key, today);
             sumSelisih += recap.avg;

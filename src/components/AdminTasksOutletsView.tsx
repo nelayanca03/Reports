@@ -8,8 +8,10 @@ import {
   RoleConfig,
   TaskDefinition,
   TaskInputType,
+  WorkingDayAdjustment,
 } from '../types/outlet';
 import {
+  DAY_ADJUSTMENT_TYPE_LABELS,
   OPERATIONAL_ROLES,
   STOCK_ACCOUNTING_OUTLETS,
   STOCK_ACCOUNTING_TASKS,
@@ -25,15 +27,19 @@ import {
   shiftMonthKey,
   todayIso,
 } from '../utils/outletLogic';
+import { AdminDayAdjustmentsSection } from './admin/AdminDayAdjustmentsSection';
 import { ConfirmModal } from './ConfirmModal';
 
 interface AdminTasksOutletsViewProps {
   roleConfigs: Record<OperationalRoleId, RoleConfig>;
   initialRoleId: OperationalRoleId;
+  activeMonth: string;
   accounts: AccountProfile[];
   onSaveRoleConfig: (roleId: OperationalRoleId, nextConfig: RoleConfig) => Promise<void>;
   onSaveOpenUntilMonthAllRoles: (openUntilMonth?: string) => Promise<void>;
   onTogglePastMonthAllRoles: (monthKey: string, open: boolean) => Promise<void>;
+  onSaveDayAdjustmentAllRoles: (adjustment: WorkingDayAdjustment) => Promise<void>;
+  onDeleteDayAdjustmentAllRoles: (adjustmentId: string) => Promise<void>;
 }
 
 const FORMULA_LABELS: Record<FormulaType, string> = {
@@ -55,10 +61,13 @@ function slugifyKey(text: string): string {
 export function AdminTasksOutletsView({
   roleConfigs,
   initialRoleId,
+  activeMonth,
   accounts,
   onSaveRoleConfig,
   onSaveOpenUntilMonthAllRoles,
   onTogglePastMonthAllRoles,
+  onSaveDayAdjustmentAllRoles,
+  onDeleteDayAdjustmentAllRoles,
 }: AdminTasksOutletsViewProps) {
   const [targetRole, setTargetRole] = useState<OperationalRoleId>(initialRoleId);
   const config = roleConfigs[targetRole];
@@ -1055,6 +1064,63 @@ export function AdminTasksOutletsView({
           </div>
         )}
       </section>
+
+      {/* Working-Day Adjustments (Off Day, Cuti/Izin, Cuti Bersama, Libur Nasional) */}
+      <AdminDayAdjustmentsSection
+        config={config}
+        activeMonth={activeMonth}
+        suggestedPicNames={suggestedPicNames}
+        busy={busy}
+        onAddRoleAdjustment={async (adj) => {
+          setBusy(true);
+          try {
+            const prev = config.dayAdjustments || [];
+            await onSaveRoleConfig(targetRole, {
+              ...config,
+              dayAdjustments: [adj, ...prev.filter((a) => a.id !== adj.id)],
+            });
+            setFeedback(
+              `Adjustment ${DAY_ADJUSTMENT_TYPE_LABELS[adj.type]} berhasil ditambahkan untuk ${
+                adj.scope === 'person' ? adj.pic : config.label
+              }.`
+            );
+          } finally {
+            setBusy(false);
+          }
+        }}
+        onDeleteRoleAdjustment={async (adjId) => {
+          setBusy(true);
+          try {
+            await onSaveRoleConfig(targetRole, {
+              ...config,
+              dayAdjustments: (config.dayAdjustments || []).filter((a) => a.id !== adjId),
+            });
+            setFeedback(`Adjustment hari kerja dihapus dari ${config.label}.`);
+          } finally {
+            setBusy(false);
+          }
+        }}
+        onAddAllRolesAdjustment={async (adj) => {
+          setBusy(true);
+          try {
+            await onSaveDayAdjustmentAllRoles(adj);
+            setFeedback(
+              `Adjustment ${DAY_ADJUSTMENT_TYPE_LABELS[adj.type]} berhasil diterapkan ke semua divisi.`
+            );
+          } finally {
+            setBusy(false);
+          }
+        }}
+        onDeleteAllRolesAdjustment={async (adjId) => {
+          setBusy(true);
+          try {
+            await onDeleteDayAdjustmentAllRoles(adjId);
+            setFeedback('Adjustment hari kerja dihapus dari semua divisi.');
+          } finally {
+            setBusy(false);
+          }
+        }}
+      />
 
       <ConfirmModal
         open={Boolean(pendingDelete)}

@@ -74,6 +74,8 @@ export default function App() {
     saveRoleConfig,
     saveOpenUntilMonthAllRoles,
     togglePastMonthAllRoles,
+    saveDayAdjustmentAllRoles,
+    deleteDayAdjustmentAllRoles,
     saveAccount,
     deleteAccount,
     importWorkspaceData,
@@ -451,10 +453,13 @@ export default function App() {
               <AdminTasksOutletsView
                 roleConfigs={roleConfigs}
                 initialRoleId={activeRoleId}
+                activeMonth={activeMonth}
                 accounts={managedAccounts}
                 onSaveRoleConfig={saveRoleConfig}
                 onSaveOpenUntilMonthAllRoles={saveOpenUntilMonthAllRoles}
                 onTogglePastMonthAllRoles={togglePastMonthAllRoles}
+                onSaveDayAdjustmentAllRoles={saveDayAdjustmentAllRoles}
+                onDeleteDayAdjustmentAllRoles={deleteDayAdjustmentAllRoles}
               />
             )}
 

@@ -171,7 +171,8 @@ export function KunjunganView({
     personList,
     today,
     filterFrom,
-    filterUpto
+    filterUpto,
+    config.dayAdjustments
   );
 
   const filteredMatrixDays = days.filter((d) => {

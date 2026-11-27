@@ -4,6 +4,8 @@ import {
   CalculatedTask,
   CalendarEvent,
   CalendarRecurrenceFreq,
+  DayAdjustmentScope,
+  DayAdjustmentType,
   EntryItem,
   FormulaType,
   InputLogEntry,
@@ -21,6 +23,7 @@ import {
   VisitEntry,
   VisitItem,
   VisitPersonStats,
+  WorkingDayAdjustment,
 } from '../types/outlet';
 import { APP_CONFIG } from '../config/appConfig';
 
@@ -868,6 +871,180 @@ export function calcTask(
   };
 }
 
+export const DAY_ADJUSTMENT_TYPE_LABELS: Record<DayAdjustmentType, string> = {
+  off_day: 'Off Day',
+  cuti_izin: 'Cuti / Izin',
+  cuti_bersama: 'Cuti Bersama',
+  libur_nasional: 'Libur Nasional',
+};
+
+export const DAY_ADJUSTMENT_SHORT_LABELS: Record<DayAdjustmentType, string> = {
+  off_day: 'OFF',
+  cuti_izin: 'CUTI',
+  cuti_bersama: 'CB',
+  libur_nasional: 'LIBUR',
+};
+
+export const DAY_ADJUSTMENT_SCOPE_LABELS: Record<DayAdjustmentScope, string> = {
+  person: 'Per Personil (PIC)',
+  role: 'Per Divisi',
+  all: 'Semua Orang (Semua Divisi)',
+};
+
+const VALID_DAY_ADJ_TYPES = new Set<DayAdjustmentType>([
+  'off_day',
+  'cuti_izin',
+  'cuti_bersama',
+  'libur_nasional',
+]);
+const VALID_DAY_ADJ_SCOPES = new Set<DayAdjustmentScope>(['person', 'role', 'all']);
+
+export function parseDayAdjustments(raw: unknown): WorkingDayAdjustment[] {
+  if (!Array.isArray(raw)) return [];
+  const seenIds = new Set<string>();
+  const result: WorkingDayAdjustment[] = [];
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const rec = item as Record<string, unknown>;
+    const id = typeof rec.id === 'string' ? rec.id.trim().slice(0, 64) : '';
+    const type = rec.type as DayAdjustmentType;
+    const scope = rec.scope as DayAdjustmentScope;
+    const rawFrom = typeof rec.dateFrom === 'string' ? rec.dateFrom.trim() : '';
+    const rawTo = typeof rec.dateTo === 'string' ? rec.dateTo.trim() : '';
+    if (
+      !id ||
+      seenIds.has(id) ||
+      !VALID_DAY_ADJ_TYPES.has(type) ||
+      !VALID_DAY_ADJ_SCOPES.has(scope) ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(rawFrom) ||
+      !/^\d{4}-\d{2}-\d{2}$/.test(rawTo)
+    ) {
+      continue;
+    }
+    const dateFrom = rawFrom <= rawTo ? rawFrom : rawTo;
+    const dateTo = rawFrom <= rawTo ? rawTo : rawFrom;
+    const pic =
+      scope === 'person' && typeof rec.pic === 'string'
+        ? rec.pic.trim().toUpperCase().slice(0, 60)
+        : '';
+    if (scope === 'person' && !pic) continue;
+    const note = typeof rec.note === 'string' ? rec.note.trim().slice(0, 100) : '';
+    seenIds.add(id);
+    result.push({
+      id,
+      type,
+      scope,
+      ...(scope === 'person' ? { pic } : {}),
+      dateFrom,
+      dateTo,
+      ...(note ? { note } : {}),
+    });
+    if (result.length >= 200) break;
+  }
+  return result.sort(
+    (a, b) => b.dateFrom.localeCompare(a.dateFrom) || a.id.localeCompare(b.id)
+  );
+}
+
+export function countWorkingDaysInRange(dateFrom: string, dateTo: string): number {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateFrom) || !/^\d{4}-\d{2}-\d{2}$/.test(dateTo)) {
+    return 0;
+  }
+  const startIso = dateFrom <= dateTo ? dateFrom : dateTo;
+  const endIso = dateFrom <= dateTo ? dateTo : dateFrom;
+  const cur = parseUtcDate(startIso);
+  const end = parseUtcDate(endIso);
+  let count = 0;
+  let guard = 0;
+  while (cur.getTime() <= end.getTime() && guard < 400) {
+    if (cur.getUTCDay() !== 0) {
+      count++;
+    }
+    cur.setUTCDate(cur.getUTCDate() + 1);
+    guard++;
+  }
+  return count;
+}
+
+export function getAdjustmentForPersonDay(
+  adjustments: WorkingDayAdjustment[] | undefined,
+  person: string,
+  day: string
+): WorkingDayAdjustment | null {
+  if (!adjustments || adjustments.length === 0 || !day) return null;
+  const picUpper = (person || '').trim().toUpperCase();
+  let best: WorkingDayAdjustment | null = null;
+  let bestPriority = 0;
+
+  for (const adj of adjustments) {
+    if (!adj || !adj.dateFrom || !adj.dateTo) continue;
+    const from = adj.dateFrom <= adj.dateTo ? adj.dateFrom : adj.dateTo;
+    const to = adj.dateFrom <= adj.dateTo ? adj.dateTo : adj.dateFrom;
+    if (day < from || day > to) continue;
+
+    if (adj.scope === 'person') {
+      if (picUpper && (adj.pic || '').trim().toUpperCase() === picUpper && bestPriority < 3) {
+        best = adj;
+        bestPriority = 3;
+      }
+    } else if (adj.scope === 'role') {
+      if (bestPriority < 2) {
+        best = adj;
+        bestPriority = 2;
+      }
+    } else if (adj.scope === 'all') {
+      if (bestPriority < 1) {
+        best = adj;
+        bestPriority = 1;
+      }
+    }
+  }
+  return best;
+}
+
+export function getEffectiveWorkingDaysForPerson(
+  days: string[],
+  adjustments: WorkingDayAdjustment[] | undefined,
+  person: string
+): string[] {
+  const workDays = days.filter((d) => !isSunday(d));
+  if (!adjustments || adjustments.length === 0) return workDays;
+  return workDays.filter((d) => !getAdjustmentForPersonDay(adjustments, person, d));
+}
+
+export function countAdjustedWorkingDays(
+  days: string[],
+  adjustments: WorkingDayAdjustment[] | undefined,
+  person: string
+): {
+  total: number;
+  effective: number;
+  adjusted: number;
+  byType: Record<DayAdjustmentType, number>;
+} {
+  const byType: Record<DayAdjustmentType, number> = {
+    off_day: 0,
+    cuti_izin: 0,
+    cuti_bersama: 0,
+    libur_nasional: 0,
+  };
+  const workDays = days.filter((d) => !isSunday(d));
+  let adjusted = 0;
+  for (const d of workDays) {
+    const match = getAdjustmentForPersonDay(adjustments, person, d);
+    if (match) {
+      adjusted++;
+      byType[match.type] = (byType[match.type] || 0) + 1;
+    }
+  }
+  return {
+    total: workDays.length,
+    effective: Math.max(0, workDays.length - adjusted),
+    adjusted,
+    byType,
+  };
+}
+
 export function calcRecap(
   state: OutletStoreState,
   days: string[],
@@ -877,16 +1054,25 @@ export function calcRecap(
   taskKey: string,
   upto: string,
   today: string = todayIso(),
-  fromDate?: string
+  fromDate?: string,
+  dayAdjustments?: WorkingDayAdjustment[]
 ): OutletRecap {
   const effectiveUpto = upto && upto > today ? today : upto;
   const effectiveFrom =
     fromDate && effectiveUpto && fromDate > effectiveUpto ? effectiveUpto : fromDate || '';
-  const ds = days.filter(
+  const allScopedDays = days.filter(
     (d) => (!effectiveFrom || d >= effectiveFrom) && d <= effectiveUpto && !isSunday(d)
   );
+  const ds =
+    dayAdjustments && dayAdjustments.length > 0
+      ? allScopedDays.filter((d) => !getAdjustmentForPersonDay(dayAdjustments, person, d))
+      : allScopedDays;
+  const adjustedDays = allScopedDays.length - ds.length;
+
   if (!ds.length) {
-    const fallback = calcTask(state, days, tasks, outlet, days[0] || effectiveUpto, taskKey, today);
+    const fallbackDay = allScopedDays[allScopedDays.length - 1] || days[0] || effectiveUpto;
+    const fallback = calcTask(state, days, tasks, outlet, fallbackDay, taskKey, today);
+    const allDaysAdjusted = allScopedDays.length > 0 && adjustedDays === allScopedDays.length;
     return {
       outlet,
       person,
@@ -894,10 +1080,13 @@ export function calcRecap(
       pend: 0,
       latestDate: fallback.d,
       latestPm: fallback.d ? fallback.pm : 0,
-      latestPend: fallback.d ? fallback.pend : false,
+      latestPend: allDaysAdjusted ? false : fallback.d ? fallback.pend : false,
       latestNote: fallback.n,
       hasAnyInput: Boolean(fallback.d),
-      backfillCount: fallback.backfillDays ? 1 : 0,
+      backfillCount: allDaysAdjusted ? 0 : fallback.backfillDays ? 1 : 0,
+      effectiveDays: 0,
+      totalDays: allScopedDays.length,
+      adjustedDays,
     };
   }
 
@@ -927,6 +1116,9 @@ export function calcRecap(
     latestNote: latest.n,
     hasAnyInput,
     backfillCount,
+    effectiveDays: ds.length,
+    totalDays: allScopedDays.length,
+    adjustedDays,
   };
 }
 
@@ -961,7 +1153,8 @@ export function calcVisitLeaderboard(
   personList: string[],
   today: string = todayIso(),
   fromDate?: string,
-  uptoDate?: string
+  uptoDate?: string,
+  dayAdjustments?: WorkingDayAdjustment[]
 ): { elapsedDays: number; grandTotalVisits: number; rows: VisitPersonStats[] } {
   const effectiveUpto = uptoDate ? (uptoDate > today ? today : uptoDate) : '';
   const effectiveFrom =
@@ -973,7 +1166,8 @@ export function calcVisitLeaderboard(
       (!effectiveUpto || d <= effectiveUpto)
   );
   const elapsedCap = effectiveUpto && effectiveUpto < today ? effectiveUpto : today;
-  const elapsedDays = workingDays.filter((d) => d <= elapsedCap).length;
+  const elapsedWorkingDays = workingDays.filter((d) => d <= elapsedCap);
+  const elapsedDays = elapsedWorkingDays.length;
   const rawRows = personList.map((person) => {
     let visitedCount = 0;
     let totalVisits = 0;
@@ -985,11 +1179,18 @@ export function calcVisitLeaderboard(
         totalVisits += Math.max(1, entries.length);
       }
     }
+    const personElapsedDays =
+      dayAdjustments && dayAdjustments.length > 0
+        ? elapsedWorkingDays.filter((d) => !getAdjustmentForPersonDay(dayAdjustments, person, d))
+            .length
+        : elapsedDays;
+    const personAdjustedDays = elapsedDays - personElapsedDays;
     return {
       person,
       visitedCount,
       totalVisits,
-      elapsedDays,
+      elapsedDays: personElapsedDays,
+      ...(personAdjustedDays > 0 ? { adjustedDays: personAdjustedDays } : {}),
     };
   });
 
@@ -1162,7 +1363,18 @@ export function buildRecapTable(
   const periodLabel = effectiveFrom ? `${effectiveFrom} s/d ${effectiveUpto}` : effectiveUpto;
   const recaps = config.outlets
     .map(({ code: outlet, person }) =>
-      calcRecap(state, days, config.tasks, outlet, person, taskKey, effectiveUpto, today, effectiveFrom)
+      calcRecap(
+        state,
+        days,
+        config.tasks,
+        outlet,
+        person,
+        taskKey,
+        effectiveUpto,
+        today,
+        effectiveFrom,
+        config.dayAdjustments
+      )
     )
     .sort((a, b) => Number(a.hasAnyInput) - Number(b.hasAnyInput) || a.avg - b.avg);
 

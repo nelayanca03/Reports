@@ -17,11 +17,13 @@ import {
   OutletStoreState,
   RecordPrefix,
   RoleConfig,
+  WorkingDayAdjustment,
 } from '../types/outlet';
 import {
   DEFAULT_ROLE_CONFIGS,
   buildOutletsByPicMap,
   currentMonthKey,
+  parseDayAdjustments,
   todayIso,
 } from '../utils/outletLogic';
 
@@ -61,6 +63,7 @@ export function useAdminManagementActions({
     const validUnlockedPast = parseUnlockedPastMonths(nextConfig.unlockedPastMonths).filter(
       (m) => m < curMonth
     );
+    const validDayAdjustments = parseDayAdjustments(nextConfig.dayAdjustments);
     try {
       const boundedOutlets = nextConfig.outlets.slice(0, 100);
       await setDoc(doc(db, 'roleConfigs', roleId), {
@@ -70,6 +73,7 @@ export function useAdminManagementActions({
         ndays: Math.max(1, Math.min(60, Math.round(nextConfig.ndays))),
         ...(validOpenMonth ? { openUntilMonth: validOpenMonth } : {}),
         ...(validUnlockedPast.length > 0 ? { unlockedPastMonths: validUnlockedPast } : {}),
+        ...(validDayAdjustments.length > 0 ? { dayAdjustments: validDayAdjustments } : {}),
         tasks: nextConfig.tasks.slice(0, 30),
         outlets: boundedOutlets,
         outletsByPic: buildOutletsByPicMap(boundedOutlets),
@@ -115,6 +119,45 @@ export function useAdminManagementActions({
         await saveRoleConfig(rId, {
           ...currentCfg,
           unlockedPastMonths: nextList,
+        });
+      }
+    },
+    [currentAccount?.role, roleConfigs, saveRoleConfig]
+  );
+
+  const saveDayAdjustmentAllRoles = useCallback(
+    async (adjustment: WorkingDayAdjustment) => {
+      const uid = auth.currentUser?.uid;
+      if (!uid || currentAccount?.role !== 'admin') return;
+      const sanitized = parseDayAdjustments([adjustment]);
+      if (sanitized.length === 0) return;
+      const entry = sanitized[0];
+      const roleIds: OperationalRoleId[] = ['stock_accounting', 'gl', 'accounting'];
+      for (const rId of roleIds) {
+        const currentCfg = roleConfigs[rId] || DEFAULT_ROLE_CONFIGS[rId];
+        const prevList = currentCfg.dayAdjustments || [];
+        const nextList = [entry, ...prevList.filter((a) => a.id !== entry.id)];
+        await saveRoleConfig(rId, {
+          ...currentCfg,
+          dayAdjustments: nextList,
+        });
+      }
+    },
+    [currentAccount?.role, roleConfigs, saveRoleConfig]
+  );
+
+  const deleteDayAdjustmentAllRoles = useCallback(
+    async (adjustmentId: string) => {
+      const uid = auth.currentUser?.uid;
+      if (!uid || currentAccount?.role !== 'admin') return;
+      const roleIds: OperationalRoleId[] = ['stock_accounting', 'gl', 'accounting'];
+      for (const rId of roleIds) {
+        const currentCfg = roleConfigs[rId] || DEFAULT_ROLE_CONFIGS[rId];
+        const prevList = currentCfg.dayAdjustments || [];
+        if (!prevList.some((a) => a.id === adjustmentId)) continue;
+        await saveRoleConfig(rId, {
+          ...currentCfg,
+          dayAdjustments: prevList.filter((a) => a.id !== adjustmentId),
         });
       }
     },
@@ -349,6 +392,8 @@ export function useAdminManagementActions({
     saveRoleConfig,
     saveOpenUntilMonthAllRoles,
     togglePastMonthAllRoles,
+    saveDayAdjustmentAllRoles,
+    deleteDayAdjustmentAllRoles,
     saveAccount,
     deleteAccount,
     importWorkspaceData,

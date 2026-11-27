@@ -155,7 +155,7 @@ service cloud.firestore {
 
     function isValidRoleConfig(data) {
       return data.keys().hasAll(['roleId', 'label', 'start', 'ndays', 'tasks', 'outlets', 'updatedAt', 'updatedBy'])
-        && data.keys().hasOnly(['roleId', 'label', 'start', 'ndays', 'openUntilMonth', 'unlockedPastMonths', 'tasks', 'outlets', 'outletsByPic', 'updatedAt', 'updatedBy'])
+        && data.keys().hasOnly(['roleId', 'label', 'start', 'ndays', 'openUntilMonth', 'unlockedPastMonths', 'tasks', 'outlets', 'outletsByPic', 'dayAdjustments', 'updatedAt', 'updatedBy'])
         && data.roleId is string && isOperationalRole(data.roleId)
         && data.label is string && data.label.size() >= 2 && data.label.size() <= 60
         && data.start is string && data.start.size() == 10 && data.start.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
@@ -169,6 +169,18 @@ service cloud.firestore {
         && (!('outletsByPic' in data) || (
           data.outletsByPic is map
           && data.outletsByPic.size() <= 100
+        ))
+        && (!('dayAdjustments' in data) || (
+          data.dayAdjustments is list
+          && data.dayAdjustments.size() <= 200
+          && (data.dayAdjustments.size() == 0 || (
+            data.dayAdjustments[0] is map
+            && data.dayAdjustments[0].id is string && data.dayAdjustments[0].id.size() >= 1 && data.dayAdjustments[0].id.size() <= 64
+            && data.dayAdjustments[0].type is string && data.dayAdjustments[0].type in ['off_day', 'cuti_izin', 'cuti_bersama', 'libur_nasional']
+            && data.dayAdjustments[0].scope is string && data.dayAdjustments[0].scope in ['person', 'role', 'all']
+            && data.dayAdjustments[0].dateFrom is string && data.dayAdjustments[0].dateFrom.size() == 10 && data.dayAdjustments[0].dateFrom.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+            && data.dayAdjustments[0].dateTo is string && data.dayAdjustments[0].dateTo.size() == 10 && data.dayAdjustments[0].dateTo.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+          ))
         ))
         && data.tasks is list && data.tasks.size() <= 30
         && (data.tasks.size() == 0 || (
@@ -486,7 +498,7 @@ service cloud.firestore {
         && isAdmin()
         && incoming().roleId == existing().roleId
         && incoming().updatedAt == request.time
-        && incoming().diff(existing()).affectedKeys().hasOnly(['label', 'start', 'ndays', 'openUntilMonth', 'unlockedPastMonths', 'tasks', 'outlets', 'outletsByPic', 'updatedAt', 'updatedBy']);
+        && incoming().diff(existing()).affectedKeys().hasOnly(['label', 'start', 'ndays', 'openUntilMonth', 'unlockedPastMonths', 'tasks', 'outlets', 'outletsByPic', 'dayAdjustments', 'updatedAt', 'updatedBy']);
       allow delete: if false;
     }
 

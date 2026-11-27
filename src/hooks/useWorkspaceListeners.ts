@@ -39,6 +39,7 @@ import {
   normalizeCalendarVisibleTo,
   normalizeCalendarWeekdays,
   normalizeExcludedDates,
+  parseDayAdjustments,
   shiftMonthKey,
 } from '../utils/outletLogic';
 import { parseUnlockedPastMonths } from './useAdminManagementActions';
@@ -137,6 +138,7 @@ export function useWorkspaceListeners({
           const d = snap.data();
           const unlockedPastMonths = parseUnlockedPastMonths(d.unlockedPastMonths);
           const parsedOutletsByPic = parseOutletsByPic(d.outletsByPic);
+          const parsedDayAdjustments = parseDayAdjustments(d.dayAdjustments);
           const parsed: RoleConfig = {
             roleId: targetRole,
             label: String(d.label || DEFAULT_ROLE_CONFIGS[targetRole].label),
@@ -149,6 +151,7 @@ export function useWorkspaceListeners({
             tasks: Array.isArray(d.tasks) ? d.tasks : [],
             outlets: Array.isArray(d.outlets) ? d.outlets : [],
             ...(parsedOutletsByPic ? { outletsByPic: parsedOutletsByPic } : {}),
+            ...(parsedDayAdjustments.length > 0 ? { dayAdjustments: parsedDayAdjustments } : {}),
           };
           setRoleConfigs((prev) => ({ ...prev, [targetRole]: parsed }));
         } else {
@@ -218,6 +221,7 @@ export function useWorkspaceListeners({
               const d = snap.data();
               const unlockedPastMonths = parseUnlockedPastMonths(d.unlockedPastMonths);
               const parsedOutletsByPic = parseOutletsByPic(d.outletsByPic);
+              const parsedDayAdjustments = parseDayAdjustments(d.dayAdjustments);
               setRoleConfigs((prev) => ({
                 ...prev,
                 [rId]: {
@@ -232,6 +236,7 @@ export function useWorkspaceListeners({
                   tasks: Array.isArray(d.tasks) ? d.tasks : [],
                   outlets: Array.isArray(d.outlets) ? d.outlets : [],
                   ...(parsedOutletsByPic ? { outletsByPic: parsedOutletsByPic } : {}),
+                  ...(parsedDayAdjustments.length > 0 ? { dayAdjustments: parsedDayAdjustments } : {}),
                 },
               }));
             }

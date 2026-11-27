@@ -5,6 +5,7 @@ import {
   RoleConfig,
 } from '../types/outlet';
 import {
+  DAY_ADJUSTMENT_TYPE_LABELS,
   OPERATIONAL_ROLES,
   ROLE_LABELS,
   buildMonthsWorkingDays,
@@ -17,6 +18,7 @@ import {
   fmtDateTimeWithSeconds,
   fmtMonth,
   fmtWeek,
+  getAdjustmentForPersonDay,
   getPeopleMap,
   getPersonList,
   getSelectableMonths,
@@ -354,6 +356,8 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
         for (const { code: outlet, person } of cfg.outlets) {
           if (picFilter !== 'ALL' && person !== picFilter) continue;
           if (outletFilter !== 'ALL' && outlet !== outletFilter) continue;
+          const dayAdj = getAdjustmentForPersonDay(cfg.dayAdjustments, person, dayItem);
+          if (onlyPending && dayAdj) continue;
 
           for (const t of cfg.tasks) {
             const c = calcTask(ws, rDays, cfg.tasks, outlet, dayItem, t.key, today);
@@ -457,6 +461,31 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
             (o) => outletFilter === 'ALL' || o === outletFilter
           );
           if (outlets.length === 0) continue;
+          const dayAdj = getAdjustmentForPersonDay(cfg.dayAdjustments, person, dayItem);
+          if (dayAdj) {
+            const v = ws.visit[`${person}|${dayItem}`];
+            const visitEntries = v?.ok ? getVisitEntries(v) : [];
+            const visitedOutlets = Array.from(
+              new Set(visitEntries.map((e) => e.outlet).filter(Boolean))
+            ).join(', ');
+            rawRows.push({
+              key: `${dayItem}|${rId}|${person}`,
+              status: 'UPDATE',
+              cells: [
+                cfg.label,
+                fmtDateLong(dayItem),
+                person,
+                outlets.length,
+                0,
+                0,
+                0,
+                DAY_ADJUSTMENT_TYPE_LABELS[dayAdj.type],
+                v?.ok ? `${Math.max(1, visitEntries.length)}x` : '0x',
+                visitedOutlets || '-',
+              ],
+            });
+            continue;
+          }
 
           let completeOutlets = 0;
           let updatedTasks = 0;
@@ -683,6 +712,7 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
         let pmSum = 0;
 
         for (const d of activeWeekDays) {
+          if (getAdjustmentForPersonDay(cfg.dayAdjustments, person, d)) continue;
           for (const outlet of outlets) {
             for (const t of cfg.tasks) {
               const c = calcTask(ws, rDays, cfg.tasks, outlet, d, t.key, today);
@@ -741,6 +771,8 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
       'Periode',
       'PIC',
       'Jumlah Outlet',
+      'Hari Kerja Efektif',
+      'Hari Adjustment',
       'Total Update',
       'Total Pending',
       'Kepatuhan Tugas (%)',
@@ -766,7 +798,8 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
         personList,
         today,
         hasCustomRange ? effRangeFrom : undefined,
-        hasCustomRange ? effRangeTo : undefined
+        hasCustomRange ? effRangeTo : undefined,
+        cfg.dayAdjustments
       );
 
       for (const person of personList) {
@@ -780,7 +813,14 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
         let upd = 0;
         let pend = 0;
         let pmSum = 0;
+        let personEffectiveDays = 0;
+        let personAdjustedDays = 0;
         for (const d of evalDays) {
+          if (getAdjustmentForPersonDay(cfg.dayAdjustments, person, d)) {
+            personAdjustedDays++;
+            continue;
+          }
+          personEffectiveDays++;
           for (const outlet of outlets) {
             for (const t of cfg.tasks) {
               const c = calcTask(ws, rDays, cfg.tasks, outlet, d, t.key, today);
@@ -819,6 +859,8 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
             periodLabel,
             person,
             outlets.length,
+            personEffectiveDays,
+            personAdjustedDays,
             upd,
             pend,
             `${compliance}%`,
@@ -894,7 +936,8 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
             matchingTask.key,
             calcUpto,
             today,
-            hasCustomRange ? effRangeFrom : daysToCalc[0]
+            hasCustomRange ? effRangeFrom : daysToCalc[0],
+            cfg.dayAdjustments
           );
           totalPend += recap.pend;
           avgSum += recap.avg;

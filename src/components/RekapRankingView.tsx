@@ -2,12 +2,15 @@ import { AlertCircle, ArrowUpRight, CheckCircle2, Search } from 'lucide-react';
 import { useState } from 'react';
 import { OutletStoreState, RoleConfig } from '../types/outlet';
 import {
+  DAY_ADJUSTMENT_SHORT_LABELS,
+  DAY_ADJUSTMENT_TYPE_LABELS,
   calcRecap,
   calcTask,
   fmtDate,
   fmtMonth,
   fmtWeek,
   formatTaskDateByType,
+  getAdjustmentForPersonDay,
   getPersonList,
   getTaskInputType,
   nearestWorkingDay,
@@ -110,7 +113,8 @@ export function RekapRankingView({
         activeTaskKey,
         effectiveRecapDate,
         today,
-        effectiveFromDate
+        effectiveFromDate,
+        config.dayAdjustments
       )
     )
     .sort((a, b) => Number(a.hasAnyInput) - Number(b.hasAnyInput) || a.avg - b.avg);
@@ -367,7 +371,14 @@ export function RekapRankingView({
                               : 'text-emerald-700 dark:text-emerald-400'
                           }`}
                         >
-                          {row.avg > 0 ? `+${row.avg.toFixed(1)}` : row.avg.toFixed(1)}
+                          <div>
+                            {row.avg > 0 ? `+${row.avg.toFixed(1)}` : row.avg.toFixed(1)}
+                          </div>
+                          {(row.adjustedDays || 0) > 0 && (
+                            <div className="font-sans text-[10px] font-medium text-blue-700 dark:text-blue-400">
+                              {row.effectiveDays}/{row.totalDays} hr efektif
+                            </div>
+                          )}
                         </td>
                         <td className="px-4 py-3 text-right font-mono text-slate-700 tabular-nums dark:text-slate-300">
                           <div>{row.pend}</div>
@@ -398,8 +409,8 @@ export function RekapRankingView({
 
             <div className="border-t border-slate-100 px-5 py-3 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
               {recapDateMode === 'range'
-                ? 'Rata-rata telat = rata-rata nilai +/- hari kerja (Senin–Sabtu) pada rentang tanggal terpilih. Hari Minggu tidak masuk perhitungan.'
-                : 'Rata-rata telat = rata-rata nilai +/- hari kerja (Senin–Sabtu) sampai tanggal terpilih. Hari Minggu tidak masuk perhitungan maupun input harian.'}
+                ? 'Rata-rata telat = rata-rata nilai +/- hari kerja efektif (Senin–Sabtu) pada rentang tanggal terpilih. Hari Minggu dan hari adjustment (Off Day, Cuti/Izin, Cuti Bersama, Libur Nasional) tidak masuk pembagi KPI.'
+                : 'Rata-rata telat = rata-rata nilai +/- hari kerja efektif (Senin–Sabtu) sampai tanggal terpilih. Hari Minggu dan hari adjustment (Off Day, Cuti/Izin, Cuti Bersama, Libur Nasional) tidak masuk pembagi KPI.'}
             </div>
           </section>
         </>
@@ -458,7 +469,8 @@ export function RekapRankingView({
                           t.key,
                           effectiveRecapDate,
                           today,
-                          effectiveFromDate
+                          effectiveFromDate,
+                          config.dayAdjustments
                         );
                         return (
                           <td key={t.key} className="px-3 py-3 text-right font-mono tabular-nums">
@@ -473,6 +485,29 @@ export function RekapRankingView({
                             </div>
                             <div className="text-[11px] text-slate-400 dark:text-slate-500">
                               {r.pend > 0 ? `${r.pend} pend` : 'Lengkap'}
+                              {(r.adjustedDays || 0) > 0 ? ` · ${r.effectiveDays}hr` : ''}
+                            </div>
+                          </td>
+                        );
+                      }
+
+                      const dayAdj = getAdjustmentForPersonDay(
+                        config.dayAdjustments,
+                        person,
+                        activeDayForMatrix
+                      );
+                      if (dayAdj) {
+                        return (
+                          <td
+                            key={t.key}
+                            title={DAY_ADJUSTMENT_TYPE_LABELS[dayAdj.type]}
+                            className="px-3 py-3 text-right font-mono tabular-nums"
+                          >
+                            <div className="font-semibold text-blue-700 dark:text-blue-400">
+                              {DAY_ADJUSTMENT_SHORT_LABELS[dayAdj.type]}
+                            </div>
+                            <div className="text-[11px] text-slate-400 dark:text-slate-500">
+                              Adj
                             </div>
                           </td>
                         );

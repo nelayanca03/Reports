@@ -6,9 +6,11 @@ import {
   ChevronRight,
   Eye,
   ImageDown,
+  Pencil,
   Plus,
   RotateCcw,
   Search,
+  Trash2,
   X,
 } from 'lucide-react';
 import { FormEvent, useMemo, useState } from 'react';
@@ -100,7 +102,7 @@ export function SavedRecordsSection({
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; message: string } | null>(null);
 
   const [viewingRecord, setViewingRecord] = useState<SavedRecord | null>(null);
-  const [confirmDeleteOpen, setConfirmDeleteOpen] = useState(false);
+  const [deletingRecord, setDeletingRecord] = useState<SavedRecord | null>(null);
 
   const [formOpen, setFormOpen] = useState(false);
   const [editingRecord, setEditingRecord] = useState<SavedRecord | null>(null);
@@ -586,14 +588,39 @@ export function SavedRecordsSection({
                       {rec.outlet}
                     </td>
                     <td className="px-4 py-3 text-right whitespace-nowrap">
-                      <button
-                        type="button"
-                        onClick={() => setViewingRecord(rec)}
-                        className="inline-flex min-h-[32px] items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-100 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
-                      >
-                        <Eye className="h-3.5 w-3.5" />
-                        <span>View</span>
-                      </button>
+                      <div className="inline-flex items-center justify-end gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setViewingRecord(rec)}
+                          aria-label={`Lihat detail ${rec.refCode}`}
+                          title="Lihat detail"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-100 hover:text-slate-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 dark:hover:text-slate-100"
+                        >
+                          <Eye className="h-3.5 w-3.5" />
+                        </button>
+                        {canManage && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => openEditModal(rec)}
+                              aria-label={`Edit data ${rec.refCode}`}
+                              title="Edit"
+                              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-blue-800 dark:hover:bg-blue-950/50 dark:hover:text-blue-400"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setDeletingRecord(rec)}
+                              aria-label={`Hapus data ${rec.refCode}`}
+                              title="Hapus"
+                              className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:border-red-900/60 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -637,7 +664,9 @@ export function SavedRecordsSection({
         canManage={canManage}
         onClose={() => setViewingRecord(null)}
         onEdit={openEditModal}
-        onRequestDelete={() => setConfirmDeleteOpen(true)}
+        onRequestDelete={() => {
+          if (viewingRecord) setDeletingRecord(viewingRecord);
+        }}
         onOpenExportPhotoForRecord={onOpenExportPhotoForRecord}
       />
 
@@ -666,18 +695,21 @@ export function SavedRecordsSection({
       )}
 
       <ConfirmModal
-        open={confirmDeleteOpen && Boolean(viewingRecord)}
-        title={`Hapus data ${viewingRecord?.refCode || ''}?`}
+        open={Boolean(deletingRecord)}
+        title={`Hapus data ${deletingRecord?.refCode || ''}?`}
         description="Data yang dihapus tidak dapat dikembalikan dan nomor kode referensi tidak akan digunakan ulang oleh sistem."
         confirmLabel="Ya, Hapus Data"
         destructive
-        onCancel={() => setConfirmDeleteOpen(false)}
+        onCancel={() => setDeletingRecord(null)}
         onConfirm={async () => {
-          if (!viewingRecord) return;
-          const deletedCode = viewingRecord.refCode;
-          await onDeleteRecord(viewingRecord.id);
-          setConfirmDeleteOpen(false);
-          setViewingRecord(null);
+          if (!deletingRecord) return;
+          const deletedId = deletingRecord.id;
+          const deletedCode = deletingRecord.refCode;
+          await onDeleteRecord(deletedId);
+          setDeletingRecord(null);
+          if (viewingRecord?.id === deletedId) {
+            setViewingRecord(null);
+          }
           setFeedback({
             type: 'ok',
             message: `Data ${deletedCode} berhasil dihapus.`,

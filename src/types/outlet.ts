@@ -24,6 +24,24 @@ export interface OutletAssignment {
   person: string;
 }
 
+export type DayAdjustmentType =
+  | 'off_day'
+  | 'cuti_izin'
+  | 'cuti_bersama'
+  | 'libur_nasional';
+
+export type DayAdjustmentScope = 'person' | 'role' | 'all';
+
+export interface WorkingDayAdjustment {
+  id: string;
+  type: DayAdjustmentType;
+  scope: DayAdjustmentScope;
+  pic?: string;
+  dateFrom: string;
+  dateTo: string;
+  note?: string;
+}
+
 export interface RoleConfig {
   roleId: OperationalRoleId;
   label: string;
@@ -34,6 +52,7 @@ export interface RoleConfig {
   tasks: TaskDefinition[];
   outlets: OutletAssignment[];
   outletsByPic?: Record<string, string[]>;
+  dayAdjustments?: WorkingDayAdjustment[];
 }
 
 export interface AccountProfile {
@@ -131,6 +150,9 @@ export interface OutletRecap {
   latestNote: string;
   hasAnyInput: boolean;
   backfillCount: number;
+  effectiveDays?: number;
+  totalDays?: number;
+  adjustedDays?: number;
 }
 
 export interface VisitPersonStats {
@@ -138,6 +160,7 @@ export interface VisitPersonStats {
   visitedCount: number;
   totalVisits: number;
   elapsedDays: number;
+  adjustedDays?: number;
   rate: number;
 }
 

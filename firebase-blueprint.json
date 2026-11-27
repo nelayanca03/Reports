@@ -127,6 +127,10 @@
           "type": "object",
           "description": "Map of uppercase PIC name to list of assigned outlet codes for rule enforcement"
         },
+        "dayAdjustments": {
+          "type": "array",
+          "description": "Bounded list of working-day adjustments (off_day, cuti_izin, cuti_bersama, libur_nasional) scoped by person, role, or all"
+        },
         "updatedAt": {
           "type": "string",
           "format": "date-time",

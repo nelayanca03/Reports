@@ -229,18 +229,6 @@ export function InputHarianDailyModal({
             </div>
           )}
 
-          {canEditDay && isAdmin && selectedDayAlreadyFilled && selectedDay < today && (
-            <div
-              role="status"
-              className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-blue-200 bg-blue-50/70 px-4 py-2.5 text-xs text-blue-900 dark:border-blue-900/70 dark:bg-blue-950/35 dark:text-blue-200"
-            >
-              <span>
-                <span className="font-semibold">Mode Koreksi Admin</span> · Data {activeOutlet} pada{' '}
-                {fmtDateLong(selectedDay)} sudah terisi sebelumnya. Admin tetap dapat mengoreksi data ini tanpa penalti isi mundur.
-              </span>
-            </div>
-          )}
-
           <section className="rounded-xl border border-slate-200 bg-white p-4 sm:p-5 dark:border-slate-800 dark:bg-slate-900">
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
               <div>
