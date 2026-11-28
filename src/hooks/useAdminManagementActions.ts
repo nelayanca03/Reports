@@ -14,7 +14,14 @@ import {
   writeBatch,
 } from 'firebase/firestore';
 import { useCallback } from 'react';
-import { OperationType, auth, db, emailToAccountId, handleFirestoreError } from '../firebase';
+import {
+  BOOTSTRAPPED_ADMIN_EMAIL,
+  OperationType,
+  auth,
+  db,
+  emailToAccountId,
+  handleFirestoreError,
+} from '../firebase';
 import {
   AccountProfile,
   AccountRole,
@@ -191,6 +198,9 @@ export function useAdminManagementActions({
       const uid = auth.currentUser?.uid;
       if (!uid) return;
       const email = input.email.trim().toLowerCase();
+      const isOwnerEmail = email === BOOTSTRAPPED_ADMIN_EMAIL;
+      const effectiveRole: AccountRole = isOwnerEmail ? 'admin' : input.role;
+      const effectiveActive = isOwnerEmail ? true : input.active;
       const accId = emailToAccountId(email);
       const accPath = `accounts/${accId}`;
       const accRef = doc(db, 'accounts', accId);
@@ -200,27 +210,27 @@ export function useAdminManagementActions({
         const cleanName = input.name.trim().slice(0, 80);
         const cleanPic = input.picName.trim().slice(0, 60);
         const validRefPrefix =
-          input.role === 'accounting' && (input.refPrefix === 'SA' || input.refPrefix === 'GL')
+          effectiveRole === 'accounting' && (input.refPrefix === 'SA' || input.refPrefix === 'GL')
             ? input.refPrefix
             : undefined;
 
         if (existingSnap.exists()) {
           await updateDoc(accRef, {
             name: cleanName,
-            role: input.role,
+            role: effectiveRole,
             picName: cleanPic,
             refPrefix: validRefPrefix ? validRefPrefix : deleteField(),
-            active: input.active,
+            active: effectiveActive,
             updatedAt: serverTimestamp(),
           });
         } else {
           await setDoc(accRef, {
             email,
             name: cleanName,
-            role: input.role,
+            role: effectiveRole,
             picName: cleanPic,
             ...(validRefPrefix ? { refPrefix: validRefPrefix } : {}),
-            active: input.active,
+            active: effectiveActive,
             createdAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
             createdBy: uid,
@@ -237,10 +247,10 @@ export function useAdminManagementActions({
             [accId]: {
               email,
               name: cleanName,
-              role: input.role,
+              role: effectiveRole,
               picName: cleanPic,
               ...(validRefPrefix ? { refPrefix: validRefPrefix } : {}),
-              active: input.active,
+              active: effectiveActive,
             },
           },
           updatedAt: serverTimestamp(),

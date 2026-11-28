@@ -1927,6 +1927,52 @@ export function isValidCalendarReturnTime(time: string): boolean {
   return /^([01]\d|2[0-3]):[0-5]\d$/.test(time);
 }
 
+export function currentWibDateTime(nowMs: number = Date.now()): {
+  dateIso: string;
+  timeHm: string;
+} {
+  const wib = new Date(nowMs + 7 * 3600 * 1000);
+  const yyyy = wib.getUTCFullYear();
+  const mm = String(wib.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(wib.getUTCDate()).padStart(2, '0');
+  const hh = String(wib.getUTCHours()).padStart(2, '0');
+  const min = String(wib.getUTCMinutes()).padStart(2, '0');
+  return {
+    dateIso: `${yyyy}-${mm}-${dd}`,
+    timeHm: `${hh}:${min}`,
+  };
+}
+
+export function validateAssignReturnTimeTiming(params: {
+  assignDate: string;
+  startTime?: string;
+  returnTime: string;
+  isAdmin?: boolean;
+  nowWib?: { dateIso: string; timeHm: string };
+}): string | null {
+  const { assignDate, startTime, returnTime, isAdmin = false } = params;
+  const cleanReturn = (returnTime || '').trim();
+  if (!CALENDAR_TIME_SLOTS.includes(cleanReturn)) {
+    return 'Pilih jam pulang antara 08:00 – 19:00 WIB (kelipatan 30 menit).';
+  }
+  const cleanStart = (startTime || '').trim();
+  if (cleanStart && /^\d{2}:\d{2}$/.test(cleanStart) && cleanReturn < cleanStart) {
+    return `Jam pulang (${cleanReturn} WIB) tidak boleh lebih awal dari jam berangkat (${cleanStart} WIB).`;
+  }
+  if (!isAdmin) {
+    const now = params.nowWib || currentWibDateTime();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(assignDate)) {
+      if (assignDate > now.dateIso) {
+        return `Tidak dapat menginput jam pulang untuk tanggal masa depan (${fmtDateSlash(assignDate)}). Waktu saat ini masih ${fmtDateSlash(now.dateIso)} pukul ${now.timeHm} WIB.`;
+      }
+      if (assignDate === now.dateIso && cleanReturn > now.timeHm) {
+        return `Tidak dapat menginput jam pulang di masa depan (${cleanReturn} WIB) karena waktu saat ini masih pukul ${now.timeHm} WIB.`;
+      }
+    }
+  }
+  return null;
+}
+
 export function getAccountPicUpper(
   account: Pick<AccountProfile, 'picName' | 'name'> | null | undefined
 ): string {

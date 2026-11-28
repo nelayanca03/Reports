@@ -58,41 +58,220 @@ function colLettersToIndex(letters: string): number {
   return Math.max(0, idx - 1);
 }
 
-async function inflateRawBytes(compressed: Uint8Array): Promise<Uint8Array> {
-  if (typeof DecompressionStream === 'undefined') {
-    throw new Error('Browser tidak mendukung ekstraksi XLSX. Gunakan format CSV sebagai alternatif.');
-  }
-  const stream = new DecompressionStream('deflate-raw');
-  const writer = stream.writable.getWriter();
-  const safeCopy = new Uint8Array(compressed.byteLength);
-  safeCopy.set(compressed);
-  await writer.write(safeCopy);
-  await writer.close();
+// Synchronous RFC-1951 raw DEFLATE decompressor — eliminates browser DecompressionStream backpressure deadlocks
+const FIXED_LIT_LENGTHS = new Uint8Array(288);
+for (let i = 0; i <= 143; i++) FIXED_LIT_LENGTHS[i] = 8;
+for (let i = 144; i <= 255; i++) FIXED_LIT_LENGTHS[i] = 9;
+for (let i = 256; i <= 279; i++) FIXED_LIT_LENGTHS[i] = 7;
+for (let i = 280; i <= 287; i++) FIXED_LIT_LENGTHS[i] = 8;
 
-  const reader = stream.readable.getReader();
-  const chunks: Uint8Array[] = [];
-  let total = 0;
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    if (value) {
-      chunks.push(value);
-      total += value.byteLength;
-      if (total > 20 * 1024 * 1024) {
-        throw new Error('Isi file XLSX terlalu besar untuk diproses.');
-      }
-    }
-  }
-  const merged = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    merged.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return merged;
+const FIXED_DIST_LENGTHS = new Uint8Array(32);
+FIXED_DIST_LENGTHS.fill(5);
+
+const LENGTH_BASE = [
+  3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31,
+  35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258,
+];
+const LENGTH_EXTRA = [
+  0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2,
+  3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0,
+];
+const DIST_BASE = [
+  1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193,
+  257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577,
+];
+const DIST_EXTRA = [
+  0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6,
+  7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13,
+];
+const CODE_LENGTH_ORDER = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15];
+
+interface HuffmanTable {
+  counts: Int32Array;
+  symbols: Int32Array;
 }
 
-async function extractZipEntries(bytes: Uint8Array): Promise<Map<string, Uint8Array>> {
+function buildHuffmanTable(lengths: Uint8Array, numSymbols: number): HuffmanTable {
+  const counts = new Int32Array(16);
+  for (let i = 0; i < numSymbols; i++) {
+    const len = lengths[i];
+    if (len > 0 && len < 16) counts[len]++;
+  }
+  const offsets = new Int32Array(16);
+  let total = 0;
+  for (let len = 1; len < 16; len++) {
+    offsets[len] = total;
+    total += counts[len];
+  }
+  const symbols = new Int32Array(total);
+  for (let i = 0; i < numSymbols; i++) {
+    const len = lengths[i];
+    if (len > 0 && len < 16) {
+      symbols[offsets[len]++] = i;
+    }
+  }
+  return { counts, symbols };
+}
+
+const FIXED_LIT_TABLE = buildHuffmanTable(FIXED_LIT_LENGTHS, 288);
+const FIXED_DIST_TABLE = buildHuffmanTable(FIXED_DIST_LENGTHS, 32);
+
+export function inflateRawBytesSync(compressed: Uint8Array): Uint8Array {
+  let bitPos = 0;
+  const maxBits = compressed.byteLength * 8;
+
+  const readBits = (n: number): number => {
+    let val = 0;
+    for (let i = 0; i < n; i++) {
+      if (bitPos >= maxBits) {
+        throw new Error('Data kompresi XLSX terpotong atau rusak.');
+      }
+      const byteIdx = bitPos >>> 3;
+      const bitIdx = bitPos & 7;
+      val |= ((compressed[byteIdx] >>> bitIdx) & 1) << i;
+      bitPos++;
+    }
+    return val;
+  };
+
+  const decodeSymbol = (table: HuffmanTable): number => {
+    let code = 0;
+    let first = 0;
+    let index = 0;
+    for (let len = 1; len < 16; len++) {
+      if (bitPos >= maxBits) {
+        throw new Error('Data simbol Huffman XLSX terpotong.');
+      }
+      code |= (compressed[bitPos >>> 3] >>> (bitPos & 7)) & 1;
+      bitPos++;
+      const count = table.counts[len];
+      if (code - count < first) {
+        return table.symbols[index + (code - first)];
+      }
+      index += count;
+      first += count;
+      first <<= 1;
+      code <<= 1;
+    }
+    throw new Error('Kode kompresi XLSX tidak valid.');
+  };
+
+  let out = new Uint8Array(Math.max(4096, compressed.byteLength * 3));
+  let outLen = 0;
+  const MAX_DECOMPRESSED = 20 * 1024 * 1024;
+
+  const ensureCapacity = (extra: number) => {
+    if (outLen + extra > MAX_DECOMPRESSED) {
+      throw new Error('Isi file XLSX terlalu besar untuk diproses.');
+    }
+    if (outLen + extra <= out.byteLength) return;
+    let nextCap = out.byteLength;
+    while (nextCap < outLen + extra) {
+      nextCap = Math.min(MAX_DECOMPRESSED, nextCap * 2);
+    }
+    const next = new Uint8Array(nextCap);
+    next.set(out.subarray(0, outLen));
+    out = next;
+  };
+
+  let isFinal = 0;
+  while (!isFinal) {
+    isFinal = readBits(1);
+    const blockType = readBits(2);
+
+    if (blockType === 0) {
+      // Uncompressed stored block: align to next byte boundary
+      bitPos = (bitPos + 7) & ~7;
+      const len = readBits(16);
+      const nlen = readBits(16);
+      if ((len ^ 0xffff) !== nlen) {
+        throw new Error('Blok data XLSX tidak konsisten.');
+      }
+      const bytePos = bitPos >>> 3;
+      if (bytePos + len > compressed.byteLength) {
+        throw new Error('Blok data XLSX melebihi ukuran file.');
+      }
+      ensureCapacity(len);
+      out.set(compressed.subarray(bytePos, bytePos + len), outLen);
+      outLen += len;
+      bitPos = (bytePos + len) * 8;
+    } else if (blockType === 1 || blockType === 2) {
+      let litTable = FIXED_LIT_TABLE;
+      let distTable = FIXED_DIST_TABLE;
+
+      if (blockType === 2) {
+        const hlit = readBits(5) + 257;
+        const hdist = readBits(5) + 1;
+        const hclen = readBits(4) + 4;
+        const codeLengths = new Uint8Array(19);
+        for (let i = 0; i < hclen; i++) {
+          codeLengths[CODE_LENGTH_ORDER[i]] = readBits(3);
+        }
+        const codeTable = buildHuffmanTable(codeLengths, 19);
+        const allLengths = new Uint8Array(hlit + hdist);
+        let idx = 0;
+        while (idx < hlit + hdist) {
+          const sym = decodeSymbol(codeTable);
+          if (sym < 16) {
+            allLengths[idx++] = sym;
+          } else if (sym === 16) {
+            const prev = idx > 0 ? allLengths[idx - 1] : 0;
+            const repeat = readBits(2) + 3;
+            for (let r = 0; r < repeat && idx < allLengths.length; r++) {
+              allLengths[idx++] = prev;
+            }
+          } else if (sym === 17) {
+            const repeat = readBits(3) + 3;
+            for (let r = 0; r < repeat && idx < allLengths.length; r++) {
+              allLengths[idx++] = 0;
+            }
+          } else if (sym === 18) {
+            const repeat = readBits(7) + 11;
+            for (let r = 0; r < repeat && idx < allLengths.length; r++) {
+              allLengths[idx++] = 0;
+            }
+          }
+        }
+        litTable = buildHuffmanTable(allLengths.subarray(0, hlit), hlit);
+        distTable = buildHuffmanTable(allLengths.subarray(hlit, hlit + hdist), hdist);
+      }
+
+      while (true) {
+        const sym = decodeSymbol(litTable);
+        if (sym === 256) break;
+        if (sym < 256) {
+          ensureCapacity(1);
+          out[outLen++] = sym;
+        } else {
+          const lenIdx = sym - 257;
+          if (lenIdx < 0 || lenIdx >= LENGTH_BASE.length) {
+            throw new Error('Kode panjang DEFLATE tidak valid.');
+          }
+          const copyLen = LENGTH_BASE[lenIdx] + (LENGTH_EXTRA[lenIdx] > 0 ? readBits(LENGTH_EXTRA[lenIdx]) : 0);
+          const distSym = decodeSymbol(distTable);
+          if (distSym < 0 || distSym >= DIST_BASE.length) {
+            throw new Error('Kode jarak DEFLATE tidak valid.');
+          }
+          const copyDist = DIST_BASE[distSym] + (DIST_EXTRA[distSym] > 0 ? readBits(DIST_EXTRA[distSym]) : 0);
+          if (copyDist > outLen) {
+            throw new Error('Referensi jarak DEFLATE keluar batas.');
+          }
+          ensureCapacity(copyLen);
+          for (let i = 0; i < copyLen; i++) {
+            out[outLen] = out[outLen - copyDist];
+            outLen++;
+          }
+        }
+      }
+    } else {
+      throw new Error('Tipe blok kompresi XLSX tidak dikenal.');
+    }
+  }
+
+  return out.subarray(0, outLen);
+}
+
+function extractZipEntriesSync(bytes: Uint8Array): Map<string, Uint8Array> {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const decoder = new TextDecoder('utf-8');
   const entries = new Map<string, Uint8Array>();
@@ -121,14 +300,15 @@ async function extractZipEntries(bytes: Uint8Array): Promise<Map<string, Uint8Ar
     const extraLen = view.getUint16(cdOffset + 30, true);
     const commentLen = view.getUint16(cdOffset + 32, true);
     const localHeaderOffset = view.getUint32(cdOffset + 42, true);
-    const name = decoder.decode(bytes.subarray(cdOffset + 46, cdOffset + 46 + fileNameLen));
+    const rawName = decoder.decode(bytes.subarray(cdOffset + 46, cdOffset + 46 + fileNameLen));
+    const normalizedName = rawName.replace(/\\/g, '/').replace(/^\/+/, '');
     cdOffset += 46 + fileNameLen + extraLen + commentLen;
 
-    // Only decompress XML files needed for spreadsheet parsing
-    const lowerName = name.toLowerCase();
+    // Only decompress XML files needed for spreadsheet parsing (sharedStrings + worksheets)
+    const lowerName = normalizedName.toLowerCase();
     if (
-      !lowerName.endsWith('.xml') &&
-      !lowerName.endsWith('.rels')
+      lowerName !== 'xl/sharedstrings.xml' &&
+      !lowerName.startsWith('xl/worksheets/')
     ) {
       continue;
     }
@@ -143,9 +323,9 @@ async function extractZipEntries(bytes: Uint8Array): Promise<Map<string, Uint8Ar
 
     const rawSlice = bytes.subarray(dataStart, dataEnd);
     if (method === 0) {
-      entries.set(name, rawSlice);
+      entries.set(lowerName, rawSlice);
     } else if (method === 8) {
-      entries.set(name, await inflateRawBytes(rawSlice));
+      entries.set(lowerName, inflateRawBytesSync(rawSlice));
     }
   }
 
@@ -174,19 +354,22 @@ function parseWorksheetRowsXml(xml: string, sharedStrings: string[]): string[][]
   const rowRegex = /<row\b[^>]*>([\s\S]*?)<\/row>/g;
   let rowMatch: RegExpExecArray | null;
 
+  // Match both paired <c ...>...</c> and self-closing <c .../> cells
   while ((rowMatch = rowRegex.exec(xml)) !== null) {
     const rowContent = rowMatch[1];
     const cells: string[] = [];
-    const cellRegex = /<c\b([^>]*)>([\s\S]*?)<\/c>/g;
+    const cellRegex = /<c\b([^>]*?)(?:\/>|>([\s\S]*?)<\/c>)/g;
     let cellMatch: RegExpExecArray | null;
     let fallbackCol = 0;
 
     while ((cellMatch = cellRegex.exec(rowContent)) !== null) {
-      const attrs = cellMatch[1];
-      const inner = cellMatch[2];
+      const attrs = cellMatch[1] || '';
+      const inner = cellMatch[2] || '';
       const refMatch = /\br="([A-Za-z]+)[0-9]+"/.exec(attrs);
       const colIdx = refMatch ? colLettersToIndex(refMatch[1].toUpperCase()) : fallbackCol;
       fallbackCol = colIdx + 1;
+
+      if (!inner) continue;
 
       const typeMatch = /\bt="([^"]+)"/.exec(attrs);
       const cellType = typeMatch ? typeMatch[1] : '';
@@ -223,6 +406,7 @@ function parseWorksheetRowsXml(xml: string, sharedStrings: string[]): string[][]
 
     if (cells.some((c) => c.trim().length > 0)) {
       rows.push(cells);
+      if (rows.length >= MAX_IMPORT_ROWS + 5) break;
     }
   }
 
@@ -234,10 +418,10 @@ export async function parseXlsxRows(buffer: ArrayBuffer | Uint8Array): Promise<s
     throw new Error('Ukuran file maksimal 5 MB.');
   }
   const bytes = buffer instanceof Uint8Array ? buffer : new Uint8Array(buffer);
-  const entries = await extractZipEntries(bytes);
+  const entries = extractZipEntriesSync(bytes);
   const decoder = new TextDecoder('utf-8');
 
-  const sharedBytes = entries.get('xl/sharedStrings.xml');
+  const sharedBytes = entries.get('xl/sharedstrings.xml');
   const sharedStrings = sharedBytes ? parseSharedStringsXml(decoder.decode(sharedBytes)) : [];
 
   let sheetBytes = entries.get('xl/worksheets/sheet1.xml');

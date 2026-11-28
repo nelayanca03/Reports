@@ -194,7 +194,14 @@ export function AdminAccountsView({
               required
               disabled={Boolean(editingEmail)}
               value={email}
-              onChange={(e) => setEmail(e.target.value)}
+              onChange={(e) => {
+                const nextEmail = e.target.value;
+                setEmail(nextEmail);
+                if (nextEmail.trim().toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL) {
+                  setRole('admin');
+                  setActive(true);
+                }
+              }}
               placeholder="nama@gmail.com"
               className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 disabled:opacity-60 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
             />
@@ -227,8 +234,11 @@ export function AdminAccountsView({
             </label>
             <select
               id="acc-role"
-              value={role}
-              disabled={editingEmail?.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL}
+              value={email.trim().toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL ? 'admin' : role}
+              disabled={
+                editingEmail?.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL ||
+                email.trim().toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL
+              }
               onChange={(e) => {
                 const nextRole = e.target.value as AccountRole;
                 setRole(nextRole);

@@ -23,10 +23,12 @@ import {
 import {
   CALENDAR_TIME_SLOTS,
   ROLE_LABELS,
+  currentWibDateTime,
   fmtDateSlash,
   fmtDateWeekdayLong,
   formatCalendarRecurrenceLabel,
   getEffectiveAssignResponse,
+  validateAssignReturnTimeTiming,
 } from '../../utils/outletLogic';
 import { ConfirmModal } from '../ConfirmModal';
 import { CalendarGridItem } from './calendarUtils';
@@ -115,8 +117,14 @@ export function KalenderDetailModal({
     if (!assignEvent) return;
     setResponseError(null);
     const trimmed = returnTimeInput.trim();
-    if (!CALENDAR_TIME_SLOTS.includes(trimmed)) {
-      setResponseError('Pilih jam pulang antara 08:00 – 19:00 WIB (kelipatan 30 menit).');
+    const timingErr = validateAssignReturnTimeTiming({
+      assignDate: selectedItem.occurrenceDate,
+      startTime: selectedItem.startTime,
+      returnTime: trimmed,
+      isAdmin,
+    });
+    if (timingErr) {
+      setResponseError(timingErr);
       return;
     }
     setResponseBusy(true);
@@ -438,43 +446,81 @@ export function KalenderDetailModal({
                   </div>
                 ) : (
                   <div className="mt-3 space-y-3">
-                    {(!isDivisionAssign || !isAdmin) && (
-                      <div className="flex flex-wrap items-end gap-2.5">
-                        <div className="min-w-[170px] flex-1">
-                          <label
-                            htmlFor="assign-return-time"
-                            className="mb-1 block text-[11px] font-semibold text-slate-600 dark:text-slate-300"
-                          >
-                            Jam Pulang dari Assign (08:00 – 19:00 WIB)
-                          </label>
-                          <select
-                            id="assign-return-time"
-                            value={returnTimeInput}
-                            onChange={(e) => setReturnTimeInput(e.target.value)}
-                            className="min-h-[38px] w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-mono text-xs font-semibold text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                          >
-                            <option value="">Pilih jam pulang...</option>
-                            {returnTimeInput && !CALENDAR_TIME_SLOTS.includes(returnTimeInput) && (
-                              <option value={returnTimeInput}>{returnTimeInput} WIB</option>
-                            )}
-                            {CALENDAR_TIME_SLOTS.map((slot) => (
-                              <option key={slot} value={slot}>
-                                {slot} WIB
-                              </option>
-                            ))}
-                          </select>
+                    {(!isDivisionAssign || !isAdmin) && (() => {
+                      const nowWib = currentWibDateTime();
+                      const isFutureDateForUser = !isAdmin && selectedItem.occurrenceDate > nowWib.dateIso;
+                      const isTodayForUser = !isAdmin && selectedItem.occurrenceDate === nowWib.dateIso;
+                      const isBeforeDepartureToday =
+                        isTodayForUser && nowWib.timeHm < selectedItem.startTime;
+
+                      if (isFutureDateForUser) {
+                        return (
+                          <div className="rounded-lg border border-amber-200 bg-amber-50/80 px-3 py-2 text-xs text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-200">
+                            Jam pulang belum dapat diisi karena tanggal penugasan (
+                            <span className="font-mono font-semibold">
+                              {fmtDateSlash(selectedItem.occurrenceDate)}
+                            </span>
+                            ) masih di masa depan.
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div className="space-y-1.5">
+                          <div className="flex flex-wrap items-end gap-2.5">
+                            <div className="min-w-[170px] flex-1">
+                              <label
+                                htmlFor="assign-return-time"
+                                className="mb-1 block text-[11px] font-semibold text-slate-600 dark:text-slate-300"
+                              >
+                                Jam Pulang dari Assign (08:00 – 19:00 WIB)
+                              </label>
+                              <select
+                                id="assign-return-time"
+                                disabled={isBeforeDepartureToday}
+                                value={returnTimeInput}
+                                onChange={(e) => setReturnTimeInput(e.target.value)}
+                                className="min-h-[38px] w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-mono text-xs font-semibold text-slate-900 focus:border-blue-600 focus:outline-none disabled:opacity-60 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                              >
+                                <option value="">Pilih jam pulang...</option>
+                                {returnTimeInput && !CALENDAR_TIME_SLOTS.includes(returnTimeInput) && (
+                                  <option value={returnTimeInput}>{returnTimeInput} WIB</option>
+                                )}
+                                {CALENDAR_TIME_SLOTS.map((slot) => {
+                                  const isBeforeStart = slot < selectedItem.startTime;
+                                  const isFutureSlot = isTodayForUser && slot > nowWib.timeHm;
+                                  const slotDisabled = isBeforeStart || isFutureSlot;
+                                  return (
+                                    <option key={slot} value={slot} disabled={slotDisabled}>
+                                      {slot} WIB
+                                      {isBeforeStart
+                                        ? ' (sebelum jam berangkat)'
+                                        : isFutureSlot
+                                          ? ` (belum lewat · sekarang ${nowWib.timeHm} WIB)`
+                                          : ''}
+                                    </option>
+                                  );
+                                })}
+                              </select>
+                            </div>
+                            <button
+                              type="button"
+                              disabled={responseBusy || isBeforeDepartureToday}
+                              onClick={handleSaveReturnTime}
+                              className="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
+                            >
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              <span>{responseBusy ? 'Menyimpan...' : 'Simpan Jam Pulang'}</span>
+                            </button>
+                          </div>
+                          {isBeforeDepartureToday && (
+                            <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                              Jam pulang baru dapat diinput setelah jam berangkat ({selectedItem.startTime} WIB). Waktu saat ini: {nowWib.timeHm} WIB.
+                            </p>
+                          )}
                         </div>
-                        <button
-                          type="button"
-                          disabled={responseBusy}
-                          onClick={handleSaveReturnTime}
-                          className="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg bg-emerald-600 px-4 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
-                        >
-                          <CheckCircle2 className="h-3.5 w-3.5" />
-                          <span>{responseBusy ? 'Menyimpan...' : 'Simpan Jam Pulang'}</span>
-                        </button>
-                      </div>
-                    )}
+                      );
+                    })()}
 
                     {!showCancelBox ? (
                       <div

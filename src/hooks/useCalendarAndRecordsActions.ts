@@ -35,6 +35,7 @@ import {
   normalizeCalendarWeekdays,
   normalizeExcludedDates,
   resolveAuthorizedRecordPrefix,
+  validateAssignReturnTimeTiming,
 } from '../utils/outletLogic';
 
 interface UseCalendarAndRecordsActionsParams {
@@ -404,6 +405,17 @@ export function useCalendarAndRecordsActions({
           throw new Error(
             'Jam pulang atau status assign sudah disimpan dan hanya dapat diubah oleh Admin.'
           );
+        }
+      }
+      if (input.assignStatus === 'completed' && evt) {
+        const timingErr = validateAssignReturnTimeTiming({
+          assignDate: evt.date,
+          startTime: evt.startTime,
+          returnTime: cleanReturnTime,
+          isAdmin: currentAccount.role === 'admin',
+        });
+        if (timingErr) {
+          throw new Error(timingErr);
         }
       }
       const evtPath = `calendarEvents/${cleanId}`;

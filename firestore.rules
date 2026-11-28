@@ -262,6 +262,11 @@ service cloud.firestore {
       return dateKeyFromShiftedTs(request.time + duration.value(7, 'h'));
     }
 
+    function currentWibTimeHm() {
+      let shifted = request.time + duration.value(7, 'h');
+      return pad2(shifted.hours()) + ':' + pad2(shifted.minutes());
+    }
+
     function currentWibMonthKey() {
       return currentWibDateKey()[0:7];
     }
@@ -843,6 +848,19 @@ service cloud.firestore {
       );
     }
 
+    function isNotFutureAssignReturnTime(prevData, status, returnTime) {
+      let todayWib = currentWibDateKey();
+      return status != 'completed' || (
+        returnTime is string
+        && returnTime != ''
+        && (!('startTime' in prevData) || !(prevData.startTime is string) || returnTime >= prevData.startTime)
+        && (
+          prevData.date < todayWib
+          || (prevData.date == todayWib && returnTime <= currentWibTimeHm())
+        )
+      );
+    }
+
     function canAccountUpdateCalendarEvent(acc, prevData, nextData) {
       let myPic = accountPicFromData(acc);
       let changedKeys = nextData.diff(prevData).affectedKeys();
@@ -861,13 +879,14 @@ service cloud.firestore {
           ])
           && (!changedKeys.hasAny(['dismissedBy']) || isValidDismissedByAppend(prevData, nextData))
         )
-        // Tier 2b (PIC Assign User): submit return time or cancel visit (one-time only; once completed/cancelled, only Admin can modify)
+        // Tier 2b (PIC Assign User): submit return time or cancel visit (one-time only; non-future return time)
         || (
           isAccountAssignedPic(acc, prevData)
           && (!('assignStatus' in prevData) || prevData.assignStatus == 'assigned')
           && nextData.assignStatus is string
           && nextData.assignStatus in ['completed', 'cancelled']
           && isValidAssignResponseFields(nextData)
+          && isNotFutureAssignReturnTime(prevData, nextData.assignStatus, nextData.returnTime)
           && changedKeys.hasOnly([
             'assignStatus', 'returnTime', 'cancelReason', 'notificationDismissed', 'dismissedBy',
             'updatedAt', 'updatedBy'
@@ -882,7 +901,7 @@ service cloud.firestore {
           ])
           && isValidDismissedByAppend(prevData, nextData)
         )
-        // Tier 3b (Division Assign Member): submit own return time or cancel own visit (one-time only; once completed/cancelled, only Admin can modify)
+        // Tier 3b (Division Assign Member): submit own return time or cancel own visit (one-time only; non-future return time)
         || (
           isAccountDivisionMember(acc, prevData)
           && (!('assignStatus' in prevData) || prevData.assignStatus != 'cancelled')
@@ -896,6 +915,7 @@ service cloud.firestore {
           && myPic in nextData.picResponses
           && isValidPicResponseEntry(nextData.picResponses[myPic])
           && nextData.picResponses[myPic].status in ['completed', 'cancelled']
+          && isNotFutureAssignReturnTime(prevData, nextData.picResponses[myPic].status, nextData.picResponses[myPic].returnTime)
           && (
             ('picResponses' in prevData && prevData.picResponses is map)
               ? (

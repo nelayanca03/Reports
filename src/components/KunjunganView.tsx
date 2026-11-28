@@ -13,6 +13,7 @@ import {
   CALENDAR_TIME_SLOTS,
   calcVisitLeaderboard,
   canAccountEditPic,
+  currentWibDateTime,
   fmtDateLong,
   formatPicTitle,
   getPeopleMap,
@@ -22,6 +23,7 @@ import {
   nearestWorkingDay,
   resolveAccountPic,
   todayIso,
+  validateAssignReturnTimeTiming,
 } from '../utils/outletLogic';
 import { KunjunganEntryList } from './kunjungan/KunjunganEntryList';
 import { KunjunganLeaderboardAndMatrix } from './kunjungan/KunjunganLeaderboardAndMatrix';
@@ -267,8 +269,14 @@ export function KunjunganView({
   const handleSaveAssignReturn = async (entry: VisitEntry) => {
     if (!entry.assignEventId || assignBusyId) return;
     const rawTime = (assignReturnInputs[entry.assignEventId] ?? entry.t ?? '').trim();
-    if (!CALENDAR_TIME_SLOTS.includes(rawTime)) {
-      setSaveError('Pilih jam pulang antara 08:00 – 19:00 WIB (kelipatan 30 menit).');
+    const timingErr = validateAssignReturnTimeTiming({
+      assignDate: activeDay,
+      startTime: entry.f,
+      returnTime: rawTime,
+      isAdmin,
+    });
+    if (timingErr) {
+      setSaveError(timingErr);
       return;
     }
     setAssignBusyId(entry.assignEventId);
@@ -635,53 +643,79 @@ export function KunjunganView({
                       )}
                     </div>
 
-                    {isPicOwner && (!isDone || isAdmin) ? (
-                      <div className="flex flex-wrap items-center gap-2">
-                        <label className="sr-only" htmlFor={`assign-ret-${evtId}`}>
-                          Jam Pulang (08:00 – 19:00 WIB)
-                        </label>
-                        <select
-                          id={`assign-ret-${evtId}`}
-                          disabled={isRowBusy}
-                          value={val}
-                          onChange={(e) =>
-                            setAssignReturnInputs((prev) => ({
-                              ...prev,
-                              [evtId]: e.target.value,
-                            }))
-                          }
-                          className="h-[36px] rounded-lg border border-slate-300 bg-slate-50 px-2.5 font-mono text-xs font-semibold text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-                        >
-                          <option value="">Pilih jam...</option>
-                          {val && !CALENDAR_TIME_SLOTS.includes(val) && (
-                            <option value={val}>{val} WIB</option>
+                    {isPicOwner && (!isDone || isAdmin) ? (() => {
+                      const nowWib = currentWibDateTime();
+                      const isFutureDateForUser = !isAdmin && activeDay > nowWib.dateIso;
+                      const isTodayForUser = !isAdmin && activeDay === nowWib.dateIso;
+                      const isBeforeDepartureToday =
+                        isTodayForUser && Boolean(entry.f) && nowWib.timeHm < entry.f;
+
+                      return (
+                        <div className="flex flex-wrap items-center gap-2">
+                          {isFutureDateForUser ? (
+                            <span className="rounded-lg border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] font-medium text-amber-800 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-300">
+                              Tanggal masa depan (belum bisa input pulang)
+                            </span>
+                          ) : (
+                            <>
+                              <label className="sr-only" htmlFor={`assign-ret-${evtId}`}>
+                                Jam Pulang (08:00 – 19:00 WIB)
+                              </label>
+                              <select
+                                id={`assign-ret-${evtId}`}
+                                disabled={isRowBusy || isBeforeDepartureToday}
+                                value={val}
+                                onChange={(e) =>
+                                  setAssignReturnInputs((prev) => ({
+                                    ...prev,
+                                    [evtId]: e.target.value,
+                                  }))
+                                }
+                                className="h-[36px] rounded-lg border border-slate-300 bg-slate-50 px-2.5 font-mono text-xs font-semibold text-slate-900 focus:border-blue-600 focus:outline-none disabled:opacity-60 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                              >
+                                <option value="">Pilih jam...</option>
+                                {val && !CALENDAR_TIME_SLOTS.includes(val) && (
+                                  <option value={val}>{val} WIB</option>
+                                )}
+                                {CALENDAR_TIME_SLOTS.map((slot) => {
+                                  const isBeforeStart = Boolean(entry.f) && slot < entry.f;
+                                  const isFutureSlot = isTodayForUser && slot > nowWib.timeHm;
+                                  const slotDisabled = isBeforeStart || isFutureSlot;
+                                  return (
+                                    <option key={slot} value={slot} disabled={slotDisabled}>
+                                      {slot} WIB
+                                      {isBeforeStart
+                                        ? ' (< berangkat)'
+                                        : isFutureSlot
+                                          ? ' (belum lewat)'
+                                          : ''}
+                                    </option>
+                                  );
+                                })}
+                              </select>
+                              <button
+                                type="button"
+                                disabled={isRowBusy || isBeforeDepartureToday}
+                                onClick={() => handleSaveAssignReturn(entry)}
+                                className="inline-flex h-[36px] items-center gap-1 rounded-lg bg-emerald-600 px-3 text-xs font-semibold text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
+                              >
+                                <CheckCircle2 className="h-3.5 w-3.5" />
+                                <span>{isRowBusy ? '...' : 'Simpan Pulang'}</span>
+                              </button>
+                            </>
                           )}
-                          {CALENDAR_TIME_SLOTS.map((slot) => (
-                            <option key={slot} value={slot}>
-                              {slot} WIB
-                            </option>
-                          ))}
-                        </select>
-                        <button
-                          type="button"
-                          disabled={isRowBusy}
-                          onClick={() => handleSaveAssignReturn(entry)}
-                          className="inline-flex h-[36px] items-center gap-1 rounded-lg bg-emerald-600 px-3 text-xs font-semibold text-white transition-colors hover:bg-emerald-700 disabled:opacity-50"
-                        >
-                          <CheckCircle2 className="h-3.5 w-3.5" />
-                          <span>{isRowBusy ? '...' : 'Simpan Pulang'}</span>
-                        </button>
-                        <button
-                          type="button"
-                          disabled={isRowBusy}
-                          onClick={() => handleCancelAssignVisit(entry)}
-                          className="inline-flex h-[36px] items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-3 text-xs font-semibold text-rose-700 transition-colors hover:bg-rose-100 disabled:opacity-50 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300 dark:hover:bg-rose-950/70"
-                        >
-                          <XCircle className="h-3.5 w-3.5" />
-                          <span>Tidak Jadi Pergi</span>
-                        </button>
-                      </div>
-                    ) : isDone ? (
+                          <button
+                            type="button"
+                            disabled={isRowBusy}
+                            onClick={() => handleCancelAssignVisit(entry)}
+                            className="inline-flex h-[36px] items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-3 text-xs font-semibold text-rose-700 transition-colors hover:bg-rose-100 disabled:opacity-50 dark:border-rose-900/60 dark:bg-rose-950/40 dark:text-rose-300 dark:hover:bg-rose-950/70"
+                          >
+                            <XCircle className="h-3.5 w-3.5" />
+                            <span>Tidak Jadi Pergi</span>
+                          </button>
+                        </div>
+                      );
+                    })() : isDone ? (
                       <span className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50/70 px-3 py-1.5 font-mono text-xs font-semibold text-emerald-800 dark:border-emerald-800/70 dark:bg-emerald-950/40 dark:text-emerald-300">
                         <Lock className="h-3.5 w-3.5" />
                         <span>Terkunci · Pulang {entry.t} WIB</span>

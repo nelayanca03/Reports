@@ -19,6 +19,7 @@ import {
   getPendingAssignNotifications,
   mergeAssignsIntoVisitMap,
   resolveAllAssignablePics,
+  validateAssignReturnTimeTiming,
 } from '../src/utils/outletLogic';
 
 function makeAssign(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
@@ -220,6 +221,78 @@ describe('PIC-specific calendar assigns & Kunjungan synchronization', () => {
     assert.equal(parsedDivCsv.validRows[0].assignedPic, '');
     assert.equal(parsedDivCsv.validRows[1].assignScope, 'division');
     assert.equal(parsedDivCsv.validRows[1].assignedDivision, 'gl');
+
+    // Test large deflate-compressed XLSX (>16KB uncompressed XML that previously deadlocked DecompressionStream)
+    const zlib = await import('node:zlib');
+    const { buildZip } = await import('../src/utils/exportDataset');
+    const longNotes = 'Catatan panjang Excel '.repeat(40);
+    const largeRows: string[][] = [];
+    for (let i = 0; i < 60; i++) {
+      largeRows.push([
+        '2026-11-28',
+        '10:00',
+        'Peter',
+        'Stock Accounting',
+        'DLS',
+        `Inventory Audit #${i + 1}`,
+        longNotes,
+      ]);
+    }
+    const baseUncompressedZip = buildXlsxWorkbook([
+      {
+        name: 'Assign',
+        columns: ['Tanggal', 'Jam', 'PIC', 'Divisi', 'Outlet', 'Judul Tugas', 'Catatan'],
+        rows: largeRows,
+      },
+    ]);
+    // Extract sheet1.xml from baseUncompressedZip, compress it with deflateRawSync, and build a method=8 ZIP
+    const baseParsed = await parseXlsxRows(baseUncompressedZip);
+    assert.equal(baseParsed.length, 61);
+    const sampleXml =
+      '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' +
+      '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>' +
+      '<row r="1">' +
+      '<c r="A1" t="inlineStr"><is><t>Tanggal</t></is></c>' +
+      '<c r="B1" t="inlineStr"><is><t>Jam</t></is></c>' +
+      '<c r="C1" t="inlineStr"><is><t>PIC</t></is></c>' +
+      '<c r="D1" t="inlineStr"><is><t>Divisi</t></is></c>' +
+      '<c r="E1" t="inlineStr"><is><t>Outlet</t></is></c>' +
+      '<c r="F1" t="inlineStr"><is><t>Judul Tugas</t></is></c>' +
+      '<c r="G1" t="inlineStr"><is><t>Catatan</t></is></c>' +
+      '</row>' +
+      Array.from({ length: 80 }, (_, idx) => {
+        const r = idx + 2;
+        return (
+          `<row r="${r}">` +
+          `<c r="A${r}" t="inlineStr"><is><t>2026-11-28</t></is></c>` +
+          `<c r="B${r}" t="inlineStr"><is><t>10:30</t></is></c>` +
+          `<c r="C${r}" t="inlineStr"><is><t>Peter</t></is></c>` +
+          `<c r="D${r}" s="0"/>` + // self-closing blank cell saved by Excel!
+          `<c r="E${r}" t="inlineStr"><is><t>DLS</t></is></c>` +
+          `<c r="F${r}" t="inlineStr"><is><t>Inventory ${r}</t></is></c>` +
+          `<c r="G${r}" t="inlineStr"><is><t>${longNotes}</t></is></c>` +
+          `</row>`
+        );
+      }).join('') +
+      '</sheetData></worksheet>';
+    const rawXmlBytes = new TextEncoder().encode(sampleXml);
+    assert.ok(rawXmlBytes.byteLength > 20000, 'Expected XML > 20KB to test buffer threshold');
+    const compressedXml = new Uint8Array(zlib.deflateRawSync(rawXmlBytes));
+    const { inflateRawBytesSync } = await import('../src/utils/assignImportExport');
+    const decompressedXml = inflateRawBytesSync(compressedXml);
+    assert.equal(decompressedXml.byteLength, rawXmlBytes.byteLength);
+    // Also verify buildZip + parseXlsxRows handles self-closing cells cleanly
+    const selfClosingZip = buildZip([
+      { name: 'xl/worksheets/sheet1.xml', content: sampleXml },
+    ]);
+    const parsedSelfClosing = parseAssignImportRows(
+      await parseXlsxRows(selfClosingZip),
+      assignablePics
+    );
+    assert.equal(parsedSelfClosing.errors.length, 0);
+    assert.equal(parsedSelfClosing.validRows.length, 80);
+    assert.equal(parsedSelfClosing.validRows[0].assignedOutlet, 'DLS');
+    assert.equal(parsedSelfClosing.validRows[0].title, 'Inventory 2');
   });
 
   it('supports Division assigns with per-PIC visits, per-PIC returnTime/cancel, and per-UID notifications', () => {
@@ -307,5 +380,63 @@ describe('PIC-specific calendar assigns & Kunjungan synchronization', () => {
     assert.ok(CALENDAR_TIME_SLOTS.includes('14:00'));
     assert.ok(!CALENDAR_TIME_SLOTS.includes('07:30'));
     assert.ok(!CALENDAR_TIME_SLOTS.includes('19:30'));
+  });
+
+  it('blocks non-admin users from submitting future returnTime or returnTime before startTime', () => {
+    const nowAt2Pm = { dateIso: '2026-12-01', timeHm: '14:00' };
+
+    // Assign on 1st at 09:00: cannot input 15:00 when current web time is still 14:00
+    const errFutureTime = validateAssignReturnTimeTiming({
+      assignDate: '2026-12-01',
+      startTime: '09:00',
+      returnTime: '15:00',
+      isAdmin: false,
+      nowWib: nowAt2Pm,
+    });
+    assert.ok(errFutureTime && errFutureTime.includes('masa depan'));
+
+    // Can input 14:00 or 13:30 when current web time is 14:00
+    assert.equal(
+      validateAssignReturnTimeTiming({
+        assignDate: '2026-12-01',
+        startTime: '09:00',
+        returnTime: '14:00',
+        isAdmin: false,
+        nowWib: nowAt2Pm,
+      }),
+      null
+    );
+
+    // Cannot input 08:30 when startTime is 09:00
+    const errBeforeStart = validateAssignReturnTimeTiming({
+      assignDate: '2026-12-01',
+      startTime: '09:00',
+      returnTime: '08:30',
+      isAdmin: false,
+      nowWib: nowAt2Pm,
+    });
+    assert.ok(errBeforeStart && errBeforeStart.includes('lebih awal dari jam berangkat'));
+
+    // Cannot input returnTime on a future date (e.g. 2026-12-02 when today is 2026-12-01)
+    const errFutureDate = validateAssignReturnTimeTiming({
+      assignDate: '2026-12-02',
+      startTime: '09:00',
+      returnTime: '11:00',
+      isAdmin: false,
+      nowWib: nowAt2Pm,
+    });
+    assert.ok(errFutureDate && errFutureDate.includes('tanggal masa depan'));
+
+    // Past assign date (2026-11-30) allows 15:00 even when current time today is 14:00
+    assert.equal(
+      validateAssignReturnTimeTiming({
+        assignDate: '2026-11-30',
+        startTime: '09:00',
+        returnTime: '15:00',
+        isAdmin: false,
+        nowWib: nowAt2Pm,
+      }),
+      null
+    );
   });
 });

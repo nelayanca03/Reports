@@ -142,6 +142,16 @@ export function useAuthAndRoleData() {
       } catch (error) {
         handleFirestoreError(error, OperationType.CREATE, accPath);
       }
+    } else if (accSnap.data().role !== 'admin' || accSnap.data().active !== true) {
+      try {
+        await updateDoc(accRef, {
+          role: 'admin',
+          active: true,
+          updatedAt: serverTimestamp(),
+        });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, accPath);
+      }
     }
 
     const dirPath = 'adminRegistry/accounts';
@@ -162,6 +172,25 @@ export function useAuthAndRoleData() {
           updatedAt: serverTimestamp(),
           updatedBy: user.uid,
         });
+      } else {
+        const prevMap = (dirSnap.data().accounts as Record<string, Record<string, unknown>>) || {};
+        const prevOwner = prevMap[accId];
+        if (!prevOwner || prevOwner.role !== 'admin' || prevOwner.active !== true) {
+          await setDoc(dirRef, {
+            accounts: {
+              ...prevMap,
+              [accId]: {
+                email,
+                name: prevOwner?.name || (accSnap.exists() ? accSnap.data().name : displayName),
+                role: 'admin',
+                picName: typeof prevOwner?.picName === 'string' ? prevOwner.picName : '',
+                active: true,
+              },
+            },
+            updatedAt: serverTimestamp(),
+            updatedBy: user.uid,
+          });
+        }
       }
     } catch (error) {
       handleFirestoreError(error, OperationType.WRITE, dirPath);
@@ -237,9 +266,10 @@ export function useAuthAndRoleData() {
       }
 
       const accId = emailToAccountId(email);
+      const isBootstrappedOwner = email === BOOTSTRAPPED_ADMIN_EMAIL;
 
       try {
-        if (email === BOOTSTRAPPED_ADMIN_EMAIL) {
+        if (isBootstrappedOwner) {
           await bootstrapOwnerEnvironment(user);
         }
 
@@ -255,12 +285,12 @@ export function useAuthAndRoleData() {
           id: accId,
           email: String(data.email || email),
           name: String(data.name || user.displayName || email),
-          role: (data.role as AccountRole) || 'stock_accounting',
+          role: isBootstrappedOwner ? 'admin' : ((data.role as AccountRole) || 'stock_accounting'),
           picName: String(data.picName || ''),
           ...(data.refPrefix === 'SA' || data.refPrefix === 'GL'
             ? { refPrefix: data.refPrefix as RecordPrefix }
             : {}),
-          active: Boolean(data.active),
+          active: isBootstrappedOwner ? true : Boolean(data.active),
         };
 
         if (!profile.active) {
