@@ -2641,7 +2641,7 @@ export function getPendingAssignNotifications(
   return calendarEvents
     .filter((evt) => {
       if (evt.eventType !== 'assign') return false;
-      if (evt.assignStatus === 'cancelled') return false;
+      if (evt.assignStatus === 'cancelled' || evt.assignStatus === 'completed') return false;
       const dismissedBy = evt.dismissedBy || [];
       if (currentUid && dismissedBy.includes(currentUid)) return false;
 
@@ -2649,7 +2649,7 @@ export function getPendingAssignNotifications(
         if (account.role === 'admin') return false;
         if (!evt.assignedDivision || evt.assignedDivision !== account.role) return false;
         const eff = getEffectiveAssignResponse(evt, myPicUpper);
-        if (eff.status === 'cancelled') return false;
+        if (eff.status === 'cancelled' || eff.status === 'completed') return false;
         return true;
       }
 

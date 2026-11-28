@@ -18,16 +18,52 @@ export function AssignNotificationBanner({
   onDismiss,
   onOpenEvent,
 }: AssignNotificationBannerProps) {
+  const [readStampMap, setReadStampMap] = useState<Record<string, string>>(() => {
+    try {
+      const raw = localStorage.getItem('outlet_read_assign_notifs_v1');
+      if (!raw) return {};
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? (parsed as Record<string, string>) : {};
+    } catch {
+      return {};
+    }
+  });
   const [busyIds, setBusyIds] = useState<Record<string, boolean>>({});
   const [closingAll, setClosingAll] = useState(false);
 
-  if (notifications.length === 0) return null;
+  const getEventStamp = (evt: CalendarEvent) =>
+    `${evt.id}|${evt.createdAtIso || evt.date}|${evt.startTime}`;
 
-  const handleDismissOne = async (eventId: string) => {
+  const markReadLocally = (eventsToMark: CalendarEvent[]) => {
+    setReadStampMap((prev) => {
+      const next = { ...prev };
+      for (const evt of eventsToMark) {
+        next[evt.id] = getEventStamp(evt);
+      }
+      try {
+        localStorage.setItem('outlet_read_assign_notifs_v1', JSON.stringify(next));
+      } catch {
+        // Ignore storage quota errors
+      }
+      return next;
+    });
+  };
+
+  const visibleNotifications = notifications.filter(
+    (evt) => readStampMap[evt.id] !== getEventStamp(evt)
+  );
+
+  if (visibleNotifications.length === 0) return null;
+
+  const handleDismissOne = async (evt: CalendarEvent) => {
+    const eventId = evt.id;
+    markReadLocally([evt]);
     if (busyIds[eventId]) return;
     setBusyIds((prev) => ({ ...prev, [eventId]: true }));
     try {
       await onDismiss(eventId);
+    } catch {
+      // Already marked as read locally so banner stays closed for the user
     } finally {
       setBusyIds((prev) => {
         const next = { ...prev };
@@ -38,11 +74,17 @@ export function AssignNotificationBanner({
   };
 
   const handleDismissAll = async () => {
+    const currentList = [...visibleNotifications];
+    markReadLocally(currentList);
     if (closingAll) return;
     setClosingAll(true);
     try {
-      for (const evt of notifications) {
-        await onDismiss(evt.id);
+      for (const evt of currentList) {
+        try {
+          await onDismiss(evt.id);
+        } catch {
+          // Continue syncing remaining items
+        }
       }
     } finally {
       setClosingAll(false);
@@ -63,7 +105,7 @@ export function AssignNotificationBanner({
           </span>
           <div className="min-w-0">
             <div className="text-xs font-bold tracking-wide uppercase">
-              Penugasan Baru ({notifications.length})
+              Penugasan Baru ({visibleNotifications.length})
             </div>
             <div className="truncate text-[11px] text-blue-100">
               Diurutkan dari terbaru · Notifikasi tetap muncul sampai Anda tutup
@@ -71,7 +113,7 @@ export function AssignNotificationBanner({
           </div>
         </div>
 
-        {notifications.length > 1 && (
+        {visibleNotifications.length > 1 && (
           <button
             type="button"
             disabled={closingAll}
@@ -84,7 +126,7 @@ export function AssignNotificationBanner({
       </div>
 
       <div className="max-h-[42vh] divide-y divide-slate-200 overflow-y-auto dark:divide-slate-800">
-        {notifications.map((evt) => {
+        {visibleNotifications.map((evt) => {
           const isBusy = Boolean(busyIds[evt.id]) || closingAll;
           return (
             <div
@@ -144,7 +186,7 @@ export function AssignNotificationBanner({
                 <button
                   type="button"
                   disabled={isBusy}
-                  onClick={() => handleDismissOne(evt.id)}
+                  onClick={() => handleDismissOne(evt)}
                   title="Tutup notifikasi ini"
                   aria-label={`Tutup notifikasi ${evt.title}`}
                   className="inline-flex h-8 items-center gap-1 rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-semibold text-slate-700 transition-colors hover:border-red-300 hover:bg-red-50 hover:text-red-700 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:border-red-800 dark:hover:bg-red-950/50 dark:hover:text-red-300"

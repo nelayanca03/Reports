@@ -21,6 +21,7 @@ import {
   PersonalReminder,
 } from '../../types/outlet';
 import {
+  CALENDAR_TIME_SLOTS,
   ROLE_LABELS,
   fmtDateSlash,
   fmtDateWeekdayLong,
@@ -114,8 +115,8 @@ export function KalenderDetailModal({
     if (!assignEvent) return;
     setResponseError(null);
     const trimmed = returnTimeInput.trim();
-    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(trimmed)) {
-      setResponseError('Masukkan jam pulang yang valid (format HH:MM, contoh 15:30).');
+    if (!CALENDAR_TIME_SLOTS.includes(trimmed)) {
+      setResponseError('Pilih jam pulang antara 08:00 – 19:00 WIB (kelipatan 30 menit).');
       return;
     }
     setResponseBusy(true);
@@ -406,24 +407,62 @@ export function KalenderDetailModal({
                   </div>
                 )}
 
-                {assignStatus !== 'cancelled' ? (
+                {assignStatus === 'cancelled' ? (
+                  <div className="mt-2 space-y-2.5">
+                    <p className="text-xs text-slate-600 dark:text-slate-300">
+                      Penugasan ini dibatalkan (tidak jadi pergi), sehingga tidak menambah kunjungan (0 kunjungan).
+                    </p>
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        disabled={responseBusy}
+                        onClick={handleReactivateAssign}
+                        className="inline-flex items-center gap-1.5 rounded-lg border border-blue-300 bg-white px-3 py-1.5 text-xs font-semibold text-blue-700 transition-colors hover:bg-blue-50 disabled:opacity-50 dark:border-blue-800 dark:bg-slate-900 dark:text-blue-300 dark:hover:bg-blue-950/60"
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" />
+                        <span>Aktifkan Kembali Assign</span>
+                      </button>
+                    )}
+                  </div>
+                ) : assignStatus === 'completed' && !isAdmin ? (
+                  <div className="mt-2.5 flex items-center gap-2.5 rounded-lg border border-emerald-200 bg-emerald-50/80 px-3.5 py-2.5 text-xs text-emerald-800 dark:border-emerald-800/70 dark:bg-emerald-950/40 dark:text-emerald-200">
+                    <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                    <div>
+                      <div className="font-semibold">
+                        Jam pulang sudah tercatat: <span className="font-mono">{effectiveReturnTime} WIB</span>
+                      </div>
+                      <div className="mt-0.5 text-[11px] text-emerald-700/90 dark:text-emerald-300/80">
+                        Data kepulangan sudah dikunci (Mode View). Hubungi Admin jika perlu perubahan.
+                      </div>
+                    </div>
+                  </div>
+                ) : (
                   <div className="mt-3 space-y-3">
                     {(!isDivisionAssign || !isAdmin) && (
                       <div className="flex flex-wrap items-end gap-2.5">
-                        <div className="min-w-[150px] flex-1">
+                        <div className="min-w-[170px] flex-1">
                           <label
                             htmlFor="assign-return-time"
                             className="mb-1 block text-[11px] font-semibold text-slate-600 dark:text-slate-300"
                           >
-                            Jam Pulang dari Assign (WIB)
+                            Jam Pulang dari Assign (08:00 – 19:00 WIB)
                           </label>
-                          <input
+                          <select
                             id="assign-return-time"
-                            type="time"
                             value={returnTimeInput}
                             onChange={(e) => setReturnTimeInput(e.target.value)}
                             className="min-h-[38px] w-full rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-mono text-xs font-semibold text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                          />
+                          >
+                            <option value="">Pilih jam pulang...</option>
+                            {returnTimeInput && !CALENDAR_TIME_SLOTS.includes(returnTimeInput) && (
+                              <option value={returnTimeInput}>{returnTimeInput} WIB</option>
+                            )}
+                            {CALENDAR_TIME_SLOTS.map((slot) => (
+                              <option key={slot} value={slot}>
+                                {slot} WIB
+                              </option>
+                            ))}
+                          </select>
                         </div>
                         <button
                           type="button"
@@ -496,23 +535,6 @@ export function KalenderDetailModal({
                           </button>
                         </div>
                       </div>
-                    )}
-                  </div>
-                ) : (
-                  <div className="mt-2 space-y-2.5">
-                    <p className="text-xs text-slate-600 dark:text-slate-300">
-                      Penugasan ini dibatalkan (tidak jadi pergi), sehingga tidak menambah kunjungan (0 kunjungan).
-                    </p>
-                    {isAdmin && (
-                      <button
-                        type="button"
-                        disabled={responseBusy}
-                        onClick={handleReactivateAssign}
-                        className="inline-flex items-center gap-1.5 rounded-lg border border-blue-300 bg-white px-3 py-1.5 text-xs font-semibold text-blue-700 transition-colors hover:bg-blue-50 disabled:opacity-50 dark:border-blue-800 dark:bg-slate-900 dark:text-blue-300 dark:hover:bg-blue-950/60"
-                      >
-                        <RotateCcw className="h-3.5 w-3.5" />
-                        <span>Aktifkan Kembali Assign</span>
-                      </button>
                     )}
                   </div>
                 )}

@@ -12,6 +12,7 @@ import {
 } from '../src/utils/assignImportExport';
 import { buildXlsxWorkbook } from '../src/utils/exportXlsx';
 import {
+  CALENDAR_TIME_SLOTS,
   DEFAULT_ROLE_CONFIGS,
   calcVisitLeaderboard,
   canUserViewCalendarEvent,
@@ -160,12 +161,13 @@ describe('PIC-specific calendar assigns & Kunjungan synchronization', () => {
     assert.equal(peterCancelled?.totalVisits, 1); // Only the manual 2026-11-25 visit remains
   });
 
-  it('sorts persistent assign notifications from newest to oldest and filters dismissed/cancelled', () => {
+  it('sorts persistent assign notifications from newest to oldest and filters dismissed/cancelled/completed', () => {
     const events: CalendarEvent[] = [
       makeAssign({ id: 'old', createdAtIso: '2026-11-25T08:00:00.000Z', notificationDismissed: false }),
       makeAssign({ id: 'newest', createdAtIso: '2026-11-26T10:30:00.000Z', notificationDismissed: false }),
       makeAssign({ id: 'mid', createdAtIso: '2026-11-26T07:00:00.000Z', notificationDismissed: false }),
       makeAssign({ id: 'dismissed', createdAtIso: '2026-11-26T11:00:00.000Z', notificationDismissed: true }),
+      makeAssign({ id: 'completed', createdAtIso: '2026-11-26T11:30:00.000Z', assignStatus: 'completed', returnTime: '17:00', notificationDismissed: false }),
       makeAssign({ id: 'cancelled', createdAtIso: '2026-11-26T12:00:00.000Z', assignStatus: 'cancelled' }),
       makeAssign({ id: 'other_pic', assignedPic: 'Habel', assignedPicUpper: 'HABEL', assignedEmail: 'habel@company.com' }),
     ];
@@ -295,5 +297,15 @@ describe('PIC-specific calendar assigns & Kunjungan synchronization', () => {
     assert.equal(merged['Charles|2026-11-26']?.ok, true);
     assert.equal(merged['Charles|2026-11-26']?.entries?.[0].t, '');
     assert.equal(merged['Habel|2026-11-26'], undefined); // Cancelled by Habel => 0 visits
+  });
+
+  it('provides 30-minute calendar time slots from 08:00 through 19:00', () => {
+    assert.equal(CALENDAR_TIME_SLOTS.length, 23);
+    assert.equal(CALENDAR_TIME_SLOTS[0], '08:00');
+    assert.equal(CALENDAR_TIME_SLOTS[1], '08:30');
+    assert.equal(CALENDAR_TIME_SLOTS[CALENDAR_TIME_SLOTS.length - 1], '19:00');
+    assert.ok(CALENDAR_TIME_SLOTS.includes('14:00'));
+    assert.ok(!CALENDAR_TIME_SLOTS.includes('07:30'));
+    assert.ok(!CALENDAR_TIME_SLOTS.includes('19:30'));
   });
 });

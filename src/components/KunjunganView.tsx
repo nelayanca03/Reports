@@ -1,5 +1,6 @@
 import { ArrowUpRight, CheckCircle2, Lock, Plus, Save, UserCheck, XCircle } from 'lucide-react';
 import { useState } from 'react';
+import { formatFriendlyFirestoreError } from '../firebase';
 import {
   AccountProfile,
   CalendarAssignStatus,
@@ -9,6 +10,7 @@ import {
   VisitItem,
 } from '../types/outlet';
 import {
+  CALENDAR_TIME_SLOTS,
   calcVisitLeaderboard,
   canAccountEditPic,
   fmtDateLong,
@@ -265,8 +267,8 @@ export function KunjunganView({
   const handleSaveAssignReturn = async (entry: VisitEntry) => {
     if (!entry.assignEventId || assignBusyId) return;
     const rawTime = (assignReturnInputs[entry.assignEventId] ?? entry.t ?? '').trim();
-    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(rawTime)) {
-      setSaveError('Masukkan jam pulang yang valid (format HH:MM, contoh 15:30).');
+    if (!CALENDAR_TIME_SLOTS.includes(rawTime)) {
+      setSaveError('Pilih jam pulang antara 08:00 – 19:00 WIB (kelipatan 30 menit).');
       return;
     }
     setAssignBusyId(entry.assignEventId);
@@ -282,7 +284,7 @@ export function KunjunganView({
       });
       setSavedNotice(`Jam pulang assign (${entry.outlet}) tersimpan: ${rawTime} WIB.`);
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Gagal menyimpan jam pulang assign.');
+      setSaveError(formatFriendlyFirestoreError(err, 'Gagal menyimpan jam pulang assign.'));
     } finally {
       setAssignBusyId(null);
     }
@@ -303,7 +305,7 @@ export function KunjunganView({
       });
       setSavedNotice(`Assign (${entry.outlet}) ditandai tidak jadi pergi (0 kunjungan).`);
     } catch (err) {
-      setSaveError(err instanceof Error ? err.message : 'Gagal membatalkan kunjungan assign.');
+      setSaveError(formatFriendlyFirestoreError(err, 'Gagal membatalkan kunjungan assign.'));
     } finally {
       setAssignBusyId(null);
     }
@@ -633,14 +635,13 @@ export function KunjunganView({
                       )}
                     </div>
 
-                    {isPicOwner && (
+                    {isPicOwner && (!isDone || isAdmin) ? (
                       <div className="flex flex-wrap items-center gap-2">
                         <label className="sr-only" htmlFor={`assign-ret-${evtId}`}>
-                          Jam Pulang
+                          Jam Pulang (08:00 – 19:00 WIB)
                         </label>
-                        <input
+                        <select
                           id={`assign-ret-${evtId}`}
-                          type="time"
                           disabled={isRowBusy}
                           value={val}
                           onChange={(e) =>
@@ -650,7 +651,17 @@ export function KunjunganView({
                             }))
                           }
                           className="h-[36px] rounded-lg border border-slate-300 bg-slate-50 px-2.5 font-mono text-xs font-semibold text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-                        />
+                        >
+                          <option value="">Pilih jam...</option>
+                          {val && !CALENDAR_TIME_SLOTS.includes(val) && (
+                            <option value={val}>{val} WIB</option>
+                          )}
+                          {CALENDAR_TIME_SLOTS.map((slot) => (
+                            <option key={slot} value={slot}>
+                              {slot} WIB
+                            </option>
+                          ))}
+                        </select>
                         <button
                           type="button"
                           disabled={isRowBusy}
@@ -670,7 +681,12 @@ export function KunjunganView({
                           <span>Tidak Jadi Pergi</span>
                         </button>
                       </div>
-                    )}
+                    ) : isDone ? (
+                      <span className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50/70 px-3 py-1.5 font-mono text-xs font-semibold text-emerald-800 dark:border-emerald-800/70 dark:bg-emerald-950/40 dark:text-emerald-300">
+                        <Lock className="h-3.5 w-3.5" />
+                        <span>Terkunci · Pulang {entry.t} WIB</span>
+                      </span>
+                    ) : null}
                   </div>
                 );
               })}

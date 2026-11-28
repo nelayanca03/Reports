@@ -583,8 +583,12 @@ service cloud.firestore {
 
     function isValidCalendarStartTime(t) {
       return t is string
-        && t.size() == 5
-        && t.matches('^((0[89]|1[0-8]):(00|30)|19:00)$');
+        && t in [
+          '08:00', '08:30', '09:00', '09:30', '10:00', '10:30',
+          '11:00', '11:30', '12:00', '12:30', '13:00', '13:30',
+          '14:00', '14:30', '15:00', '15:30', '16:00', '16:30',
+          '17:00', '17:30', '18:00', '18:30', '19:00'
+        ];
     }
 
     function isValidVisibleToList(arr) {
@@ -598,7 +602,11 @@ service cloud.firestore {
 
     function isValidCalendarReturnTime(t) {
       return t is string
-        && (t == '' || (t.size() == 5 && t.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$')));
+        && (
+          t == ''
+          || isValidCalendarStartTime(t)
+          || (t.size() == 5 && t.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$'))
+        );
     }
 
     function isValidPicResponseEntry(entry) {
@@ -775,13 +783,16 @@ service cloud.firestore {
 
     function isAccountAssignedPic(acc, data) {
       let picUpper = accountPicFromData(acc);
+      let nameUpper = ('name' in acc && acc.name is string) ? acc.name.trim().upper() : '';
       return acc.active == true
         && 'eventType' in data && data.eventType == 'assign'
         && (!('assignScope' in data) || data.assignScope != 'division')
         && (
-          (picUpper != '' && 'assignedPicUpper' in data && data.assignedPicUpper == picUpper)
-          || ('assignedEmail' in data && data.assignedEmail != ''
-            && data.assignedEmail == request.auth.token.email.lower())
+          (picUpper != '' && 'assignedPicUpper' in data && data.assignedPicUpper is string && data.assignedPicUpper.trim().upper() == picUpper)
+          || (picUpper != '' && 'assignedPic' in data && data.assignedPic is string && data.assignedPic.trim().upper() == picUpper)
+          || (nameUpper != '' && 'assignedPicUpper' in data && data.assignedPicUpper is string && data.assignedPicUpper.trim().upper() == nameUpper)
+          || ('assignedEmail' in data && data.assignedEmail is string && data.assignedEmail.trim() != ''
+            && data.assignedEmail.trim().lower() == request.auth.token.email.lower())
         );
     }
 
@@ -792,56 +803,91 @@ service cloud.firestore {
         && 'assignedDivision' in data && data.assignedDivision == acc.role;
     }
 
+    function isValidAssignResponseFields(nextData) {
+      return (!('assignStatus' in nextData) || (nextData.assignStatus is string && nextData.assignStatus in ['assigned', 'completed', 'cancelled']))
+        && (!('returnTime' in nextData) || isValidCalendarReturnTime(nextData.returnTime))
+        && (!('cancelReason' in nextData) || (nextData.cancelReason is string && nextData.cancelReason.size() <= 200))
+        && (!('notificationDismissed' in nextData) || nextData.notificationDismissed is bool)
+        && (!('dismissedBy' in nextData) || (nextData.dismissedBy is list && nextData.dismissedBy.size() <= 100))
+        && (!('picResponses' in nextData) || (nextData.picResponses is map && nextData.picResponses.size() <= 60));
+    }
+
+    function isImmutableCalendarCreator(prevData, nextData) {
+      return nextData.createdAt == prevData.createdAt
+        && nextData.createdBy == prevData.createdBy
+        && nextData.createdByEmail == prevData.createdByEmail
+        && nextData.createdByName == prevData.createdByName;
+    }
+
+    function canAdminUpdateCalendarEvent(prevData, nextData, changedKeys) {
+      return (
+        // Fast path: Admin updating assign status / returnTime / cancelReason / reactivation
+        changedKeys.hasOnly([
+          'assignStatus', 'returnTime', 'cancelReason', 'notificationDismissed',
+          'dismissedBy', 'picResponses', 'updatedAt', 'updatedBy'
+        ])
+        && isValidAssignResponseFields(nextData)
+      ) || (
+        // Full edit path: Admin editing event details
+        isValidCalendarEvent(nextData)
+        && isImmutableCalendarCreator(prevData, nextData)
+        && changedKeys.hasOnly([
+          'title', 'date', 'startTime', 'visibleTo', 'notes',
+          'eventType', 'assignScope', 'assignedDivision',
+          'assignedPic', 'assignedPicUpper', 'assignedEmail',
+          'assignedRole', 'assignedOutlet', 'assignStatus', 'returnTime',
+          'cancelReason', 'notificationDismissed', 'dismissedBy', 'picResponses',
+          'repeatFreq', 'repeatInterval', 'repeatUntil', 'repeatWeekdays', 'excludedDates',
+          'updatedAt', 'updatedBy'
+        ])
+      );
+    }
+
     function canAccountUpdateCalendarEvent(acc, prevData, nextData) {
       let myPic = accountPicFromData(acc);
+      let changedKeys = nextData.diff(prevData).affectedKeys();
       return acc.active == true && (
         // Tier 1 (Admin): full management of calendar assignments
         (
           acc.role == 'admin'
-          && nextData.diff(prevData).affectedKeys().hasOnly([
-            'title', 'date', 'startTime', 'visibleTo', 'notes',
-            'eventType', 'assignScope', 'assignedDivision',
-            'assignedPic', 'assignedPicUpper', 'assignedEmail',
-            'assignedRole', 'assignedOutlet', 'assignStatus', 'returnTime',
-            'cancelReason', 'notificationDismissed', 'dismissedBy', 'picResponses',
-            'repeatFreq', 'repeatInterval', 'repeatUntil', 'repeatWeekdays', 'excludedDates',
-            'updatedAt', 'updatedBy'
-          ])
+          && canAdminUpdateCalendarEvent(prevData, nextData, changedKeys)
         )
         // Tier 2a (PIC Assign User): explicitly dismiss persistent notification
         || (
           isAccountAssignedPic(acc, prevData)
           && nextData.notificationDismissed == true
-          && nextData.diff(prevData).affectedKeys().hasOnly([
+          && changedKeys.hasOnly([
             'notificationDismissed', 'dismissedBy', 'updatedAt', 'updatedBy'
           ])
-          && (!('dismissedBy' in nextData.diff(prevData).affectedKeys()) || isValidDismissedByAppend(prevData, nextData))
+          && (!changedKeys.hasAny(['dismissedBy']) || isValidDismissedByAppend(prevData, nextData))
         )
-        // Tier 2b (PIC Assign User): submit return time or cancel visit (not terminal yet)
+        // Tier 2b (PIC Assign User): submit return time or cancel visit (one-time only; once completed/cancelled, only Admin can modify)
         || (
           isAccountAssignedPic(acc, prevData)
-          && prevData.assignStatus != 'cancelled'
-          && nextData.assignStatus in ['assigned', 'completed', 'cancelled']
-          && nextData.diff(prevData).affectedKeys().hasOnly([
+          && (!('assignStatus' in prevData) || prevData.assignStatus == 'assigned')
+          && nextData.assignStatus is string
+          && nextData.assignStatus in ['completed', 'cancelled']
+          && isValidAssignResponseFields(nextData)
+          && changedKeys.hasOnly([
             'assignStatus', 'returnTime', 'cancelReason', 'notificationDismissed', 'dismissedBy',
             'updatedAt', 'updatedBy'
           ])
-          && (!('dismissedBy' in nextData.diff(prevData).affectedKeys()) || isValidDismissedByAppend(prevData, nextData))
+          && (!changedKeys.hasAny(['dismissedBy']) || isValidDismissedByAppend(prevData, nextData))
         )
         // Tier 3a (Division Assign Member): dismiss persistent notification for self only
         || (
           isAccountDivisionMember(acc, prevData)
-          && nextData.diff(prevData).affectedKeys().hasOnly([
+          && changedKeys.hasOnly([
             'dismissedBy', 'updatedAt', 'updatedBy'
           ])
           && isValidDismissedByAppend(prevData, nextData)
         )
-        // Tier 3b (Division Assign Member): submit own return time or cancel own visit
+        // Tier 3b (Division Assign Member): submit own return time or cancel own visit (one-time only; once completed/cancelled, only Admin can modify)
         || (
           isAccountDivisionMember(acc, prevData)
-          && prevData.assignStatus != 'cancelled'
+          && (!('assignStatus' in prevData) || prevData.assignStatus != 'cancelled')
           && myPic != ''
-          && nextData.diff(prevData).affectedKeys().hasOnly([
+          && changedKeys.hasOnly([
             'picResponses', 'dismissedBy', 'updatedAt', 'updatedBy'
           ])
           && 'picResponses' in nextData
@@ -849,16 +895,27 @@ service cloud.firestore {
           && nextData.picResponses.size() <= 60
           && myPic in nextData.picResponses
           && isValidPicResponseEntry(nextData.picResponses[myPic])
+          && nextData.picResponses[myPic].status in ['completed', 'cancelled']
           && (
             ('picResponses' in prevData && prevData.picResponses is map)
               ? (
                 nextData.picResponses.diff(prevData.picResponses).affectedKeys().hasOnly([myPic])
-                && (!(myPic in prevData.picResponses) || prevData.picResponses[myPic].status != 'cancelled')
+                && (!(myPic in prevData.picResponses) || prevData.picResponses[myPic].status == 'assigned')
               )
               : nextData.picResponses.keys().hasOnly([myPic])
           )
-          && (!('dismissedBy' in nextData.diff(prevData).affectedKeys()) || isValidDismissedByAppend(prevData, nextData))
+          && (!changedKeys.hasAny(['dismissedBy']) || isValidDismissedByAppend(prevData, nextData))
         )
+      );
+    }
+
+    function canUpdateCalendarEvent(prevData, nextData) {
+      let path = accountDocPath();
+      let changedKeys = nextData.diff(prevData).affectedKeys();
+      return (
+        isBootstrappedAdmin() && canAdminUpdateCalendarEvent(prevData, nextData, changedKeys)
+      ) || (
+        exists(path) && canAccountUpdateCalendarEvent(get(path).data, prevData, nextData)
       );
     }
 
@@ -876,20 +933,9 @@ service cloud.firestore {
         && incoming().updatedAt == request.time;
       allow update: if isVerifiedUser()
         && isValidId(eventId)
-        && isValidCalendarEvent(incoming())
-        && incoming().createdAt == existing().createdAt
-        && incoming().createdBy == existing().createdBy
-        && incoming().createdByEmail == existing().createdByEmail
-        && incoming().createdByName == existing().createdByName
         && incoming().updatedBy == request.auth.uid
         && incoming().updatedAt == request.time
-        && (
-          isBootstrappedAdmin()
-          || (
-            exists(accountDocPath())
-            && canAccountUpdateCalendarEvent(get(accountDocPath()).data, existing(), incoming())
-          )
-        );
+        && canUpdateCalendarEvent(existing(), incoming());
       allow delete: if isVerifiedUser() && isValidId(eventId) && isAdmin();
     }
 

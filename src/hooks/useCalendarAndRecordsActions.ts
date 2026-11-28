@@ -387,14 +387,25 @@ export function useCalendarAndRecordsActions({
       const cleanReturnTime = (input.returnTime || '').trim();
       if (input.assignStatus === 'completed') {
         if (!cleanReturnTime || !isValidCalendarReturnTime(cleanReturnTime)) {
-          throw new Error('Pilih atau masukkan jam pulang yang valid (HH:MM).');
+          throw new Error('Pilih jam pulang yang valid antara 08:00 – 19:00 (kelipatan 30 menit).');
         }
       } else if (cleanReturnTime && !isValidCalendarReturnTime(cleanReturnTime)) {
-        throw new Error('Format jam pulang harus HH:MM.');
+        throw new Error('Format jam pulang harus antara 08:00 – 19:00 (kelipatan 30 menit).');
       }
 
       const evt = calendarEvents.find((e) => e.id === cleanId);
       const isDivisionAssign = evt?.assignScope === 'division';
+      if (evt && currentAccount.role !== 'admin') {
+        const myPic = (input.targetPic || getAccountPicUpper(currentAccount)).trim().toUpperCase();
+        const prevStatus = isDivisionAssign
+          ? (myPic ? evt.picResponses?.[myPic]?.status : undefined) || evt.assignStatus
+          : evt.assignStatus;
+        if (prevStatus === 'completed' || prevStatus === 'cancelled') {
+          throw new Error(
+            'Jam pulang atau status assign sudah disimpan dan hanya dapat diubah oleh Admin.'
+          );
+        }
+      }
       const evtPath = `calendarEvents/${cleanId}`;
       const cleanCancelReason =
         input.assignStatus === 'cancelled'
@@ -457,8 +468,6 @@ export function useCalendarAndRecordsActions({
         };
         if (input.notificationDismissed === false) {
           payload.dismissedBy = [];
-        } else {
-          payload.dismissedBy = arrayUnion(uid);
         }
         await updateDoc(doc(db, 'calendarEvents', cleanId), payload);
       } catch (error) {
@@ -489,7 +498,6 @@ export function useCalendarAndRecordsActions({
         } else {
           await updateDoc(doc(db, 'calendarEvents', cleanId), {
             notificationDismissed: true,
-            dismissedBy: arrayUnion(uid),
             updatedAt: serverTimestamp(),
             updatedBy: uid,
           });

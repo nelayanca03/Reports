@@ -143,6 +143,12 @@ describe('firestore.rules structural invariants & blueprint sync', () => {
       /prevList\.size\(\) == 0 \|\| nextData\.dismissedBy\.hasAll\(prevList\)/
     );
     assert.match(rulesText, /function canListCalendarEvent\(/);
+    assert.match(rulesText, /function canUpdateCalendarEvent\(/);
+    assert.ok(
+      !/\bin\s+[^\n]*affectedKeys\(\)/.test(rulesText),
+      'firestore.rules must not use the `in` operator on Set affectedKeys(); use .hasAny([...]) instead'
+    );
+    assert.match(rulesText, /!changedKeys\.hasAny\(\['dismissedBy'\]\)/);
 
     const fnStart = rulesText.indexOf('function isValidCalendarEvent(data)');
     const fnEnd = rulesText.indexOf('function canAccountViewCalendarEvent(', fnStart);
