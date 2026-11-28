@@ -596,6 +596,30 @@ service cloud.firestore {
         && (arr.size() < 3 || (arr[2] is string && isOperationalRole(arr[2])));
     }
 
+    function isValidCalendarReturnTime(t) {
+      return t is string
+        && (t == '' || (t.size() == 5 && t.matches('^([01][0-9]|2[0-3]):[0-5][0-9]$')));
+    }
+
+    function isValidPicResponseEntry(entry) {
+      return entry is map
+        && entry.keys().hasAll(['status', 'returnTime', 'cancelReason'])
+        && entry.keys().hasOnly(['status', 'returnTime', 'cancelReason'])
+        && entry.status is string && entry.status in ['assigned', 'completed', 'cancelled']
+        && isValidCalendarReturnTime(entry.returnTime)
+        && entry.cancelReason is string && entry.cancelReason.size() <= 200;
+    }
+
+    function isValidDismissedByAppend(prevData, nextData) {
+      let prevList = ('dismissedBy' in prevData && prevData.dismissedBy is list) ? prevData.dismissedBy : [];
+      return 'dismissedBy' in nextData
+        && nextData.dismissedBy is list
+        && nextData.dismissedBy.size() <= 100
+        && request.auth.uid in nextData.dismissedBy
+        && nextData.dismissedBy.hasAll(prevList)
+        && nextData.dismissedBy.size() <= prevList.size() + 1;
+    }
+
     function isValidCalendarEvent(data) {
       return data.keys().hasAll([
           'title', 'date', 'startTime', 'visibleTo', 'notes',
@@ -604,6 +628,10 @@ service cloud.firestore {
         ])
         && data.keys().hasOnly([
           'title', 'date', 'startTime', 'visibleTo', 'notes',
+          'eventType', 'assignScope', 'assignedDivision',
+          'assignedPic', 'assignedPicUpper', 'assignedEmail',
+          'assignedRole', 'assignedOutlet', 'assignStatus', 'returnTime',
+          'cancelReason', 'notificationDismissed', 'dismissedBy', 'picResponses',
           'repeatFreq', 'repeatInterval', 'repeatUntil', 'repeatWeekdays', 'excludedDates',
           'createdAt', 'updatedAt', 'createdBy', 'updatedBy',
           'createdByEmail', 'createdByName'
@@ -613,6 +641,55 @@ service cloud.firestore {
         && isValidCalendarStartTime(data.startTime)
         && isValidVisibleToList(data.visibleTo)
         && data.notes is string && data.notes.size() <= 500
+        && (!('eventType' in data) || (data.eventType is string && data.eventType in ['assign', 'general']))
+        && (!('assignScope' in data) || (data.assignScope is string && data.assignScope in ['pic', 'division']))
+        && (!('assignedDivision' in data) || (data.assignedDivision is string && (data.assignedDivision == '' || isOperationalRole(data.assignedDivision))))
+        && (!('assignedPic' in data) || (data.assignedPic is string && data.assignedPic.size() <= 60))
+        && (!('assignedPicUpper' in data) || (data.assignedPicUpper is string && data.assignedPicUpper.size() <= 60))
+        && (!('assignedEmail' in data) || (data.assignedEmail is string && data.assignedEmail.size() <= 120))
+        && (!('assignedRole' in data) || (data.assignedRole is string && isOperationalRole(data.assignedRole)))
+        && (!('assignedOutlet' in data) || (data.assignedOutlet is string && data.assignedOutlet.size() <= 40))
+        && (!('assignStatus' in data) || (data.assignStatus is string && data.assignStatus in ['assigned', 'completed', 'cancelled']))
+        && (!('returnTime' in data) || isValidCalendarReturnTime(data.returnTime))
+        && (!('cancelReason' in data) || (data.cancelReason is string && data.cancelReason.size() <= 200))
+        && (!('notificationDismissed' in data) || data.notificationDismissed is bool)
+        && (!('dismissedBy' in data) || (data.dismissedBy is list && data.dismissedBy.size() <= 100))
+        && (!('picResponses' in data) || (data.picResponses is map && data.picResponses.size() <= 60))
+        // PIC-scoped assign invariants
+        && (
+          !('eventType' in data) || data.eventType != 'assign'
+          || ('assignScope' in data && data.assignScope == 'division')
+          || (
+            'assignedPic' in data && data.assignedPic.size() >= 1
+            && 'assignedPicUpper' in data && data.assignedPicUpper.size() >= 1
+            && data.assignedPicUpper == data.assignedPic.trim().upper()
+            && 'assignedRole' in data && isOperationalRole(data.assignedRole)
+            && (!('assignedDivision' in data) || data.assignedDivision == '')
+            && 'assignStatus' in data && data.assignStatus in ['assigned', 'completed', 'cancelled']
+            && 'notificationDismissed' in data && data.notificationDismissed is bool
+          )
+        )
+        // Division-scoped assign invariants
+        && (
+          !('eventType' in data) || data.eventType != 'assign'
+          || !('assignScope' in data) || data.assignScope != 'division'
+          || (
+            'assignedDivision' in data && isOperationalRole(data.assignedDivision)
+            && 'assignedRole' in data && data.assignedRole == data.assignedDivision
+            && (!('assignedPicUpper' in data) || data.assignedPicUpper == '')
+            && (!('assignedEmail' in data) || data.assignedEmail == '')
+            && 'assignStatus' in data && data.assignStatus in ['assigned', 'completed', 'cancelled']
+          )
+        )
+        // Non-assign docs cannot populate query partition keys
+        && (
+          ('eventType' in data && data.eventType == 'assign')
+          || (
+            (!('assignedPicUpper' in data) || data.assignedPicUpper == '')
+            && (!('assignedEmail' in data) || data.assignedEmail == '')
+            && (!('assignedDivision' in data) || data.assignedDivision == '')
+          )
+        )
         && (!('repeatFreq' in data) || (
           data.repeatFreq is string
           && data.repeatFreq in ['none', 'daily', 'weekly', 'monthly', 'yearly']
@@ -629,7 +706,7 @@ service cloud.firestore {
         && (!('repeatWeekdays' in data) || (
           data.repeatWeekdays is list
           && data.repeatWeekdays.size() <= 7
-          && data.repeatWeekdays.hasOnly([0, 1, 2, 3, 4, 5, 6])
+          && (data.repeatWeekdays.size() == 0 || data.repeatWeekdays.hasOnly([0, 1, 2, 3, 4, 5, 6]))
         ))
         && (!('excludedDates' in data) || (
           data.excludedDates is list
@@ -649,9 +726,27 @@ service cloud.firestore {
     }
 
     function canAccountViewCalendarEvent(acc, data) {
+      let picUpper = accountPicFromData(acc);
       return acc.active == true && (
-        acc.role in ['admin', 'accounting']
-        || (acc.role in ['stock_accounting', 'gl'] && acc.role in data.visibleTo)
+        acc.role == 'admin'
+        || (
+          picUpper != ''
+          && 'assignedPicUpper' in data
+          && data.assignedPicUpper is string
+          && data.assignedPicUpper == picUpper
+        )
+        || (
+          'assignedEmail' in data
+          && data.assignedEmail is string
+          && data.assignedEmail != ''
+          && data.assignedEmail == request.auth.token.email.lower()
+        )
+        || (
+          'assignedDivision' in data
+          && data.assignedDivision is string
+          && data.assignedDivision != ''
+          && data.assignedDivision == acc.role
+        )
       );
     }
 
@@ -662,13 +757,119 @@ service cloud.firestore {
       );
     }
 
+    function canAccountListCalendarEvent(acc, data) {
+      let picUpper = accountPicFromData(acc);
+      return acc.active == true && (
+        acc.role == 'admin'
+        || (picUpper != '' && data.assignedPicUpper == picUpper)
+        || data.assignedEmail == request.auth.token.email.lower()
+        || (isOperationalRole(acc.role) && data.assignedDivision == acc.role)
+      );
+    }
+
+    function canListCalendarEvent(data) {
+      let path = accountDocPath();
+      return isBootstrappedAdmin() || (
+        exists(path) && canAccountListCalendarEvent(get(path).data, data)
+      );
+    }
+
+    function isAccountAssignedPic(acc, data) {
+      let picUpper = accountPicFromData(acc);
+      return acc.active == true
+        && 'eventType' in data && data.eventType == 'assign'
+        && (!('assignScope' in data) || data.assignScope != 'division')
+        && (
+          (picUpper != '' && 'assignedPicUpper' in data && data.assignedPicUpper == picUpper)
+          || ('assignedEmail' in data && data.assignedEmail != ''
+            && data.assignedEmail == request.auth.token.email.lower())
+        );
+    }
+
+    function isAccountDivisionMember(acc, data) {
+      return acc.active == true
+        && 'eventType' in data && data.eventType == 'assign'
+        && 'assignScope' in data && data.assignScope == 'division'
+        && 'assignedDivision' in data && data.assignedDivision == acc.role;
+    }
+
+    function canAccountUpdateCalendarEvent(acc, prevData, nextData) {
+      let myPic = accountPicFromData(acc);
+      return acc.active == true && (
+        // Tier 1 (Admin): full management of calendar assignments
+        (
+          acc.role == 'admin'
+          && nextData.diff(prevData).affectedKeys().hasOnly([
+            'title', 'date', 'startTime', 'visibleTo', 'notes',
+            'eventType', 'assignScope', 'assignedDivision',
+            'assignedPic', 'assignedPicUpper', 'assignedEmail',
+            'assignedRole', 'assignedOutlet', 'assignStatus', 'returnTime',
+            'cancelReason', 'notificationDismissed', 'dismissedBy', 'picResponses',
+            'repeatFreq', 'repeatInterval', 'repeatUntil', 'repeatWeekdays', 'excludedDates',
+            'updatedAt', 'updatedBy'
+          ])
+        )
+        // Tier 2a (PIC Assign User): explicitly dismiss persistent notification
+        || (
+          isAccountAssignedPic(acc, prevData)
+          && nextData.notificationDismissed == true
+          && nextData.diff(prevData).affectedKeys().hasOnly([
+            'notificationDismissed', 'dismissedBy', 'updatedAt', 'updatedBy'
+          ])
+          && (!('dismissedBy' in nextData.diff(prevData).affectedKeys()) || isValidDismissedByAppend(prevData, nextData))
+        )
+        // Tier 2b (PIC Assign User): submit return time or cancel visit (not terminal yet)
+        || (
+          isAccountAssignedPic(acc, prevData)
+          && prevData.assignStatus != 'cancelled'
+          && nextData.assignStatus in ['assigned', 'completed', 'cancelled']
+          && nextData.diff(prevData).affectedKeys().hasOnly([
+            'assignStatus', 'returnTime', 'cancelReason', 'notificationDismissed', 'dismissedBy',
+            'updatedAt', 'updatedBy'
+          ])
+          && (!('dismissedBy' in nextData.diff(prevData).affectedKeys()) || isValidDismissedByAppend(prevData, nextData))
+        )
+        // Tier 3a (Division Assign Member): dismiss persistent notification for self only
+        || (
+          isAccountDivisionMember(acc, prevData)
+          && nextData.diff(prevData).affectedKeys().hasOnly([
+            'dismissedBy', 'updatedAt', 'updatedBy'
+          ])
+          && isValidDismissedByAppend(prevData, nextData)
+        )
+        // Tier 3b (Division Assign Member): submit own return time or cancel own visit
+        || (
+          isAccountDivisionMember(acc, prevData)
+          && prevData.assignStatus != 'cancelled'
+          && myPic != ''
+          && nextData.diff(prevData).affectedKeys().hasOnly([
+            'picResponses', 'dismissedBy', 'updatedAt', 'updatedBy'
+          ])
+          && 'picResponses' in nextData
+          && nextData.picResponses is map
+          && nextData.picResponses.size() <= 60
+          && myPic in nextData.picResponses
+          && isValidPicResponseEntry(nextData.picResponses[myPic])
+          && (
+            ('picResponses' in prevData && prevData.picResponses is map)
+              ? (
+                nextData.picResponses.diff(prevData.picResponses).affectedKeys().hasOnly([myPic])
+                && (!(myPic in prevData.picResponses) || prevData.picResponses[myPic].status != 'cancelled')
+              )
+              : nextData.picResponses.keys().hasOnly([myPic])
+          )
+          && (!('dismissedBy' in nextData.diff(prevData).affectedKeys()) || isValidDismissedByAppend(prevData, nextData))
+        )
+      );
+    }
+
     match /calendarEvents/{eventId} {
       allow get: if isVerifiedUser() && isValidId(eventId) && canViewCalendarEvent(existing());
-      allow list: if isVerifiedUser() && canViewCalendarEvent(resource.data);
+      allow list: if isVerifiedUser() && canListCalendarEvent(resource.data);
       allow create: if isVerifiedUser()
         && isValidId(eventId)
-        && isAccountingOrAdmin()
         && isValidCalendarEvent(incoming())
+        && isAdmin()
         && incoming().createdBy == request.auth.uid
         && incoming().updatedBy == request.auth.uid
         && incoming().createdByEmail == request.auth.token.email.lower()
@@ -676,7 +877,6 @@ service cloud.firestore {
         && incoming().updatedAt == request.time;
       allow update: if isVerifiedUser()
         && isValidId(eventId)
-        && isAccountingOrAdmin()
         && isValidCalendarEvent(incoming())
         && incoming().createdAt == existing().createdAt
         && incoming().createdBy == existing().createdBy
@@ -684,12 +884,104 @@ service cloud.firestore {
         && incoming().createdByName == existing().createdByName
         && incoming().updatedBy == request.auth.uid
         && incoming().updatedAt == request.time
+        && (
+          isBootstrappedAdmin()
+          || (
+            exists(accountDocPath())
+            && canAccountUpdateCalendarEvent(get(accountDocPath()).data, existing(), incoming())
+          )
+        );
+      allow delete: if isVerifiedUser() && isValidId(eventId) && isAdmin();
+    }
+
+    function isValidPersonalReminder(data) {
+      return data.keys().hasAll([
+          'title', 'date', 'startTime', 'notes',
+          'createdAt', 'updatedAt', 'createdBy', 'updatedBy',
+          'createdByEmail', 'createdByName'
+        ])
+        && data.keys().hasOnly([
+          'title', 'date', 'startTime', 'notes',
+          'repeatFreq', 'repeatInterval', 'repeatUntil', 'repeatWeekdays', 'excludedDates',
+          'createdAt', 'updatedAt', 'createdBy', 'updatedBy',
+          'createdByEmail', 'createdByName'
+        ])
+        && data.title is string && data.title.size() >= 1 && data.title.size() <= 120
+        && data.date is string && data.date.size() == 10 && data.date.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+        && isValidCalendarStartTime(data.startTime)
+        && data.notes is string && data.notes.size() <= 500
+        && (!('repeatFreq' in data) || (
+          data.repeatFreq is string
+          && data.repeatFreq in ['none', 'daily', 'weekly', 'monthly', 'yearly']
+        ))
+        && (!('repeatInterval' in data) || (
+          data.repeatInterval is int
+          && data.repeatInterval >= 1
+          && data.repeatInterval <= 12
+        ))
+        && (!('repeatUntil' in data) || (
+          data.repeatUntil is string
+          && (data.repeatUntil == '' || (data.repeatUntil.size() == 10 && data.repeatUntil.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')))
+        ))
+        && (!('repeatWeekdays' in data) || (
+          data.repeatWeekdays is list
+          && data.repeatWeekdays.size() <= 7
+          && (data.repeatWeekdays.size() == 0 || data.repeatWeekdays.hasOnly([0, 1, 2, 3, 4, 5, 6]))
+        ))
+        && (!('excludedDates' in data) || (
+          data.excludedDates is list
+          && data.excludedDates.size() <= 200
+          && (data.excludedDates.size() == 0 || (
+            data.excludedDates[0] is string
+            && data.excludedDates[0].size() == 10
+            && data.excludedDates[0].matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+          ))
+        ))
+        && data.createdAt is timestamp
+        && data.updatedAt is timestamp
+        && data.createdBy is string && data.createdBy.size() >= 1 && data.createdBy.size() <= 128
+        && data.updatedBy is string && data.updatedBy.size() >= 1 && data.updatedBy.size() <= 128
+        && data.createdByEmail is string && data.createdByEmail.size() >= 5 && data.createdByEmail.size() <= 120
+        && data.createdByName is string && data.createdByName.size() >= 1 && data.createdByName.size() <= 80;
+    }
+
+    match /personalReminders/{reminderId} {
+      allow get: if isVerifiedUser()
+        && isValidId(reminderId)
+        && hasActiveAccount()
+        && existing().createdBy == request.auth.uid;
+      allow list: if isVerifiedUser()
+        && hasActiveAccount()
+        && resource.data.createdBy == request.auth.uid;
+      allow create: if isVerifiedUser()
+        && isValidId(reminderId)
+        && isValidPersonalReminder(incoming())
+        && hasActiveAccount()
+        && incoming().createdBy == request.auth.uid
+        && incoming().updatedBy == request.auth.uid
+        && incoming().createdByEmail == request.auth.token.email.lower()
+        && incoming().createdAt == request.time
+        && incoming().updatedAt == request.time;
+      allow update: if isVerifiedUser()
+        && isValidId(reminderId)
+        && isValidPersonalReminder(incoming())
+        && hasActiveAccount()
+        && existing().createdBy == request.auth.uid
+        && incoming().createdBy == existing().createdBy
+        && incoming().createdAt == existing().createdAt
+        && incoming().createdByEmail == existing().createdByEmail
+        && incoming().createdByName == existing().createdByName
+        && incoming().updatedBy == request.auth.uid
+        && incoming().updatedAt == request.time
         && incoming().diff(existing()).affectedKeys().hasOnly([
-          'title', 'date', 'startTime', 'visibleTo', 'notes',
+          'title', 'date', 'startTime', 'notes',
           'repeatFreq', 'repeatInterval', 'repeatUntil', 'repeatWeekdays', 'excludedDates',
           'updatedAt', 'updatedBy'
         ]);
-      allow delete: if isVerifiedUser() && isValidId(eventId) && isAccountingOrAdmin();
+      allow delete: if isVerifiedUser()
+        && isValidId(reminderId)
+        && hasActiveAccount()
+        && existing().createdBy == request.auth.uid;
     }
 
     function isValidCounterId(id) {

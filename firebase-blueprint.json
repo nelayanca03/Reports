@@ -383,14 +383,14 @@
     },
     "CalendarEvent": {
       "title": "CalendarEvent",
-      "description": "Department-scoped calendar event managed by Accounting and Admin",
+      "description": "PIC-assigned calendar task managed by Admin with automatic visit tracking and persistent notification",
       "type": "object",
       "properties": {
         "title": {
           "type": "string",
           "minLength": 1,
           "maxLength": 120,
-          "description": "Event title displayed on calendar grid"
+          "description": "Event or assignment title displayed on calendar grid"
         },
         "date": {
           "type": "string",
@@ -406,12 +406,79 @@
         },
         "visibleTo": {
           "type": "array",
-          "description": "Authorized operational departments allowed to view this event"
+          "description": "Operational role metadata associated with this event"
         },
         "notes": {
           "type": "string",
           "maxLength": 500,
-          "description": "Optional notes and participant list hidden from overview"
+          "description": "Optional notes and instructions"
+        },
+        "eventType": {
+          "type": "string",
+          "enum": ["assign", "general"],
+          "description": "Whether this is a PIC/Division assignment or legacy general event"
+        },
+        "assignScope": {
+          "type": "string",
+          "enum": ["pic", "division"],
+          "description": "Whether the assignment targets a single PIC or an entire division"
+        },
+        "assignedDivision": {
+          "type": "string",
+          "maxLength": 32,
+          "description": "Operational role/division targeted when assignScope is division (empty string for PIC assigns)"
+        },
+        "assignedPic": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Display name of the specific PIC assigned to this calendar entry"
+        },
+        "assignedPicUpper": {
+          "type": "string",
+          "maxLength": 60,
+          "description": "Uppercase trimmed PIC name used for strict PIC-only Firestore queries and rules"
+        },
+        "assignedEmail": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Optional lowercase email of the assigned user account"
+        },
+        "assignedRole": {
+          "type": "string",
+          "enum": ["stock_accounting", "gl", "accounting"],
+          "description": "Operational role/division of the assigned PIC or division for visit synchronization"
+        },
+        "assignedOutlet": {
+          "type": "string",
+          "maxLength": 40,
+          "description": "Optional target outlet code for this assignment"
+        },
+        "assignStatus": {
+          "type": "string",
+          "enum": ["assigned", "completed", "cancelled"],
+          "description": "Execution status of the assignment (assigned=+1 visit, completed=+1 with returnTime, cancelled=0 visit)"
+        },
+        "returnTime": {
+          "type": "string",
+          "maxLength": 5,
+          "description": "Optional HH:MM return time reported by the assigned user upon completion"
+        },
+        "cancelReason": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Optional reason when the user cancels / does not attend the assignment"
+        },
+        "notificationDismissed": {
+          "type": "boolean",
+          "description": "Whether the assigned PIC has explicitly closed the persistent top notification popup"
+        },
+        "dismissedBy": {
+          "type": "array",
+          "description": "List of UIDs who have explicitly dismissed the persistent notification popup for this assignment"
+        },
+        "picResponses": {
+          "type": "object",
+          "description": "Map of uppercase PIC name to { status, returnTime, cancelReason } for division-wide assignments"
         },
         "repeatFreq": {
           "type": "string",
@@ -471,6 +538,94 @@
         "date",
         "startTime",
         "visibleTo",
+        "notes",
+        "createdAt",
+        "updatedAt",
+        "createdBy",
+        "updatedBy",
+        "createdByEmail",
+        "createdByName"
+      ]
+    },
+    "PersonalReminder": {
+      "title": "PersonalReminder",
+      "description": "Private personal calendar reminder visible and editable strictly by its owner",
+      "type": "object",
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "Personal reminder title"
+        },
+        "date": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$",
+          "maxLength": 10,
+          "description": "Reminder date in YYYY-MM-DD format"
+        },
+        "startTime": {
+          "type": "string",
+          "pattern": "^(0[89]|1[0-8]):(00|30)|19:00$",
+          "maxLength": 5,
+          "description": "Reminder time slot between 08:00 and 19:00"
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 500,
+          "description": "Optional personal notes"
+        },
+        "repeatFreq": {
+          "type": "string",
+          "enum": ["none", "daily", "weekly", "monthly", "yearly"]
+        },
+        "repeatInterval": {
+          "type": "integer"
+        },
+        "repeatUntil": {
+          "type": "string",
+          "maxLength": 10
+        },
+        "repeatWeekdays": {
+          "type": "array"
+        },
+        "excludedDates": {
+          "type": "array"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "createdBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "updatedBy": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "createdByEmail": {
+          "type": "string",
+          "format": "email",
+          "minLength": 5,
+          "maxLength": 120
+        },
+        "createdByName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        }
+      },
+      "required": [
+        "title",
+        "date",
+        "startTime",
         "notes",
         "createdAt",
         "updatedAt",
@@ -683,7 +838,11 @@
     },
     "/calendarEvents/{eventId}": {
       "schema": { "$ref": "#/entities/CalendarEvent" },
-      "description": "Calendar events created by Accounting/Admin with per-department visibility"
+      "description": "Admin-managed PIC calendar assignments visible strictly to Admin and the assigned PIC"
+    },
+    "/personalReminders/{reminderId}": {
+      "schema": { "$ref": "#/entities/PersonalReminder" },
+      "description": "Owner-only personal calendar reminders created by any active user"
     },
     "/recordCounters/{counterId}": {
       "schema": { "$ref": "#/entities/RecordCounter" },

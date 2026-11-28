@@ -1,24 +1,33 @@
 import {
+  FieldPath,
+  arrayUnion,
   deleteDoc,
   doc,
   runTransaction,
   serverTimestamp,
   setDoc,
   updateDoc,
+  writeBatch,
 } from 'firebase/firestore';
 import { useCallback } from 'react';
 import { OperationType, auth, db, handleFirestoreError } from '../firebase';
 import {
   AccountProfile,
+  CalendarAssignScope,
+  CalendarAssignStatus,
+  CalendarEvent,
   CalendarRecurrenceFreq,
   OperationalRoleId,
   OutletAssignment,
 } from '../types/outlet';
+import { ParsedAssignImportRow } from '../utils/assignImportExport';
 import {
   canAccountEditPic,
   formatReferenceCode,
   formatYymmFromIsoDate,
+  getAccountPicUpper,
   getPeopleMap,
+  isValidCalendarReturnTime,
   isValidCalendarStartTime,
   normalizeCalendarInterval,
   normalizeCalendarRecurrenceFreq,
@@ -32,20 +41,28 @@ interface UseCalendarAndRecordsActionsParams {
   currentAccount: AccountProfile | null;
   effectiveRoleId: OperationalRoleId;
   activeOutlets: OutletAssignment[];
+  calendarEvents: CalendarEvent[];
 }
 
 export function useCalendarAndRecordsActions({
   currentAccount,
   effectiveRoleId,
   activeOutlets,
+  calendarEvents,
 }: UseCalendarAndRecordsActionsParams) {
   const createCalendarEvent = useCallback(
     async (input: {
       title: string;
       date: string;
       startTime: string;
-      visibleTo: OperationalRoleId[];
+      assignScope?: CalendarAssignScope;
+      assignedDivision?: OperationalRoleId | '';
+      assignedPic: string;
+      assignedRole: OperationalRoleId;
+      assignedEmail?: string;
+      assignedOutlet?: string;
       notes: string;
+      visibleTo?: OperationalRoleId[];
       repeatFreq?: CalendarRecurrenceFreq;
       repeatInterval?: number;
       repeatUntil?: string;
@@ -53,61 +70,88 @@ export function useCalendarAndRecordsActions({
       excludedDates?: string[];
     }) => {
       const uid = auth.currentUser?.uid;
-      const email = (currentAccount?.email || auth.currentUser?.email || '').trim().toLowerCase();
+      const email = (auth.currentUser?.email || currentAccount?.email || '').trim().toLowerCase();
       if (!uid || !email || !currentAccount) {
         throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
       }
-      if (currentAccount.role !== 'admin' && currentAccount.role !== 'accounting') {
-        throw new Error('Hanya Accounting atau Admin yang dapat membuat event kalender.');
+      if (currentAccount.role !== 'admin') {
+        throw new Error('Hanya Admin yang dapat membuat assign pada kalender.');
       }
       const cleanTitle = input.title.trim().slice(0, 120);
       if (!cleanTitle) {
-        throw new Error('Judul event wajib diisi.');
+        throw new Error('Judul penugasan wajib diisi.');
       }
       if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) {
-        throw new Error('Tanggal event tidak valid.');
+        throw new Error('Tanggal penugasan tidak valid.');
       }
       if (!isValidCalendarStartTime(input.startTime)) {
         throw new Error('Jam mulai hanya diperbolehkan antara 08:00 hingga 19:00 (kelipatan 30 menit).');
       }
-      const visibleTo = normalizeCalendarVisibleTo(input.visibleTo);
-      if (visibleTo.length === 0) {
-        throw new Error('Pilih minimal satu departemen penerima tampilan event.');
-      }
-      const repeatFreq = normalizeCalendarRecurrenceFreq(input.repeatFreq);
-      const repeatInterval = normalizeCalendarInterval(input.repeatInterval);
-      const rawUntil = (input.repeatUntil || '').trim();
-      if (rawUntil && !/^\d{4}-\d{2}-\d{2}$/.test(rawUntil)) {
-        throw new Error('Tanggal akhir pengulangan tidak valid.');
-      }
-      if (rawUntil && rawUntil < input.date) {
-        throw new Error('Tanggal akhir pengulangan tidak boleh lebih awal dari tanggal event.');
-      }
-      const repeatUntil = repeatFreq === 'none' ? '' : rawUntil;
-      const repeatWeekdays =
-        repeatFreq === 'weekly' ? normalizeCalendarWeekdays(input.repeatWeekdays) : [];
-      const excludedDates = normalizeExcludedDates(input.excludedDates);
 
-      const eventId = `evt_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const assignScope: CalendarAssignScope =
+        input.assignScope === 'division' ? 'division' : 'pic';
+      const assignedRole: OperationalRoleId =
+        assignScope === 'division'
+          ? input.assignedDivision === 'gl' || input.assignedDivision === 'accounting'
+            ? input.assignedDivision
+            : 'stock_accounting'
+          : input.assignedRole === 'gl' || input.assignedRole === 'accounting'
+            ? input.assignedRole
+            : 'stock_accounting';
+
+      const cleanPic =
+        assignScope === 'division' ? '' : (input.assignedPic || '').trim().slice(0, 60).trim();
+      if (assignScope === 'pic' && !cleanPic) {
+        throw new Error('Pilih PIC tujuan penugasan terlebih dahulu.');
+      }
+      const cleanPicUpper = assignScope === 'division' ? '' : cleanPic.toUpperCase();
+      const cleanEmail =
+        assignScope === 'division'
+          ? ''
+          : (input.assignedEmail || '').trim().toLowerCase().slice(0, 120);
+      const assignedDivision: OperationalRoleId | '' =
+        assignScope === 'division' ? assignedRole : '';
+      const cleanOutlet = (input.assignedOutlet || '').trim().slice(0, 40);
+      const visibleTo = normalizeCalendarVisibleTo(
+        input.visibleTo && input.visibleTo.length > 0 ? input.visibleTo : [assignedRole]
+      );
+      const createdByName =
+        ((currentAccount.name || '').trim() || email).slice(0, 80).trim() || email.slice(0, 80);
+
+      const eventId = `asg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       const evtPath = `calendarEvents/${eventId}`;
       try {
         await setDoc(doc(db, 'calendarEvents', eventId), {
           title: cleanTitle,
           date: input.date,
           startTime: input.startTime,
-          visibleTo,
+          visibleTo: visibleTo.length > 0 ? visibleTo : [assignedRole],
           notes: (input.notes || '').trim().slice(0, 500),
-          repeatFreq,
-          repeatInterval,
-          repeatUntil,
-          repeatWeekdays,
-          excludedDates,
+          eventType: 'assign',
+          assignScope,
+          assignedDivision,
+          assignedPic: cleanPic,
+          assignedPicUpper: cleanPicUpper,
+          assignedEmail: cleanEmail,
+          assignedRole,
+          assignedOutlet: cleanOutlet,
+          assignStatus: 'assigned',
+          returnTime: '',
+          cancelReason: '',
+          notificationDismissed: false,
+          dismissedBy: [],
+          picResponses: {},
+          repeatFreq: 'none',
+          repeatInterval: 1,
+          repeatUntil: '',
+          repeatWeekdays: [],
+          excludedDates: [],
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
           createdBy: uid,
           updatedBy: uid,
           createdByEmail: email.slice(0, 120),
-          createdByName: (currentAccount.name || email).slice(0, 80),
+          createdByName,
         });
       } catch (error) {
         handleFirestoreError(error, OperationType.CREATE, evtPath);
@@ -124,66 +168,113 @@ export function useCalendarAndRecordsActions({
         title: string;
         date: string;
         startTime: string;
-        visibleTo: OperationalRoleId[];
+        assignScope?: CalendarAssignScope;
+        assignedDivision?: OperationalRoleId | '';
+        assignedPic: string;
+        assignedRole: OperationalRoleId;
+        assignedEmail?: string;
+        assignedOutlet?: string;
         notes: string;
-        repeatFreq?: CalendarRecurrenceFreq;
-        repeatInterval?: number;
-        repeatUntil?: string;
-        repeatWeekdays?: number[];
-        excludedDates?: string[];
+        assignStatus?: CalendarAssignStatus;
+        returnTime?: string;
+        cancelReason?: string;
+        notificationDismissed?: boolean;
+        resetDismissedBy?: boolean;
+        visibleTo?: OperationalRoleId[];
       }
     ) => {
       const uid = auth.currentUser?.uid;
       if (!uid || !currentAccount) {
         throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
       }
-      if (currentAccount.role !== 'admin' && currentAccount.role !== 'accounting') {
-        throw new Error('Hanya Accounting atau Admin yang dapat mengubah event kalender.');
+      if (currentAccount.role !== 'admin') {
+        throw new Error('Hanya Admin yang dapat mengubah assign kalender.');
       }
       const cleanTitle = input.title.trim().slice(0, 120);
       if (!cleanTitle) {
-        throw new Error('Judul event wajib diisi.');
+        throw new Error('Judul penugasan wajib diisi.');
       }
       if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) {
-        throw new Error('Tanggal event tidak valid.');
+        throw new Error('Tanggal penugasan tidak valid.');
       }
       if (!isValidCalendarStartTime(input.startTime)) {
         throw new Error('Jam mulai hanya diperbolehkan antara 08:00 hingga 19:00 (kelipatan 30 menit).');
       }
-      const visibleTo = normalizeCalendarVisibleTo(input.visibleTo);
-      if (visibleTo.length === 0) {
-        throw new Error('Pilih minimal satu departemen penerima tampilan event.');
+
+      const assignScope: CalendarAssignScope =
+        input.assignScope === 'division' ? 'division' : 'pic';
+      const assignedRole: OperationalRoleId =
+        assignScope === 'division'
+          ? input.assignedDivision === 'gl' || input.assignedDivision === 'accounting'
+            ? input.assignedDivision
+            : 'stock_accounting'
+          : input.assignedRole === 'gl' || input.assignedRole === 'accounting'
+            ? input.assignedRole
+            : 'stock_accounting';
+
+      const cleanPic =
+        assignScope === 'division' ? '' : (input.assignedPic || '').trim().slice(0, 60).trim();
+      if (assignScope === 'pic' && !cleanPic) {
+        throw new Error('PIC tujuan penugasan wajib diisi.');
       }
-      const repeatFreq = normalizeCalendarRecurrenceFreq(input.repeatFreq);
-      const repeatInterval = normalizeCalendarInterval(input.repeatInterval);
-      const rawUntil = (input.repeatUntil || '').trim();
-      if (rawUntil && !/^\d{4}-\d{2}-\d{2}$/.test(rawUntil)) {
-        throw new Error('Tanggal akhir pengulangan tidak valid.');
+      const cleanPicUpper = assignScope === 'division' ? '' : cleanPic.toUpperCase();
+      const cleanEmail =
+        assignScope === 'division'
+          ? ''
+          : (input.assignedEmail || '').trim().toLowerCase().slice(0, 120);
+      const assignedDivision: OperationalRoleId | '' =
+        assignScope === 'division' ? assignedRole : '';
+      const cleanOutlet = (input.assignedOutlet || '').trim().slice(0, 40);
+      const assignStatus: CalendarAssignStatus =
+        input.assignStatus === 'completed' || input.assignStatus === 'cancelled'
+          ? input.assignStatus
+          : 'assigned';
+      const returnTime = (input.returnTime || '').trim();
+      if (!isValidCalendarReturnTime(returnTime)) {
+        throw new Error('Format jam pulang harus HH:MM (contoh 15:30).');
       }
-      if (rawUntil && rawUntil < input.date) {
-        throw new Error('Tanggal akhir pengulangan tidak boleh lebih awal dari tanggal event.');
+      const visibleTo = normalizeCalendarVisibleTo(
+        input.visibleTo && input.visibleTo.length > 0 ? input.visibleTo : [assignedRole]
+      );
+
+      const payload: Record<string, unknown> = {
+        title: cleanTitle,
+        date: input.date,
+        startTime: input.startTime,
+        visibleTo: visibleTo.length > 0 ? visibleTo : [assignedRole],
+        notes: (input.notes || '').trim().slice(0, 500),
+        eventType: 'assign',
+        assignScope,
+        assignedDivision,
+        assignedPic: cleanPic,
+        assignedPicUpper: cleanPicUpper,
+        assignedEmail: cleanEmail,
+        assignedRole,
+        assignedOutlet: cleanOutlet,
+        assignStatus,
+        returnTime: assignStatus === 'cancelled' ? '' : returnTime,
+        cancelReason:
+          assignStatus === 'cancelled'
+            ? (input.cancelReason || '').trim().slice(0, 200)
+            : '',
+        repeatFreq: 'none',
+        repeatInterval: 1,
+        repeatUntil: '',
+        repeatWeekdays: [],
+        excludedDates: [],
+        updatedAt: serverTimestamp(),
+        updatedBy: uid,
+      };
+      if (typeof input.notificationDismissed === 'boolean') {
+        payload.notificationDismissed = input.notificationDismissed;
       }
-      const repeatUntil = repeatFreq === 'none' ? '' : rawUntil;
-      const repeatWeekdays =
-        repeatFreq === 'weekly' ? normalizeCalendarWeekdays(input.repeatWeekdays) : [];
-      const excludedDates = normalizeExcludedDates(input.excludedDates);
+      if (input.resetDismissedBy) {
+        payload.dismissedBy = [];
+      }
 
       const evtPath = `calendarEvents/${eventId}`;
       try {
-        await updateDoc(doc(db, 'calendarEvents', eventId), {
-          title: cleanTitle,
-          date: input.date,
-          startTime: input.startTime,
-          visibleTo,
-          notes: (input.notes || '').trim().slice(0, 500),
-          repeatFreq,
-          repeatInterval,
-          repeatUntil,
-          repeatWeekdays,
-          excludedDates,
-          updatedAt: serverTimestamp(),
-          updatedBy: uid,
-        });
+        await updateDoc(doc(db, 'calendarEvents', eventId), payload);
       } catch (error) {
         handleFirestoreError(error, OperationType.UPDATE, evtPath);
       }
@@ -197,14 +288,375 @@ export function useCalendarAndRecordsActions({
       if (!uid || !currentAccount) {
         throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
       }
-      if (currentAccount.role !== 'admin' && currentAccount.role !== 'accounting') {
-        throw new Error('Hanya Accounting atau Admin yang dapat menghapus event kalender.');
+      if (currentAccount.role !== 'admin') {
+        throw new Error('Hanya Admin yang dapat menghapus assign kalender.');
       }
       const evtPath = `calendarEvents/${eventId}`;
       try {
         await deleteDoc(doc(db, 'calendarEvents', eventId));
       } catch (error) {
         handleFirestoreError(error, OperationType.DELETE, evtPath);
+      }
+    },
+    [currentAccount]
+  );
+
+  const bulkCreateAssignEvents = useCallback(
+    async (rows: ParsedAssignImportRow[]): Promise<number> => {
+      const uid = auth.currentUser?.uid;
+      const email = (auth.currentUser?.email || currentAccount?.email || '').trim().toLowerCase();
+      if (!uid || !email || !currentAccount) {
+        throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
+      }
+      if (currentAccount.role !== 'admin') {
+        throw new Error('Hanya Admin yang dapat mengunggah data assign.');
+      }
+      if (!rows.length) return 0;
+
+      const createdByName =
+        ((currentAccount.name || '').trim() || email).slice(0, 80).trim() || email.slice(0, 80);
+      const createdByEmail = email.slice(0, 120);
+      const CHUNK_SIZE = 400;
+      let totalCreated = 0;
+
+      try {
+        for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+          const chunk = rows.slice(i, i + CHUNK_SIZE);
+          const batch = writeBatch(db);
+          chunk.forEach((row, idx) => {
+            const eventId = `asg_${Date.now()}_${i + idx}_${Math.random().toString(36).slice(2, 6)}`;
+            const isDivision = row.assignScope === 'division';
+            const cleanPic = isDivision ? '' : row.assignedPic.trim().slice(0, 60).trim();
+            batch.set(doc(db, 'calendarEvents', eventId), {
+              title: row.title.trim().slice(0, 120),
+              date: row.date,
+              startTime: row.startTime,
+              visibleTo: [row.assignedRole],
+              notes: (row.notes || '').trim().slice(0, 500),
+              eventType: 'assign',
+              assignScope: isDivision ? 'division' : 'pic',
+              assignedDivision: isDivision ? row.assignedRole : '',
+              assignedPic: cleanPic,
+              assignedPicUpper: isDivision ? '' : cleanPic.toUpperCase(),
+              assignedEmail: isDivision
+                ? ''
+                : (row.assignedEmail || '').trim().toLowerCase().slice(0, 120),
+              assignedRole: row.assignedRole,
+              assignedOutlet: (row.assignedOutlet || '').trim().slice(0, 40),
+              assignStatus: 'assigned',
+              returnTime: '',
+              cancelReason: '',
+              notificationDismissed: false,
+              dismissedBy: [],
+              picResponses: {},
+              repeatFreq: 'none',
+              repeatInterval: 1,
+              repeatUntil: '',
+              repeatWeekdays: [],
+              excludedDates: [],
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+              createdBy: uid,
+              updatedBy: uid,
+              createdByEmail,
+              createdByName,
+            });
+          });
+          await batch.commit();
+          totalCreated += chunk.length;
+        }
+      } catch (error) {
+        handleFirestoreError(error, OperationType.CREATE, 'calendarEvents');
+      }
+      return totalCreated;
+    },
+    [currentAccount]
+  );
+
+  const updateAssignResponse = useCallback(
+    async (
+      eventId: string,
+      input: {
+        assignStatus: CalendarAssignStatus;
+        returnTime?: string;
+        cancelReason?: string;
+        notificationDismissed?: boolean;
+        targetPic?: string;
+        forceGlobal?: boolean;
+      }
+    ) => {
+      const uid = auth.currentUser?.uid;
+      if (!uid || !currentAccount) {
+        throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
+      }
+      const cleanId = eventId.trim();
+      if (!cleanId) {
+        throw new Error('ID assign tidak valid.');
+      }
+      const cleanReturnTime = (input.returnTime || '').trim();
+      if (input.assignStatus === 'completed') {
+        if (!cleanReturnTime || !isValidCalendarReturnTime(cleanReturnTime)) {
+          throw new Error('Pilih atau masukkan jam pulang yang valid (HH:MM).');
+        }
+      } else if (cleanReturnTime && !isValidCalendarReturnTime(cleanReturnTime)) {
+        throw new Error('Format jam pulang harus HH:MM.');
+      }
+
+      const evt = calendarEvents.find((e) => e.id === cleanId);
+      const isDivisionAssign = evt?.assignScope === 'division';
+      const evtPath = `calendarEvents/${cleanId}`;
+      const cleanCancelReason =
+        input.assignStatus === 'cancelled'
+          ? (input.cancelReason || '').trim().slice(0, 200)
+          : '';
+      const effectiveReturnTime = input.assignStatus === 'cancelled' ? '' : cleanReturnTime;
+
+      try {
+        if (isDivisionAssign) {
+          const isAdminGlobal =
+            currentAccount.role === 'admin' && (input.forceGlobal || !input.targetPic);
+          if (isAdminGlobal) {
+            const globalPayload: Record<string, unknown> = {
+              assignStatus: input.assignStatus,
+              returnTime: effectiveReturnTime,
+              cancelReason: cleanCancelReason,
+              notificationDismissed: input.notificationDismissed ?? false,
+              updatedAt: serverTimestamp(),
+              updatedBy: uid,
+            };
+            if (input.assignStatus === 'assigned' && input.forceGlobal) {
+              globalPayload.dismissedBy = [];
+              globalPayload.picResponses = {};
+            }
+            await updateDoc(doc(db, 'calendarEvents', cleanId), globalPayload);
+          } else {
+            const picKey = (input.targetPic || getAccountPicUpper(currentAccount))
+              .trim()
+              .toUpperCase();
+            if (!picKey) {
+              throw new Error('Nama PIC pada akun Anda belum diatur.');
+            }
+            const entry = {
+              status: input.assignStatus,
+              returnTime: effectiveReturnTime,
+              cancelReason: cleanCancelReason,
+            };
+            await updateDoc(
+              doc(db, 'calendarEvents', cleanId),
+              new FieldPath('picResponses', picKey),
+              entry,
+              'dismissedBy',
+              arrayUnion(uid),
+              'updatedAt',
+              serverTimestamp(),
+              'updatedBy',
+              uid
+            );
+          }
+          return;
+        }
+
+        const payload: Record<string, unknown> = {
+          assignStatus: input.assignStatus,
+          returnTime: effectiveReturnTime,
+          cancelReason: cleanCancelReason,
+          notificationDismissed: input.notificationDismissed ?? true,
+          updatedAt: serverTimestamp(),
+          updatedBy: uid,
+        };
+        if (input.notificationDismissed === false) {
+          payload.dismissedBy = [];
+        } else {
+          payload.dismissedBy = arrayUnion(uid);
+        }
+        await updateDoc(doc(db, 'calendarEvents', cleanId), payload);
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, evtPath);
+      }
+    },
+    [currentAccount, calendarEvents]
+  );
+
+  const dismissAssignNotification = useCallback(
+    async (eventId: string) => {
+      const uid = auth.currentUser?.uid;
+      if (!uid || !currentAccount) {
+        throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
+      }
+      const cleanId = eventId.trim();
+      if (!cleanId) return;
+      const evt = calendarEvents.find((e) => e.id === cleanId);
+      const isDivisionAssign = evt?.assignScope === 'division';
+      const evtPath = `calendarEvents/${cleanId}`;
+      try {
+        if (isDivisionAssign) {
+          await updateDoc(doc(db, 'calendarEvents', cleanId), {
+            dismissedBy: arrayUnion(uid),
+            updatedAt: serverTimestamp(),
+            updatedBy: uid,
+          });
+        } else {
+          await updateDoc(doc(db, 'calendarEvents', cleanId), {
+            notificationDismissed: true,
+            dismissedBy: arrayUnion(uid),
+            updatedAt: serverTimestamp(),
+            updatedBy: uid,
+          });
+        }
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, evtPath);
+      }
+    },
+    [currentAccount, calendarEvents]
+  );
+
+  const createPersonalReminder = useCallback(
+    async (input: {
+      title: string;
+      date: string;
+      startTime: string;
+      notes: string;
+      repeatFreq?: CalendarRecurrenceFreq;
+      repeatInterval?: number;
+      repeatUntil?: string;
+      repeatWeekdays?: number[];
+      excludedDates?: string[];
+    }) => {
+      const uid = auth.currentUser?.uid;
+      const email = (auth.currentUser?.email || currentAccount?.email || '').trim().toLowerCase();
+      if (!uid || !email || !currentAccount) {
+        throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
+      }
+      const cleanTitle = input.title.trim().slice(0, 120);
+      if (!cleanTitle) {
+        throw new Error('Judul reminder wajib diisi.');
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) {
+        throw new Error('Tanggal reminder tidak valid.');
+      }
+      if (!isValidCalendarStartTime(input.startTime)) {
+        throw new Error('Jam reminder hanya diperbolehkan antara 08:00 hingga 19:00 (kelipatan 30 menit).');
+      }
+      const repeatFreq = normalizeCalendarRecurrenceFreq(input.repeatFreq);
+      const repeatInterval = normalizeCalendarInterval(input.repeatInterval);
+      const rawUntil = (input.repeatUntil || '').trim();
+      if (rawUntil && !/^\d{4}-\d{2}-\d{2}$/.test(rawUntil)) {
+        throw new Error('Tanggal akhir pengulangan tidak valid.');
+      }
+      if (rawUntil && rawUntil < input.date) {
+        throw new Error('Tanggal akhir pengulangan tidak boleh lebih awal dari tanggal reminder.');
+      }
+      const repeatUntil = repeatFreq === 'none' ? '' : rawUntil;
+      const repeatWeekdays =
+        repeatFreq === 'weekly' ? normalizeCalendarWeekdays(input.repeatWeekdays) : [];
+      const excludedDates = normalizeExcludedDates(input.excludedDates);
+      const createdByName =
+        ((currentAccount.name || '').trim() || email).slice(0, 80).trim() || email.slice(0, 80);
+
+      const remId = `rem_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const remPath = `personalReminders/${remId}`;
+      try {
+        await setDoc(doc(db, 'personalReminders', remId), {
+          title: cleanTitle,
+          date: input.date,
+          startTime: input.startTime,
+          notes: (input.notes || '').trim().slice(0, 500),
+          repeatFreq,
+          repeatInterval,
+          repeatUntil,
+          repeatWeekdays,
+          excludedDates,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          createdBy: uid,
+          updatedBy: uid,
+          createdByEmail: email.slice(0, 120),
+          createdByName,
+        });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.CREATE, remPath);
+      }
+      return remId;
+    },
+    [currentAccount]
+  );
+
+  const updatePersonalReminder = useCallback(
+    async (
+      reminderId: string,
+      input: {
+        title: string;
+        date: string;
+        startTime: string;
+        notes: string;
+        repeatFreq?: CalendarRecurrenceFreq;
+        repeatInterval?: number;
+        repeatUntil?: string;
+        repeatWeekdays?: number[];
+        excludedDates?: string[];
+      }
+    ) => {
+      const uid = auth.currentUser?.uid;
+      if (!uid || !currentAccount) {
+        throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
+      }
+      const cleanTitle = input.title.trim().slice(0, 120);
+      if (!cleanTitle) {
+        throw new Error('Judul reminder wajib diisi.');
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(input.date)) {
+        throw new Error('Tanggal reminder tidak valid.');
+      }
+      if (!isValidCalendarStartTime(input.startTime)) {
+        throw new Error('Jam reminder hanya diperbolehkan antara 08:00 hingga 19:00 (kelipatan 30 menit).');
+      }
+      const repeatFreq = normalizeCalendarRecurrenceFreq(input.repeatFreq);
+      const repeatInterval = normalizeCalendarInterval(input.repeatInterval);
+      const rawUntil = (input.repeatUntil || '').trim();
+      if (rawUntil && !/^\d{4}-\d{2}-\d{2}$/.test(rawUntil)) {
+        throw new Error('Tanggal akhir pengulangan tidak valid.');
+      }
+      if (rawUntil && rawUntil < input.date) {
+        throw new Error('Tanggal akhir pengulangan tidak boleh lebih awal dari tanggal reminder.');
+      }
+      const repeatUntil = repeatFreq === 'none' ? '' : rawUntil;
+      const repeatWeekdays =
+        repeatFreq === 'weekly' ? normalizeCalendarWeekdays(input.repeatWeekdays) : [];
+      const excludedDates = normalizeExcludedDates(input.excludedDates);
+
+      const remPath = `personalReminders/${reminderId}`;
+      try {
+        await updateDoc(doc(db, 'personalReminders', reminderId), {
+          title: cleanTitle,
+          date: input.date,
+          startTime: input.startTime,
+          notes: (input.notes || '').trim().slice(0, 500),
+          repeatFreq,
+          repeatInterval,
+          repeatUntil,
+          repeatWeekdays,
+          excludedDates,
+          updatedAt: serverTimestamp(),
+          updatedBy: uid,
+        });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, remPath);
+      }
+    },
+    [currentAccount]
+  );
+
+  const deletePersonalReminder = useCallback(
+    async (reminderId: string) => {
+      const uid = auth.currentUser?.uid;
+      if (!uid || !currentAccount) {
+        throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
+      }
+      const remPath = `personalReminders/${reminderId}`;
+      try {
+        await deleteDoc(doc(db, 'personalReminders', reminderId));
+      } catch (error) {
+        handleFirestoreError(error, OperationType.DELETE, remPath);
       }
     },
     [currentAccount]
@@ -499,6 +951,12 @@ export function useCalendarAndRecordsActions({
     createCalendarEvent,
     updateCalendarEvent,
     deleteCalendarEvent,
+    bulkCreateAssignEvents,
+    updateAssignResponse,
+    dismissAssignNotification,
+    createPersonalReminder,
+    updatePersonalReminder,
+    deletePersonalReminder,
     addCalendarBanner,
     updateCalendarBanner,
     deleteCalendarBanner,

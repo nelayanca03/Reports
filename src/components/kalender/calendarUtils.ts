@@ -1,13 +1,39 @@
-import { CalendarRecurrenceFreq, OperationalRoleId } from '../../types/outlet';
+import {
+  CalendarAssignScope,
+  CalendarAssignStatus,
+  CalendarEvent,
+  CalendarRecurrenceFreq,
+  OperationalRoleId,
+  PersonalReminder,
+} from '../../types/outlet';
 import { parseUtcDate, shiftIsoDays } from '../../utils/outletLogic';
 
 export type CalendarViewMode = 'month' | 'week' | 'day';
+export type CalendarFormMode = 'assign' | 'personal';
 
 export interface CalendarEventFormPayload {
   title: string;
   date: string;
   startTime: string;
-  visibleTo: OperationalRoleId[];
+  assignScope?: CalendarAssignScope;
+  assignedDivision?: OperationalRoleId | '';
+  assignedPic: string;
+  assignedRole: OperationalRoleId;
+  assignedEmail?: string;
+  assignedOutlet?: string;
+  notes: string;
+  assignStatus?: CalendarAssignStatus;
+  returnTime?: string;
+  cancelReason?: string;
+  notificationDismissed?: boolean;
+  resetDismissedBy?: boolean;
+  visibleTo?: OperationalRoleId[];
+}
+
+export interface PersonalReminderFormPayload {
+  title: string;
+  date: string;
+  startTime: string;
   notes: string;
   repeatFreq?: CalendarRecurrenceFreq;
   repeatInterval?: number;
@@ -15,6 +41,26 @@ export interface CalendarEventFormPayload {
   repeatWeekdays?: number[];
   excludedDates?: string[];
 }
+
+export type CalendarGridItem =
+  | {
+      kind: 'assign';
+      key: string;
+      occurrenceDate: string;
+      startTime: string;
+      title: string;
+      isRecurring: boolean;
+      event: CalendarEvent;
+    }
+  | {
+      kind: 'personal';
+      key: string;
+      occurrenceDate: string;
+      startTime: string;
+      title: string;
+      isRecurring: boolean;
+      reminder: PersonalReminder;
+    };
 
 export const WEEKDAY_SHORT = ['Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab', 'Min'];
 

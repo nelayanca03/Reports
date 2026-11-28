@@ -1,4 +1,5 @@
 import { Suspense, lazy, useState } from 'react';
+import { AssignNotificationBanner } from './components/AssignNotificationBanner';
 import { LoginView } from './components/LoginView';
 import { Sidebar } from './components/Sidebar';
 import { TopBar } from './components/TopBar';
@@ -37,6 +38,7 @@ import {
   buildRecapTable,
   buildVisitTable,
   currentMonthKey,
+  getPendingAssignNotifications,
   getPeopleMap,
   getPersonList,
   mergeWorkspaceStates,
@@ -66,6 +68,7 @@ export default function App() {
     resetSecurity,
     inputLogs,
     calendarEvents,
+    personalReminders,
     calendarBanners,
     savedRecords,
     firebaseStorage,
@@ -89,6 +92,12 @@ export default function App() {
     createCalendarEvent,
     updateCalendarEvent,
     deleteCalendarEvent,
+    bulkCreateAssignEvents,
+    updateAssignResponse,
+    dismissAssignNotification,
+    createPersonalReminder,
+    updatePersonalReminder,
+    deletePersonalReminder,
     addCalendarBanner,
     updateCalendarBanner,
     deleteCalendarBanner,
@@ -113,6 +122,11 @@ export default function App() {
   const [rekapRangeTo, setRekapRangeTo] = useState<string>(() => todayIso());
   const [dailyModalJumpTrigger, setDailyModalJumpTrigger] = useState<number>(0);
   const [editingDailyRecord, setEditingDailyRecord] = useState<SavedRecord | null>(null);
+  const [calendarFocusAssign, setCalendarFocusAssign] = useState<{
+    eventId: string;
+    date: string;
+    seq: number;
+  } | null>(null);
 
   const accountId = currentAccount?.id || '';
   const [prevAccountId, setPrevAccountId] = useState<string>('');
@@ -255,6 +269,11 @@ export default function App() {
 
   const isAdmin = currentAccount.role === 'admin';
   const isPrimaryAdmin = currentAccount.email.toLowerCase() === BOOTSTRAPPED_ADMIN_EMAIL;
+  const pendingAssignNotifications = getPendingAssignNotifications(
+    calendarEvents,
+    currentAccount,
+    firebaseUser?.uid
+  );
 
   const handleChangePerson = (person: string) => {
     setSelectedPerson(person);
@@ -377,6 +396,18 @@ export default function App() {
 
   return (
     <div className="flex min-h-screen bg-slate-50 text-slate-800 dark:bg-slate-950 dark:text-slate-100">
+      <AssignNotificationBanner
+        notifications={pendingAssignNotifications}
+        onDismiss={dismissAssignNotification}
+        onOpenEvent={(evt) => {
+          setCalendarFocusAssign((prev) => ({
+            eventId: evt.id,
+            date: evt.date,
+            seq: (prev?.seq || 0) + 1,
+          }));
+          setActiveView('calendar');
+        }}
+      />
       <Sidebar
         account={currentAccount}
         activeRoleId={activeRoleId}
@@ -427,10 +458,19 @@ export default function App() {
               <KalenderView
                 account={currentAccount}
                 events={calendarEvents}
+                personalReminders={personalReminders}
+                roleConfigs={roleConfigs}
+                managedAccounts={managedAccounts}
                 bannerImages={calendarBanners}
+                focusAssign={calendarFocusAssign}
                 onCreateEvent={createCalendarEvent}
                 onUpdateEvent={updateCalendarEvent}
                 onDeleteEvent={deleteCalendarEvent}
+                onBulkCreateAssigns={bulkCreateAssignEvents}
+                onUpdateAssignResponse={updateAssignResponse}
+                onCreatePersonalReminder={createPersonalReminder}
+                onUpdatePersonalReminder={updatePersonalReminder}
+                onDeletePersonalReminder={deletePersonalReminder}
                 onAddBannerImage={addCalendarBanner}
                 onUpdateBannerImage={updateCalendarBanner}
                 onDeleteBannerImage={deleteCalendarBanner}
@@ -501,6 +541,7 @@ export default function App() {
                 days={days}
                 selectedPerson={effectiveSelectedPerson}
                 onSaveVisitDay={saveVisitDay}
+                onUpdateAssignResponse={updateAssignResponse}
                 onJumpToInput={handleJumpToInput}
               />
             )}

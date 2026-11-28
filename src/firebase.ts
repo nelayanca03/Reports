@@ -74,6 +74,31 @@ export function handleFirestoreError(
   throw new Error(JSON.stringify(errInfo));
 }
 
+export function formatFriendlyFirestoreError(error: unknown, fallback: string): string {
+  const raw = error instanceof Error ? error.message : typeof error === 'string' ? error : '';
+  if (!raw) return fallback;
+  const trimmed = raw.trim();
+  if (trimmed.startsWith('{') && trimmed.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(trimmed) as Partial<FirestoreErrorInfo>;
+      const inner = typeof parsed.error === 'string' ? parsed.error : '';
+      if (/Missing or insufficient permissions/i.test(inner)) {
+        return 'Akses ditolak oleh aturan keamanan database. Pastikan Anda login dengan akun yang sesuai, lalu muat ulang halaman dan coba lagi.';
+      }
+      if (/Quota exceeded/i.test(inner)) {
+        return 'Kuota harian database tercapai. Silakan coba lagi besok atau tingkatkan paket Firebase.';
+      }
+      if (/offline|unavailable|network/i.test(inner)) {
+        return 'Koneksi ke server terputus. Periksa jaringan internet Anda lalu coba lagi.';
+      }
+      if (inner) return inner;
+    } catch {
+      // Fallback to raw message below if JSON parse fails
+    }
+  }
+  return raw;
+}
+
 async function testConnection() {
   try {
     await getDocFromServer(doc(db, 'test', 'connection'));

@@ -1131,6 +1131,8 @@ export function getVisitEntries(visitItem?: VisitItem): VisitEntry[] {
       f: entry.f || '',
       t: entry.t || '',
       n: entry.n || '',
+      ...(entry.assignEventId ? { assignEventId: entry.assignEventId } : {}),
+      ...(entry.assignStatus ? { assignStatus: entry.assignStatus } : {}),
     }));
   }
   if (visitItem.ok || visitItem.outlet || visitItem.f || visitItem.t || visitItem.n) {
@@ -1637,12 +1639,96 @@ export function normalizeCalendarVisibleTo(roles: OperationalRoleId[]): Operatio
   return unique;
 }
 
+export function isValidCalendarReturnTime(time: string): boolean {
+  if (!time) return true;
+  return /^([01]\d|2[0-3]):[0-5]\d$/.test(time);
+}
+
+export function getAccountPicUpper(
+  account: Pick<AccountProfile, 'picName' | 'name'> | null | undefined
+): string {
+  if (!account) return '';
+  return ((account.picName || '').trim() || (account.name || '').trim()).toUpperCase();
+}
+
 export function canUserViewCalendarEvent(
-  event: Pick<CalendarEvent, 'visibleTo'>,
-  accountRole: AccountRole
+  event: Pick<
+    CalendarEvent,
+    | 'visibleTo'
+    | 'eventType'
+    | 'assignScope'
+    | 'assignedDivision'
+    | 'assignedPic'
+    | 'assignedPicUpper'
+    | 'assignedEmail'
+  >,
+  accountOrRole:
+    | AccountRole
+    | Pick<AccountProfile, 'role' | 'picName' | 'name' | 'email'>
 ): boolean {
-  if (accountRole === 'admin' || accountRole === 'accounting') return true;
-  return event.visibleTo.includes(accountRole);
+  if (typeof accountOrRole === 'string') {
+    if (accountOrRole === 'admin') return true;
+    if (event.eventType === 'assign') {
+      return event.assignScope === 'division' && event.assignedDivision === accountOrRole;
+    }
+    return event.visibleTo.includes(accountOrRole);
+  }
+  if (accountOrRole.role === 'admin') return true;
+  if (event.eventType !== 'assign') return false;
+  if (event.assignScope === 'division') {
+    return Boolean(event.assignedDivision && event.assignedDivision === accountOrRole.role);
+  }
+  const myPicUpper = getAccountPicUpper(accountOrRole);
+  const eventPicUpper = (
+    event.assignedPicUpper ||
+    (event.assignedPic || '').trim().toUpperCase()
+  ).trim();
+  if (myPicUpper && eventPicUpper && eventPicUpper === myPicUpper) {
+    return true;
+  }
+  const myEmail = (accountOrRole.email || '').trim().toLowerCase();
+  const eventEmail = (event.assignedEmail || '').trim().toLowerCase();
+  if (myEmail && eventEmail && eventEmail === myEmail) {
+    return true;
+  }
+  return false;
+}
+
+export function getEffectiveAssignResponse(
+  event: Pick<
+    CalendarEvent,
+    'assignScope' | 'assignStatus' | 'returnTime' | 'cancelReason' | 'picResponses'
+  >,
+  picUpper?: string
+): {
+  status: import('../types/outlet').CalendarAssignStatus;
+  returnTime: string;
+  cancelReason: string;
+} {
+  const globalStatus = event.assignStatus || 'assigned';
+  if (globalStatus === 'cancelled') {
+    return {
+      status: 'cancelled',
+      returnTime: '',
+      cancelReason: event.cancelReason || '',
+    };
+  }
+  if (event.assignScope === 'division' && picUpper) {
+    const resp = event.picResponses?.[picUpper.trim().toUpperCase()];
+    if (resp) {
+      return {
+        status: resp.status || 'assigned',
+        returnTime: resp.status === 'cancelled' ? '' : resp.returnTime || '',
+        cancelReason: resp.status === 'cancelled' ? resp.cancelReason || '' : '',
+      };
+    }
+    return { status: 'assigned', returnTime: '', cancelReason: '' };
+  }
+  return {
+    status: globalStatus,
+    returnTime: event.returnTime || '',
+    cancelReason: event.cancelReason || '',
+  };
 }
 
 export function formatCalendarVisibleLabel(visibleTo: OperationalRoleId[]): string {
@@ -2069,4 +2155,263 @@ export function buildOutletsByPicMap(
     }
   }
   return map;
+}
+
+export interface AssignablePicOption {
+  pic: string;
+  picUpper: string;
+  roleId: OperationalRoleId;
+  email: string;
+  outlets: string[];
+}
+
+export function resolveAllAssignablePics(
+  roleConfigs: Record<OperationalRoleId, RoleConfig>,
+  managedAccounts: AccountProfile[] = []
+): AssignablePicOption[] {
+  const roleOrder: OperationalRoleId[] = ['stock_accounting', 'gl', 'accounting'];
+  const byKey = new Map<string, AssignablePicOption>();
+
+  const accountByRolePic = new Map<string, AccountProfile>();
+  const accountByPic = new Map<string, AccountProfile>();
+  for (const acc of managedAccounts) {
+    if (!acc.active || acc.role === 'admin') continue;
+    const picUpper = getAccountPicUpper(acc);
+    if (!picUpper) continue;
+    accountByRolePic.set(`${acc.role}|${picUpper}`, acc);
+    if (!accountByPic.has(picUpper)) {
+      accountByPic.set(picUpper, acc);
+    }
+  }
+
+  for (const roleId of roleOrder) {
+    const outlets = roleConfigs[roleId]?.outlets || [];
+    for (const item of outlets) {
+      const pic = (item.person || '').trim();
+      const code = (item.code || '').trim();
+      if (!pic) continue;
+      const picUpper = pic.toUpperCase();
+      const key = `${roleId}|${picUpper}`;
+      const matchedAcc =
+        accountByRolePic.get(key) || accountByPic.get(picUpper);
+      const existing = byKey.get(key);
+      if (!existing) {
+        byKey.set(key, {
+          pic,
+          picUpper,
+          roleId,
+          email: (matchedAcc?.email || '').trim().toLowerCase(),
+          outlets: code ? [code] : [],
+        });
+      } else {
+        if (code && !existing.outlets.includes(code)) {
+          existing.outlets.push(code);
+        }
+        if (!existing.email && matchedAcc?.email) {
+          existing.email = matchedAcc.email.trim().toLowerCase();
+        }
+      }
+    }
+  }
+
+  for (const acc of managedAccounts) {
+    if (!acc.active || acc.role === 'admin') continue;
+    const roleId = acc.role as OperationalRoleId;
+    const pic = (acc.picName || '').trim() || (acc.name || '').trim();
+    if (!pic) continue;
+    const picUpper = pic.toUpperCase();
+    const key = `${roleId}|${picUpper}`;
+    if (!byKey.has(key)) {
+      byKey.set(key, {
+        pic,
+        picUpper,
+        roleId,
+        email: (acc.email || '').trim().toLowerCase(),
+        outlets: [],
+      });
+    }
+  }
+
+  return Array.from(byKey.values())
+    .map((item) => ({
+      ...item,
+      outlets: [...item.outlets].sort((a, b) => a.localeCompare(b)),
+    }))
+    .sort(
+      (a, b) =>
+        roleOrder.indexOf(a.roleId) - roleOrder.indexOf(b.roleId) ||
+        a.pic.localeCompare(b.pic)
+    );
+}
+
+export function mergeAssignsIntoVisitMap(
+  baseVisit: Record<string, VisitItem>,
+  calendarEvents: CalendarEvent[],
+  roleId: OperationalRoleId,
+  outlets: OutletAssignment[]
+): Record<string, VisitItem> {
+  const canonicalPicByUpper = new Map<string, string>();
+  for (const item of outlets) {
+    const p = (item.person || '').trim();
+    if (p && !canonicalPicByUpper.has(p.toUpperCase())) {
+      canonicalPicByUpper.set(p.toUpperCase(), p);
+    }
+  }
+
+  const nextVisit: Record<string, VisitItem> = {};
+  for (const [key, item] of Object.entries(baseVisit || {})) {
+    const manualEntries = getVisitEntries(item).filter((e) => !e.assignEventId);
+    if (manualEntries.length > 0) {
+      const first = manualEntries[0];
+      nextVisit[key] = {
+        ok: true,
+        outlet: first.outlet,
+        f: first.f,
+        t: first.t,
+        n: first.n,
+        entries: manualEntries,
+      };
+    }
+  }
+
+  const assignEntriesByKey = new Map<string, VisitEntry[]>();
+  const divisionPicList = getPersonList(outlets);
+
+  const pushAssignEntry = (
+    pic: string,
+    evt: CalendarEvent,
+    status: import('../types/outlet').CalendarAssignStatus,
+    returnTime: string
+  ) => {
+    if (!pic || status === 'cancelled') return;
+    const key = `${pic}|${evt.date}`;
+    const noteText = evt.notes ? `${evt.title} — ${evt.notes}` : evt.title;
+    const entry: VisitEntry = {
+      id: `assign_${evt.id}_${pic.toUpperCase()}`,
+      outlet: (evt.assignedOutlet || '').trim() || 'Assign',
+      f: evt.startTime || '08:00',
+      t: returnTime || '',
+      n: noteText.slice(0, 100),
+      assignEventId: evt.id,
+      assignStatus: status,
+    };
+    const list = assignEntriesByKey.get(key) || [];
+    list.push(entry);
+    assignEntriesByKey.set(key, list);
+  };
+
+  for (const evt of calendarEvents) {
+    if (evt.eventType !== 'assign') continue;
+    if (evt.assignStatus === 'cancelled') continue;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(evt.date)) continue;
+
+    if (evt.assignScope === 'division') {
+      const targetDiv = evt.assignedDivision || evt.assignedRole;
+      if (targetDiv !== roleId) continue;
+      for (const pic of divisionPicList) {
+        const eff = getEffectiveAssignResponse(evt, pic.toUpperCase());
+        pushAssignEntry(pic, evt, eff.status, eff.returnTime);
+      }
+      continue;
+    }
+
+    if (evt.assignedRole !== roleId) continue;
+    const picUpper = (
+      evt.assignedPicUpper ||
+      (evt.assignedPic || '').trim().toUpperCase()
+    ).trim();
+    if (!picUpper) continue;
+
+    const pic = canonicalPicByUpper.get(picUpper) || (evt.assignedPic || '').trim();
+    pushAssignEntry(pic, evt, evt.assignStatus || 'assigned', evt.returnTime || '');
+  }
+
+  for (const [key, assignEntries] of assignEntriesByKey.entries()) {
+    assignEntries.sort(
+      (a, b) => a.f.localeCompare(b.f) || a.id.localeCompare(b.id)
+    );
+    const existingManual = nextVisit[key]?.entries || [];
+    const combined = [...assignEntries, ...existingManual];
+    const first = combined[0];
+    nextVisit[key] = {
+      ok: true,
+      outlet: first.outlet,
+      f: first.f,
+      t: first.t,
+      n: first.n,
+      entries: combined,
+    };
+  }
+
+  return nextVisit;
+}
+
+export function getPendingAssignNotifications(
+  calendarEvents: CalendarEvent[],
+  account: Pick<AccountProfile, 'role' | 'picName' | 'name' | 'email'> | null,
+  currentUid?: string
+): CalendarEvent[] {
+  if (!account) return [];
+  const myPicUpper = getAccountPicUpper(account);
+  const myEmail = (account.email || '').trim().toLowerCase();
+
+  return calendarEvents
+    .filter((evt) => {
+      if (evt.eventType !== 'assign') return false;
+      if (evt.assignStatus === 'cancelled') return false;
+      const dismissedBy = evt.dismissedBy || [];
+      if (currentUid && dismissedBy.includes(currentUid)) return false;
+
+      if (evt.assignScope === 'division') {
+        if (account.role === 'admin') return false;
+        if (!evt.assignedDivision || evt.assignedDivision !== account.role) return false;
+        const eff = getEffectiveAssignResponse(evt, myPicUpper);
+        if (eff.status === 'cancelled') return false;
+        return true;
+      }
+
+      if (evt.notificationDismissed) return false;
+      const evtPicUpper = (
+        evt.assignedPicUpper ||
+        (evt.assignedPic || '').trim().toUpperCase()
+      ).trim();
+      const evtEmail = (evt.assignedEmail || '').trim().toLowerCase();
+      const matchesPic = Boolean(myPicUpper && evtPicUpper && evtPicUpper === myPicUpper);
+      const matchesEmail = Boolean(myEmail && evtEmail && evtEmail === myEmail);
+      return matchesPic || matchesEmail;
+    })
+    .sort((a, b) => {
+      const aTime = a.createdAtIso || `${a.date}T${a.startTime || '00:00'}:00.000Z`;
+      const bTime = b.createdAtIso || `${b.date}T${b.startTime || '00:00'}:00.000Z`;
+      return bTime.localeCompare(aTime) || b.id.localeCompare(a.id);
+    });
+}
+
+export interface ExpandedPersonalReminderOccurrence {
+  reminder: import('../types/outlet').PersonalReminder;
+  occurrenceDate: string;
+  isRecurring: boolean;
+}
+
+export function expandPersonalRemindersForRange(
+  reminders: import('../types/outlet').PersonalReminder[],
+  rangeStart: string,
+  rangeEnd: string
+): ExpandedPersonalReminderOccurrence[] {
+  const pseudoEvents = reminders.map((r) => ({
+    ...r,
+    visibleTo: [] as OperationalRoleId[],
+  })) as unknown as CalendarEvent[];
+  const byId = new Map(reminders.map((r) => [r.id, r]));
+  return expandCalendarEventsForRange(pseudoEvents, rangeStart, rangeEnd)
+    .map((occ) => {
+      const reminder = byId.get(occ.event.id);
+      if (!reminder) return null;
+      return {
+        reminder,
+        occurrenceDate: occ.occurrenceDate,
+        isRecurring: occ.isRecurring,
+      };
+    })
+    .filter((x): x is ExpandedPersonalReminderOccurrence => x !== null);
 }

@@ -1,80 +1,116 @@
-import { Repeat, X } from 'lucide-react';
+import { Bell, Repeat, UserCheck, Users, X } from 'lucide-react';
 import { FormEvent } from 'react';
-import { CalendarRecurrenceFreq, OperationalRoleId } from '../../types/outlet';
 import {
+  CalendarAssignScope,
+  CalendarRecurrenceFreq,
+  OperationalRoleId,
+} from '../../types/outlet';
+import {
+  AssignablePicOption,
   CALENDAR_TIME_SLOTS,
+  ROLE_LABELS,
   formatCalendarRecurrenceLabel,
   normalizeCalendarInterval,
   parseUtcDate,
 } from '../../utils/outletLogic';
-import { WEEKDAY_DOW_MAP } from './calendarUtils';
+import { CalendarFormMode, WEEKDAY_DOW_MAP } from './calendarUtils';
 
 interface KalenderFormModalProps {
   open: boolean;
-  editingEventId: string | null;
+  isAdmin: boolean;
+  mode: CalendarFormMode;
+  editingId: string | null;
   busy: boolean;
   formError: string | null;
   formTitle: string;
   formDate: string;
   formStartTime: string;
-  formVisibleTo: OperationalRoleId[];
   formNotes: string;
+  // Assign mode fields
+  assignablePics: AssignablePicOption[];
+  allMasterOutlets: string[];
+  formAssignScope: CalendarAssignScope;
+  formAssignedDivision: OperationalRoleId;
+  formAssignedPicKey: string;
+  formAssignedOutlet: string;
+  // Personal reminder recurrence fields
   formRepeatFreq: CalendarRecurrenceFreq;
   formRepeatInterval: number;
   formRepeatWeekdays: number[];
   formRepeatEndMode: 'never' | 'until';
   formRepeatUntil: string;
   formExcludedDates: string[];
-  allDeptsSelected: boolean;
   onClose: () => void;
+  onChangeMode: (nextMode: CalendarFormMode) => void;
   onSubmit: (e: FormEvent) => Promise<void>;
   onChangeTitle: (value: string) => void;
   onChangeDate: (value: string) => void;
   onChangeStartTime: (value: string) => void;
   onChangeNotes: (value: string) => void;
+  onChangeAssignScope: (scope: CalendarAssignScope) => void;
+  onChangeAssignedDivision: (roleId: OperationalRoleId) => void;
+  onChangeAssignedPicKey: (picKey: string) => void;
+  onChangeAssignedOutlet: (outlet: string) => void;
   onChangeRepeatFreq: (freq: CalendarRecurrenceFreq) => void;
   onChangeRepeatInterval: (interval: number) => void;
   onChangeRepeatEndMode: (mode: 'never' | 'until') => void;
   onChangeRepeatUntil: (value: string) => void;
   onToggleRepeatWeekday: (dow: number) => void;
   onRestoreExcludedDates: () => void;
-  onToggleAllDepts: () => void;
-  onToggleDept: (roleId: OperationalRoleId) => void;
 }
 
 export function KalenderFormModal({
   open,
-  editingEventId,
+  isAdmin,
+  mode,
+  editingId,
   busy,
   formError,
   formTitle,
   formDate,
   formStartTime,
-  formVisibleTo,
   formNotes,
+  assignablePics,
+  allMasterOutlets,
+  formAssignScope,
+  formAssignedDivision,
+  formAssignedPicKey,
+  formAssignedOutlet,
   formRepeatFreq,
   formRepeatInterval,
   formRepeatWeekdays,
   formRepeatEndMode,
   formRepeatUntil,
   formExcludedDates,
-  allDeptsSelected,
   onClose,
+  onChangeMode,
   onSubmit,
   onChangeTitle,
   onChangeDate,
   onChangeStartTime,
   onChangeNotes,
+  onChangeAssignScope,
+  onChangeAssignedDivision,
+  onChangeAssignedPicKey,
+  onChangeAssignedOutlet,
   onChangeRepeatFreq,
   onChangeRepeatInterval,
   onChangeRepeatEndMode,
   onChangeRepeatUntil,
   onToggleRepeatWeekday,
   onRestoreExcludedDates,
-  onToggleAllDepts,
-  onToggleDept,
 }: KalenderFormModalProps) {
   if (!open) return null;
+
+  const isAssignMode = mode === 'assign';
+  const isDivisionScope = formAssignScope === 'division';
+  const selectedPicOption = assignablePics.find(
+    (p) => `${p.roleId}|${p.picUpper}` === formAssignedPicKey
+  );
+  const picOutlets = isDivisionScope ? [] : selectedPicOption?.outlets || [];
+  const otherOutlets = allMasterOutlets.filter((o) => !picOutlets.includes(o));
+
+  const rolesOrder: OperationalRoleId[] = ['stock_accounting', 'gl', 'accounting'];
 
   return (
     <div
@@ -89,32 +125,229 @@ export function KalenderFormModal({
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-3 border-b border-slate-100 pb-4 dark:border-slate-800">
-          <div>
-            <h3
-              id="event-form-title"
-              className="text-base font-bold text-slate-900 dark:text-slate-100"
+          <div className="flex items-start gap-2.5">
+            <span
+              className={`mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
+                isAssignMode
+                  ? 'bg-blue-100 text-blue-700 dark:bg-blue-950/70 dark:text-blue-400'
+                  : 'bg-violet-100 text-violet-700 dark:bg-violet-950/70 dark:text-violet-400'
+              }`}
             >
-              {editingEventId ? 'Edit Event Kalender' : 'Buat Event Kalender Baru'}
-            </h3>
-            <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
-              Isi detail jadwal dan pilih departemen yang diizinkan melihat event ini.
-            </p>
+              {isAssignMode ? (
+                isDivisionScope ? (
+                  <Users className="h-4 w-4" />
+                ) : (
+                  <UserCheck className="h-4 w-4" />
+                )
+              ) : (
+                <Bell className="h-4 w-4" />
+              )}
+            </span>
+            <div>
+              <h3
+                id="event-form-title"
+                className="text-base font-bold text-slate-900 dark:text-slate-100"
+              >
+                {isAssignMode
+                  ? editingId
+                    ? 'Edit Assign'
+                    : isDivisionScope
+                      ? 'Buat Assign Divisi'
+                      : 'Buat Assign PIC'
+                  : editingId
+                    ? 'Edit Reminder Personal'
+                    : 'Buat Reminder Personal'}
+              </h3>
+              <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                {isAssignMode
+                  ? isDivisionScope
+                    ? 'Assign tampil di kalender semua akun divisi yang dipilih saat login, memicu notifikasi pop-up, dan otomatis menambah kunjungan.'
+                    : 'Assign langsung tampil di akun PIC yang dipilih saat login, memicu notifikasi pop-up, dan otomatis menambah kunjungan.'
+                  : 'Reminder personal bersifat privat dan hanya tampil di kalender Anda sendiri.'}
+              </p>
+            </div>
           </div>
           <button
             type="button"
             disabled={busy}
             onClick={onClose}
-            aria-label="Tutup form event"
+            aria-label="Tutup form"
             className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
           >
             <X className="h-4 w-4" />
           </button>
         </div>
 
+        {isAdmin && !editingId && (
+          <div className="mt-4 inline-flex w-full rounded-lg border border-slate-200 bg-slate-50 p-1 dark:border-slate-700 dark:bg-slate-800">
+            <button
+              type="button"
+              onClick={() => onChangeMode('assign')}
+              className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                isAssignMode
+                  ? 'bg-blue-700 text-white dark:bg-blue-600'
+                  : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100'
+              }`}
+            >
+              Assign PIC / Divisi
+            </button>
+            <button
+              type="button"
+              onClick={() => onChangeMode('personal')}
+              className={`flex-1 rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                !isAssignMode
+                  ? 'bg-violet-700 text-white dark:bg-violet-600'
+                  : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100'
+              }`}
+            >
+              Reminder Personal
+            </button>
+          </div>
+        )}
+
         <form onSubmit={onSubmit} className="mt-4 space-y-4">
           {formError && (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-3.5 py-2.5 text-xs font-medium text-red-700 dark:border-red-900/60 dark:bg-red-950/50 dark:text-red-300">
+            <div className="overflow-hidden break-words rounded-lg border border-red-200 bg-red-50 px-3.5 py-2.5 text-xs font-medium leading-relaxed text-red-700 dark:border-red-900/60 dark:bg-red-950/50 dark:text-red-300">
               {formError}
+            </div>
+          )}
+
+          {isAssignMode && (
+            <div className="space-y-3">
+              <div>
+                <span className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  Target Penugasan
+                </span>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => onChangeAssignScope('pic')}
+                    className={`flex min-h-[38px] items-center justify-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                      !isDivisionScope
+                        ? 'border-blue-700 bg-blue-50 text-blue-800 dark:border-blue-500 dark:bg-blue-950/60 dark:text-blue-200'
+                        : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
+                    }`}
+                  >
+                    <UserCheck className="h-3.5 w-3.5" />
+                    <span>PIC Khusus</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onChangeAssignScope('division')}
+                    className={`flex min-h-[38px] items-center justify-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                      isDivisionScope
+                        ? 'border-blue-700 bg-blue-50 text-blue-800 dark:border-blue-500 dark:bg-blue-950/60 dark:text-blue-200'
+                        : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
+                    }`}
+                  >
+                    <Users className="h-3.5 w-3.5" />
+                    <span>Assign Divisi</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                {!isDivisionScope ? (
+                  <div>
+                    <label
+                      htmlFor="assign-pic-select"
+                      className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300"
+                    >
+                      PIC Tujuan
+                    </label>
+                    <select
+                      id="assign-pic-select"
+                      required
+                      value={formAssignedPicKey}
+                      onChange={(e) => onChangeAssignedPicKey(e.target.value)}
+                      className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                    >
+                      <option value="">Pilih PIC...</option>
+                      {rolesOrder.map((roleId) => {
+                        const group = assignablePics.filter((p) => p.roleId === roleId);
+                        if (group.length === 0) return null;
+                        return (
+                          <optgroup key={roleId} label={ROLE_LABELS[roleId]}>
+                            {group.map((opt) => (
+                              <option
+                                key={`${opt.roleId}|${opt.picUpper}`}
+                                value={`${opt.roleId}|${opt.picUpper}`}
+                              >
+                                {opt.pic}
+                                {opt.outlets.length > 0 ? ` (${opt.outlets.length} outlet)` : ''}
+                              </option>
+                            ))}
+                          </optgroup>
+                        );
+                      })}
+                    </select>
+                  </div>
+                ) : (
+                  <div>
+                    <label
+                      htmlFor="assign-division-select"
+                      className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300"
+                    >
+                      Divisi Tujuan
+                    </label>
+                    <select
+                      id="assign-division-select"
+                      required
+                      value={formAssignedDivision}
+                      onChange={(e) =>
+                        onChangeAssignedDivision(e.target.value as OperationalRoleId)
+                      }
+                      className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                    >
+                      {rolesOrder.map((roleId) => (
+                        <option key={roleId} value={roleId}>
+                          {ROLE_LABELS[roleId]}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                <div>
+                  <label
+                    htmlFor="assign-outlet-select"
+                    className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300"
+                  >
+                    Outlet Tujuan (Opsional)
+                  </label>
+                  <select
+                    id="assign-outlet-select"
+                    value={formAssignedOutlet}
+                    onChange={(e) => onChangeAssignedOutlet(e.target.value)}
+                    className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                  >
+                    <option value="">Tanpa outlet khusus</option>
+                    {picOutlets.length > 0 && (
+                      <optgroup label={`Outlet ${selectedPicOption?.pic || 'PIC'}`}>
+                        {picOutlets.map((code) => (
+                          <option key={code} value={code}>
+                            {code}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {otherOutlets.length > 0 && (
+                      <optgroup label={picOutlets.length > 0 ? 'Outlet Lainnya' : 'Daftar Outlet'}>
+                        {otherOutlets.map((code) => (
+                          <option key={code} value={code}>
+                            {code}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {formAssignedOutlet &&
+                      !picOutlets.includes(formAssignedOutlet) &&
+                      !otherOutlets.includes(formAssignedOutlet) && (
+                        <option value={formAssignedOutlet}>{formAssignedOutlet}</option>
+                      )}
+                  </select>
+                </div>
+              </div>
             </div>
           )}
 
@@ -123,7 +356,7 @@ export function KalenderFormModal({
               htmlFor="evt-title"
               className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300"
             >
-              Judul Event
+              {isAssignMode ? 'Judul Tugas / Penugasan' : 'Judul Reminder'}
             </label>
             <input
               id="evt-title"
@@ -132,7 +365,11 @@ export function KalenderFormModal({
               maxLength={120}
               value={formTitle}
               onChange={(e) => onChangeTitle(e.target.value)}
-              placeholder="Contoh: Cek Asset, Stock Opname, Monthly Closing"
+              placeholder={
+                isAssignMode
+                  ? 'Contoh: Stock Opname Outlet DLS, Cek Asset, Audit Kas'
+                  : 'Contoh: Kirim laporan mingguan, Cek selisih stok'
+              }
               className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
             />
           </div>
@@ -160,7 +397,7 @@ export function KalenderFormModal({
                 htmlFor="evt-start-time"
                 className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300"
               >
-                Jam Mulai (08:00 – 19:00)
+                {isAssignMode ? 'Jam Berangkat (08:00 – 19:00)' : 'Jam Reminder (08:00 – 19:00)'}
               </label>
               <select
                 id="evt-start-time"
@@ -177,232 +414,170 @@ export function KalenderFormModal({
             </div>
           </div>
 
-          <div>
-            <label
-              htmlFor="evt-repeat-freq"
-              className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300"
-            >
-              Pengulangan Event
-            </label>
-            <select
-              id="evt-repeat-freq"
-              value={formRepeatFreq}
-              onChange={(e) => {
-                const nextFreq = e.target.value as CalendarRecurrenceFreq;
-                onChangeRepeatFreq(nextFreq);
-              }}
-              className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-            >
-              <option value="none">Tidak Berulang</option>
-              <option value="daily">Setiap Hari</option>
-              <option value="weekly">Setiap Minggu</option>
-              <option value="monthly">Setiap Bulan</option>
-              <option value="yearly">Setiap Tahun</option>
-            </select>
-
-            {formRepeatFreq !== 'none' && (
-              <div className="mt-2.5 space-y-3 rounded-lg border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-700 dark:bg-slate-800/40">
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div>
-                    <label
-                      htmlFor="evt-repeat-interval"
-                      className="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300"
-                    >
-                      Interval Pengulangan
-                    </label>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-slate-600 dark:text-slate-300">Setiap</span>
-                      <input
-                        id="evt-repeat-interval"
-                        type="number"
-                        min={1}
-                        max={12}
-                        value={formRepeatInterval}
-                        onChange={(e) =>
-                          onChangeRepeatInterval(normalizeCalendarInterval(e.target.value))
-                        }
-                        className="h-[36px] w-16 rounded-lg border border-slate-200 bg-white px-2 text-center font-mono text-xs font-semibold text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                      />
-                      <span className="text-xs text-slate-600 dark:text-slate-300">
-                        {formRepeatFreq === 'daily'
-                          ? 'hari'
-                          : formRepeatFreq === 'weekly'
-                            ? 'minggu'
-                            : formRepeatFreq === 'monthly'
-                              ? 'bulan'
-                              : 'tahun'}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div>
-                    <label
-                      htmlFor="evt-repeat-end-mode"
-                      className="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300"
-                    >
-                      Berakhir Pada
-                    </label>
-                    <select
-                      id="evt-repeat-end-mode"
-                      value={formRepeatEndMode}
-                      onChange={(e) =>
-                        onChangeRepeatEndMode(e.target.value as 'never' | 'until')
-                      }
-                      className="h-[36px] w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                    >
-                      <option value="never">Selamanya (Tanpa Batas)</option>
-                      <option value="until">Sampai Tanggal Tertentu</option>
-                    </select>
-                  </div>
-                </div>
-
-                {formRepeatEndMode === 'until' && (
-                  <div>
-                    <label
-                      htmlFor="evt-repeat-until"
-                      className="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300"
-                    >
-                      Tanggal Akhir Pengulangan
-                    </label>
-                    <input
-                      id="evt-repeat-until"
-                      type="date"
-                      required
-                      min={formDate}
-                      value={formRepeatUntil}
-                      onChange={(e) => onChangeRepeatUntil(e.target.value)}
-                      className="h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 font-mono text-xs text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-                    />
-                  </div>
-                )}
-
-                {formRepeatFreq === 'weekly' && (
-                  <div>
-                    <span className="mb-1.5 block text-[11px] font-medium text-slate-600 dark:text-slate-300">
-                      Ulangi Pada Hari
-                    </span>
-                    <div className="flex flex-wrap gap-1.5">
-                      {WEEKDAY_DOW_MAP.map(({ label, dow }) => {
-                        const active = formRepeatWeekdays.includes(dow);
-                        return (
-                          <button
-                            key={dow}
-                            type="button"
-                            onClick={() => onToggleRepeatWeekday(dow)}
-                            className={`min-h-[32px] rounded-md border px-2.5 py-1 text-[11px] font-semibold transition-colors ${
-                              active
-                                ? 'border-blue-700 bg-blue-700 text-white dark:border-blue-600 dark:bg-blue-600'
-                                : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'
-                            }`}
-                          >
-                            {label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200/80 pt-2 text-[11px] text-slate-600 dark:border-slate-700 dark:text-slate-300">
-                  <span className="inline-flex items-center gap-1.5">
-                    <Repeat className="h-3.5 w-3.5 text-blue-700 dark:text-blue-400" />
-                    <span>
-                      {formatCalendarRecurrenceLabel({
-                        date: formDate,
-                        repeatFreq: formRepeatFreq,
-                        repeatInterval: formRepeatInterval,
-                        repeatWeekdays:
-                          formRepeatWeekdays.length > 0
-                            ? formRepeatWeekdays
-                            : /^\d{4}-\d{2}-\d{2}$/.test(formDate)
-                              ? [parseUtcDate(formDate).getUTCDay()]
-                              : [],
-                        repeatUntil: formRepeatEndMode === 'until' ? formRepeatUntil : '',
-                      })}
-                    </span>
-                  </span>
-
-                  {editingEventId && formExcludedDates.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={onRestoreExcludedDates}
-                      className="font-semibold text-blue-700 hover:underline dark:text-blue-400"
-                    >
-                      Pulihkan {formExcludedDates.length} tgl dilewati
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-
-          <div>
-            <div className="mb-1.5 flex items-center justify-between">
-              <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
-                Tampilkan Event Ke (Visibilitas Departemen)
-              </span>
-              <button
-                type="button"
-                onClick={onToggleAllDepts}
-                className="text-xs font-semibold text-blue-700 hover:underline dark:text-blue-400"
+          {!isAssignMode && (
+            <div>
+              <label
+                htmlFor="evt-repeat-freq"
+                className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300"
               >
-                {allDeptsSelected ? 'Batalkan Semua' : 'Pilih Semua Departemen'}
-              </button>
+                Pengulangan Reminder
+              </label>
+              <select
+                id="evt-repeat-freq"
+                value={formRepeatFreq}
+                onChange={(e) => onChangeRepeatFreq(e.target.value as CalendarRecurrenceFreq)}
+                className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+              >
+                <option value="none">Tidak Berulang</option>
+                <option value="daily">Setiap Hari</option>
+                <option value="weekly">Setiap Minggu</option>
+                <option value="monthly">Setiap Bulan</option>
+                <option value="yearly">Setiap Tahun</option>
+              </select>
+
+              {formRepeatFreq !== 'none' && (
+                <div className="mt-2.5 space-y-3 rounded-lg border border-slate-200 bg-slate-50/80 p-3 dark:border-slate-700 dark:bg-slate-800/40">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div>
+                      <label
+                        htmlFor="evt-repeat-interval"
+                        className="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300"
+                      >
+                        Interval Pengulangan
+                      </label>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs text-slate-600 dark:text-slate-300">Setiap</span>
+                        <input
+                          id="evt-repeat-interval"
+                          type="number"
+                          min={1}
+                          max={12}
+                          value={formRepeatInterval}
+                          onChange={(e) =>
+                            onChangeRepeatInterval(normalizeCalendarInterval(e.target.value))
+                          }
+                          className="h-[36px] w-16 rounded-lg border border-slate-200 bg-white px-2 text-center font-mono text-xs font-semibold text-slate-900 tabular-nums focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                        />
+                        <span className="text-xs text-slate-600 dark:text-slate-300">
+                          {formRepeatFreq === 'daily'
+                            ? 'hari'
+                            : formRepeatFreq === 'weekly'
+                              ? 'minggu'
+                              : formRepeatFreq === 'monthly'
+                                ? 'bulan'
+                                : 'tahun'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div>
+                      <label
+                        htmlFor="evt-repeat-end-mode"
+                        className="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300"
+                      >
+                        Berakhir Pada
+                      </label>
+                      <select
+                        id="evt-repeat-end-mode"
+                        value={formRepeatEndMode}
+                        onChange={(e) =>
+                          onChangeRepeatEndMode(e.target.value as 'never' | 'until')
+                        }
+                        className="h-[36px] w-full rounded-lg border border-slate-200 bg-white px-2.5 text-xs font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                      >
+                        <option value="never">Selamanya (Tanpa Batas)</option>
+                        <option value="until">Sampai Tanggal Tertentu</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  {formRepeatEndMode === 'until' && (
+                    <div>
+                      <label
+                        htmlFor="evt-repeat-until"
+                        className="mb-1 block text-[11px] font-medium text-slate-600 dark:text-slate-300"
+                      >
+                        Tanggal Akhir Pengulangan
+                      </label>
+                      <input
+                        id="evt-repeat-until"
+                        type="date"
+                        required
+                        min={formDate}
+                        value={formRepeatUntil}
+                        onChange={(e) => onChangeRepeatUntil(e.target.value)}
+                        className="h-[38px] w-full rounded-lg border border-slate-200 bg-white px-2.5 font-mono text-xs text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                      />
+                    </div>
+                  )}
+
+                  {formRepeatFreq === 'weekly' && (
+                    <div>
+                      <span className="mb-1.5 block text-[11px] font-medium text-slate-600 dark:text-slate-300">
+                        Ulangi Pada Hari
+                      </span>
+                      <div className="flex flex-wrap gap-1.5">
+                        {WEEKDAY_DOW_MAP.map(({ label, dow }) => {
+                          const active = formRepeatWeekdays.includes(dow);
+                          return (
+                            <button
+                              key={dow}
+                              type="button"
+                              onClick={() => onToggleRepeatWeekday(dow)}
+                              className={`min-h-[32px] rounded-md border px-2.5 py-1 text-[11px] font-semibold transition-colors ${
+                                active
+                                  ? 'border-violet-700 bg-violet-700 text-white dark:border-violet-600 dark:bg-violet-600'
+                                  : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200/80 pt-2 text-[11px] text-slate-600 dark:border-slate-700 dark:text-slate-300">
+                    <span className="inline-flex items-center gap-1.5">
+                      <Repeat className="h-3.5 w-3.5 text-violet-700 dark:text-violet-400" />
+                      <span>
+                        {formatCalendarRecurrenceLabel({
+                          date: formDate,
+                          repeatFreq: formRepeatFreq,
+                          repeatInterval: formRepeatInterval,
+                          repeatWeekdays:
+                            formRepeatWeekdays.length > 0
+                              ? formRepeatWeekdays
+                              : /^\d{4}-\d{2}-\d{2}$/.test(formDate)
+                                ? [parseUtcDate(formDate).getUTCDay()]
+                                : [],
+                          repeatUntil: formRepeatEndMode === 'until' ? formRepeatUntil : '',
+                        })}
+                      </span>
+                    </span>
+
+                    {editingId && formExcludedDates.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={onRestoreExcludedDates}
+                        className="font-semibold text-violet-700 hover:underline dark:text-violet-400"
+                      >
+                        Pulihkan {formExcludedDates.length} tgl dilewati
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
             </div>
-
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <label className="flex min-h-[42px] cursor-pointer items-center gap-2.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-800 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700/70">
-                <input
-                  type="checkbox"
-                  checked={allDeptsSelected}
-                  onChange={onToggleAllDepts}
-                  className="h-4 w-4 accent-blue-700"
-                />
-                <span>Semua Departemen</span>
-              </label>
-
-              <label className="flex min-h-[42px] cursor-pointer items-center gap-2.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-800 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700/70">
-                <input
-                  type="checkbox"
-                  checked={formVisibleTo.includes('stock_accounting')}
-                  onChange={() => onToggleDept('stock_accounting')}
-                  className="h-4 w-4 accent-blue-700"
-                />
-                <span>Stock Accounting</span>
-              </label>
-
-              <label className="flex min-h-[42px] cursor-pointer items-center gap-2.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-800 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700/70">
-                <input
-                  type="checkbox"
-                  checked={formVisibleTo.includes('gl')}
-                  onChange={() => onToggleDept('gl')}
-                  className="h-4 w-4 accent-blue-700"
-                />
-                <span>GL</span>
-              </label>
-
-              <label className="flex min-h-[42px] cursor-pointer items-center gap-2.5 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-800 transition-colors hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-slate-700/70">
-                <input
-                  type="checkbox"
-                  checked={formVisibleTo.includes('accounting')}
-                  onChange={() => onToggleDept('accounting')}
-                  className="h-4 w-4 accent-blue-700"
-                />
-                <span>Accounting</span>
-              </label>
-            </div>
-
-            <p className="mt-1.5 text-[11px] text-slate-500 dark:text-slate-400">
-              Pengguna Accounting yang berwenang selalu dapat melihat semua event untuk koordinasi.
-            </p>
-          </div>
+          )}
 
           <div>
             <label
               htmlFor="evt-notes"
               className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300"
             >
-              Catatan / Peserta (Opsional)
+              Catatan (Opsional)
             </label>
             <textarea
               id="evt-notes"
@@ -410,12 +585,13 @@ export function KalenderFormModal({
               maxLength={500}
               value={formNotes}
               onChange={(e) => onChangeNotes(e.target.value)}
-              placeholder="Contoh: Peter, Melvin, Jackson, dan Jessica akan berpartisipasi."
+              placeholder={
+                isAssignMode
+                  ? 'Contoh: Bawa dokumen SO dan koordinasi dengan kepala outlet.'
+                  : 'Catatan pribadi untuk reminder ini...'
+              }
               className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
             />
-            <p className="mt-1 text-[11px] text-slate-500 dark:text-slate-400">
-              Catatan dan daftar peserta hanya terlihat saat event diklik (tidak tampil di ringkasan kalender).
-            </p>
           </div>
 
           <div className="flex items-center justify-end gap-2.5 border-t border-slate-100 pt-4 dark:border-slate-800">
@@ -430,13 +606,21 @@ export function KalenderFormModal({
             <button
               type="submit"
               disabled={busy}
-              className="min-h-[40px] rounded-lg bg-blue-700 px-5 py-2 text-xs font-semibold text-white transition-colors hover:bg-blue-800 disabled:opacity-50 dark:bg-blue-600 dark:hover:bg-blue-500"
+              className={`min-h-[40px] rounded-lg px-5 py-2 text-xs font-semibold text-white transition-colors disabled:opacity-50 ${
+                isAssignMode
+                  ? 'bg-blue-700 hover:bg-blue-800 dark:bg-blue-600 dark:hover:bg-blue-500'
+                  : 'bg-violet-700 hover:bg-violet-800 dark:bg-violet-600 dark:hover:bg-violet-500'
+              }`}
             >
               {busy
                 ? 'Menyimpan...'
-                : editingEventId
+                : editingId
                   ? 'Simpan Perubahan'
-                  : 'Simpan Event'}
+                  : isAssignMode
+                    ? isDivisionScope
+                      ? 'Simpan Assign Divisi'
+                      : 'Simpan Assign PIC'
+                    : 'Simpan Reminder'}
             </button>
           </div>
         </form>

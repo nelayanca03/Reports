@@ -104,6 +104,7 @@ describe('firestore.rules structural invariants & blueprint sync', () => {
       ['isValidRoleMonthlyWorkspace', 'RoleMonthlyWorkspace'],
       ['isValidInputLog', 'InputLog'],
       ['isValidCalendarEvent', 'CalendarEvent'],
+      ['isValidPersonalReminder', 'PersonalReminder'],
       ['isValidRecordCounter', 'RecordCounter'],
       ['isValidSavedRecord', 'SavedRecord'],
       ['isValidCalendarMedia', 'CalendarMedia'],
@@ -114,7 +115,7 @@ describe('firestore.rules structural invariants & blueprint sync', () => {
       assert.ok(entity, `Missing entity ${entityName} in firebase-blueprint.json`);
       const fnIdx = rulesText.indexOf(`function ${fnName}(`);
       assert.ok(fnIdx >= 0, `Missing function ${fnName} in firestore.rules`);
-      const slice = rulesText.slice(fnIdx, fnIdx + 1200);
+      const slice = rulesText.slice(fnIdx, fnIdx + 4200);
       for (const reqKey of entity.required || []) {
         assert.ok(
           slice.includes(`'${reqKey}'`),
@@ -123,5 +124,66 @@ describe('firestore.rules structural invariants & blueprint sync', () => {
       }
     }
   });
+
+  it('guards empty repeatWeekdays lists, avoids {} map literals, and matches createCalendarEvent keys', () => {
+    assert.ok(
+      !rulesText.includes(': {}'),
+      'firestore.rules must not contain {} empty map literals (unsupported in CEL rules)'
+    );
+    const repeatMatches =
+      rulesText.match(/data\.repeatWeekdays\.size\(\) == 0 \|\| data\.repeatWeekdays\.hasOnly\(/g) ||
+      [];
+    assert.equal(
+      repeatMatches.length,
+      2,
+      'Expected both isValidCalendarEvent and isValidPersonalReminder to guard empty repeatWeekdays before hasOnly'
+    );
+    assert.match(rulesText, /function canListCalendarEvent\(/);
+
+    const fnStart = rulesText.indexOf('function isValidCalendarEvent(data)');
+    const fnEnd = rulesText.indexOf('function canAccountViewCalendarEvent(', fnStart);
+    const fnBody = rulesText.slice(fnStart, fnEnd);
+    const hasOnlyMatch = fnBody.match(/data\.keys\(\)\.hasOnly\(\[([\s\S]*?)\]\)/);
+    assert.ok(hasOnlyMatch, 'Expected hasOnly list in isValidCalendarEvent');
+    const allowedKeys = [...hasOnlyMatch[1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
+    const createPayloadKeys = [
+      'title',
+      'date',
+      'startTime',
+      'visibleTo',
+      'notes',
+      'eventType',
+      'assignScope',
+      'assignedDivision',
+      'assignedPic',
+      'assignedPicUpper',
+      'assignedEmail',
+      'assignedRole',
+      'assignedOutlet',
+      'assignStatus',
+      'returnTime',
+      'cancelReason',
+      'notificationDismissed',
+      'dismissedBy',
+      'picResponses',
+      'repeatFreq',
+      'repeatInterval',
+      'repeatUntil',
+      'repeatWeekdays',
+      'excludedDates',
+      'createdAt',
+      'updatedAt',
+      'createdBy',
+      'updatedBy',
+      'createdByEmail',
+      'createdByName',
+    ];
+    assert.deepEqual(
+      createPayloadKeys.filter((k) => !allowedKeys.includes(k)),
+      [],
+      'All createCalendarEvent keys must be whitelisted in isValidCalendarEvent'
+    );
+  });
 });
+
 

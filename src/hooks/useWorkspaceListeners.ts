@@ -17,12 +17,15 @@ import {
   AccountProfile,
   AccountRole,
   AdminResetSecurityRecord,
+  CalendarAssignStatus,
   CalendarBannerMedia,
   CalendarEvent,
+  CalendarEventType,
   FirebaseStorageStats,
   InputLogEntry,
   OperationalRoleId,
   OutletStoreState,
+  PersonalReminder,
   RecordDepartment,
   RecordPrefix,
   RoleConfig,
@@ -35,6 +38,8 @@ import {
   buildMonthWorkingDays,
   buildOutletsByPicMap,
   estimateFirestoreDocBytes,
+  getAccountPicUpper,
+  mergeAssignsIntoVisitMap,
   mergeWorkspaceStates,
   normalizeCalendarInterval,
   normalizeCalendarRecurrenceFreq,
@@ -113,6 +118,7 @@ export function useWorkspaceListeners({
   const [resetSecurity, setResetSecurity] = useState<AdminResetSecurityRecord | null>(null);
   const [inputLogs, setInputLogs] = useState<InputLogEntry[]>([]);
   const [calendarEvents, setCalendarEvents] = useState<CalendarEvent[]>([]);
+  const [personalReminders, setPersonalReminders] = useState<PersonalReminder[]>([]);
   const [calendarBanners, setCalendarBanners] = useState<CalendarBannerMedia[]>([]);
   const [savedRecords, setSavedRecords] = useState<SavedRecord[]>([]);
   const [adminWorkspaceBytes, setAdminWorkspaceBytes] = useState<Record<string, number>>({});
@@ -250,74 +256,246 @@ export function useWorkspaceListeners({
       );
     }
 
-    const canAccessAllRecordsAndEvents =
+    const canAccessAllRecords =
       currentAccount.role === 'admin' || currentAccount.role === 'accounting';
+    const isAdminViewer = currentAccount.role === 'admin';
+    const myPicUpper = getAccountPicUpper(currentAccount);
+    const myEmail = (currentAccount.email || auth.currentUser?.email || '').trim().toLowerCase();
 
-    const eventsQuery = canAccessAllRecordsAndEvents
-      ? query(collection(db, 'calendarEvents'), orderBy('date', 'asc'))
-      : query(
-          collection(db, 'calendarEvents'),
-          where('visibleTo', 'array-contains', currentAccount.role)
+    const mapCalendarDoc = (docSnap: {
+      id: string;
+      data: () => Record<string, unknown>;
+    }): CalendarEvent => {
+      const d = docSnap.data();
+      const createdAtIso =
+        d.createdAt instanceof Timestamp ? d.createdAt.toDate().toISOString() : undefined;
+      const updatedAtIso =
+        d.updatedAt instanceof Timestamp ? d.updatedAt.toDate().toISOString() : undefined;
+      const repeatFreq = normalizeCalendarRecurrenceFreq(d.repeatFreq);
+      const repeatInterval = normalizeCalendarInterval(d.repeatInterval);
+      const repeatUntil =
+        typeof d.repeatUntil === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.repeatUntil)
+          ? d.repeatUntil
+          : '';
+      const repeatWeekdays = normalizeCalendarWeekdays(d.repeatWeekdays);
+      const excludedDates = normalizeExcludedDates(d.excludedDates);
+      const eventType: CalendarEventType = d.eventType === 'assign' ? 'assign' : 'general';
+      const assignScope = d.assignScope === 'division' ? 'division' : 'pic';
+      const assignedDivision: OperationalRoleId | '' =
+        d.assignedDivision === 'stock_accounting' ||
+        d.assignedDivision === 'gl' ||
+        d.assignedDivision === 'accounting'
+          ? d.assignedDivision
+          : '';
+      const assignStatus: CalendarAssignStatus =
+        d.assignStatus === 'completed' || d.assignStatus === 'cancelled'
+          ? d.assignStatus
+          : 'assigned';
+      const assignedRole: OperationalRoleId | undefined =
+        d.assignedRole === 'stock_accounting' ||
+        d.assignedRole === 'gl' ||
+        d.assignedRole === 'accounting'
+          ? d.assignedRole
+          : assignedDivision || undefined;
+      const dismissedBy = Array.isArray(d.dismissedBy)
+        ? d.dismissedBy.filter((item): item is string => typeof item === 'string' && item.length > 0)
+        : [];
+      const picResponses: CalendarEvent['picResponses'] = {};
+      if (d.picResponses && typeof d.picResponses === 'object' && !Array.isArray(d.picResponses)) {
+        for (const [picKey, val] of Object.entries(d.picResponses as Record<string, unknown>)) {
+          if (!val || typeof val !== 'object') continue;
+          const entry = val as Record<string, unknown>;
+          const status: CalendarAssignStatus =
+            entry.status === 'completed' || entry.status === 'cancelled'
+              ? entry.status
+              : 'assigned';
+          picResponses[picKey.trim().toUpperCase()] = {
+            status,
+            returnTime: typeof entry.returnTime === 'string' ? entry.returnTime : '',
+            cancelReason: typeof entry.cancelReason === 'string' ? entry.cancelReason : '',
+          };
+        }
+      }
+      return {
+        id: docSnap.id,
+        title: String(d.title || ''),
+        date: String(d.date || ''),
+        startTime: String(d.startTime || '08:00'),
+        visibleTo: normalizeCalendarVisibleTo(
+          Array.isArray(d.visibleTo) ? (d.visibleTo as OperationalRoleId[]) : []
+        ),
+        notes: String(d.notes || ''),
+        eventType,
+        assignScope,
+        assignedDivision,
+        assignedPic: typeof d.assignedPic === 'string' ? d.assignedPic : '',
+        assignedPicUpper: typeof d.assignedPicUpper === 'string' ? d.assignedPicUpper : '',
+        assignedEmail: typeof d.assignedEmail === 'string' ? d.assignedEmail : '',
+        ...(assignedRole ? { assignedRole } : {}),
+        assignedOutlet: typeof d.assignedOutlet === 'string' ? d.assignedOutlet : '',
+        assignStatus,
+        returnTime: typeof d.returnTime === 'string' ? d.returnTime : '',
+        cancelReason: typeof d.cancelReason === 'string' ? d.cancelReason : '',
+        notificationDismissed: Boolean(d.notificationDismissed),
+        dismissedBy,
+        picResponses,
+        repeatFreq,
+        repeatInterval,
+        repeatUntil,
+        repeatWeekdays,
+        excludedDates,
+        createdBy: String(d.createdBy || ''),
+        updatedBy: String(d.updatedBy || ''),
+        createdByEmail: String(d.createdByEmail || ''),
+        createdByName: String(d.createdByName || ''),
+        createdAtIso,
+        updatedAtIso,
+      };
+    };
+
+    const sortCalendarEvents = (list: CalendarEvent[]) =>
+      list.sort(
+        (a, b) =>
+          a.date.localeCompare(b.date) ||
+          a.startTime.localeCompare(b.startTime) ||
+          a.title.localeCompare(b.title)
+      );
+
+    if (isAdminViewer) {
+      const eventsQuery = query(collection(db, 'calendarEvents'), orderBy('date', 'asc'));
+      unsubs.push(
+        onSnapshot(
+          eventsQuery,
+          (snap) => {
+            setCalendarEvents(sortCalendarEvents(snap.docs.map(mapCalendarDoc)));
+          },
+          (error) => handleFirestoreError(error, OperationType.LIST, 'calendarEvents')
+        )
+      );
+    } else {
+      // Combine 3 single-field queries (zero composite index needed) so PIC assigns
+      // (matched by PIC name or email) and Division assigns appear immediately on login.
+      const buckets: Record<'pic' | 'email' | 'division', Map<string, CalendarEvent>> = {
+        pic: new Map(),
+        email: new Map(),
+        division: new Map(),
+      };
+      const flushMergedEvents = () => {
+        const merged = new Map<string, CalendarEvent>();
+        for (const map of [buckets.pic, buckets.email, buckets.division]) {
+          for (const [id, evt] of map.entries()) {
+            merged.set(id, evt);
+          }
+        }
+        setCalendarEvents(sortCalendarEvents(Array.from(merged.values())));
+      };
+
+      const attachBucketQuery = (
+        bucketKey: 'pic' | 'email' | 'division',
+        q: ReturnType<typeof query>
+      ) => {
+        unsubs.push(
+          onSnapshot(
+            q,
+            (snap) => {
+              const nextMap = new Map<string, CalendarEvent>();
+              snap.docs.forEach((docSnap) => {
+                nextMap.set(
+                  docSnap.id,
+                  mapCalendarDoc({
+                    id: docSnap.id,
+                    data: () => docSnap.data() as Record<string, unknown>,
+                  })
+                );
+              });
+              buckets[bucketKey] = nextMap;
+              flushMergedEvents();
+            },
+            (error) => handleFirestoreError(error, OperationType.LIST, 'calendarEvents')
+          )
         );
+      };
 
-    unsubs.push(
-      onSnapshot(
-        eventsQuery,
-        (snap) => {
-          const list: CalendarEvent[] = snap.docs
-            .map((docSnap) => {
-              const d = docSnap.data();
-              const createdAtIso =
-                d.createdAt instanceof Timestamp
-                  ? d.createdAt.toDate().toISOString()
-                  : undefined;
-              const updatedAtIso =
-                d.updatedAt instanceof Timestamp
-                  ? d.updatedAt.toDate().toISOString()
-                  : undefined;
-              const repeatFreq = normalizeCalendarRecurrenceFreq(d.repeatFreq);
-              const repeatInterval = normalizeCalendarInterval(d.repeatInterval);
-              const repeatUntil =
-                typeof d.repeatUntil === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.repeatUntil)
-                  ? d.repeatUntil
-                  : '';
-              const repeatWeekdays = normalizeCalendarWeekdays(d.repeatWeekdays);
-              const excludedDates = normalizeExcludedDates(d.excludedDates);
-              return {
-                id: docSnap.id,
-                title: String(d.title || ''),
-                date: String(d.date || ''),
-                startTime: String(d.startTime || '08:00'),
-                visibleTo: normalizeCalendarVisibleTo(
-                  Array.isArray(d.visibleTo) ? (d.visibleTo as OperationalRoleId[]) : []
-                ),
-                notes: String(d.notes || ''),
-                repeatFreq,
-                repeatInterval,
-                repeatUntil,
-                repeatWeekdays,
-                excludedDates,
-                createdBy: String(d.createdBy || ''),
-                updatedBy: String(d.updatedBy || ''),
-                createdByEmail: String(d.createdByEmail || ''),
-                createdByName: String(d.createdByName || ''),
-                createdAtIso,
-                updatedAtIso,
-              };
-            })
-            .sort(
-              (a, b) =>
-                a.date.localeCompare(b.date) ||
-                a.startTime.localeCompare(b.startTime) ||
-                a.title.localeCompare(b.title)
-            );
-          setCalendarEvents(list);
-        },
-        (error) => handleFirestoreError(error, OperationType.LIST, 'calendarEvents')
-      )
-    );
+      if (myPicUpper) {
+        attachBucketQuery(
+          'pic',
+          query(collection(db, 'calendarEvents'), where('assignedPicUpper', '==', myPicUpper))
+        );
+      }
+      if (myEmail) {
+        attachBucketQuery(
+          'email',
+          query(collection(db, 'calendarEvents'), where('assignedEmail', '==', myEmail))
+        );
+      }
+      attachBucketQuery(
+        'division',
+        query(collection(db, 'calendarEvents'), where('assignedDivision', '==', currentAccount.role))
+      );
+    }
 
-    const recordsQuery = canAccessAllRecordsAndEvents
+    const uid = auth.currentUser?.uid;
+    if (uid) {
+      const remindersQuery = query(
+        collection(db, 'personalReminders'),
+        where('createdBy', '==', uid)
+      );
+      unsubs.push(
+        onSnapshot(
+          remindersQuery,
+          (snap) => {
+            const list: PersonalReminder[] = snap.docs
+              .map((docSnap) => {
+                const d = docSnap.data();
+                const createdAtIso =
+                  d.createdAt instanceof Timestamp
+                    ? d.createdAt.toDate().toISOString()
+                    : undefined;
+                const updatedAtIso =
+                  d.updatedAt instanceof Timestamp
+                    ? d.updatedAt.toDate().toISOString()
+                    : undefined;
+                const repeatFreq = normalizeCalendarRecurrenceFreq(d.repeatFreq);
+                const repeatInterval = normalizeCalendarInterval(d.repeatInterval);
+                const repeatUntil =
+                  typeof d.repeatUntil === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.repeatUntil)
+                    ? d.repeatUntil
+                    : '';
+                const repeatWeekdays = normalizeCalendarWeekdays(d.repeatWeekdays);
+                const excludedDates = normalizeExcludedDates(d.excludedDates);
+                return {
+                  id: docSnap.id,
+                  title: String(d.title || ''),
+                  date: String(d.date || ''),
+                  startTime: String(d.startTime || '08:00'),
+                  notes: String(d.notes || ''),
+                  repeatFreq,
+                  repeatInterval,
+                  repeatUntil,
+                  repeatWeekdays,
+                  excludedDates,
+                  createdBy: String(d.createdBy || ''),
+                  updatedBy: String(d.updatedBy || ''),
+                  createdByEmail: String(d.createdByEmail || ''),
+                  createdByName: String(d.createdByName || ''),
+                  createdAtIso,
+                  updatedAtIso,
+                };
+              })
+              .sort(
+                (a, b) =>
+                  a.date.localeCompare(b.date) ||
+                  a.startTime.localeCompare(b.startTime) ||
+                  a.title.localeCompare(b.title)
+              );
+            setPersonalReminders(list);
+          },
+          (error) => handleFirestoreError(error, OperationType.LIST, 'personalReminders')
+        )
+      );
+    }
+
+    const recordsQuery = canAccessAllRecords
       ? query(collection(db, 'savedRecords'), orderBy('date', 'desc'), limit(500))
       : query(collection(db, 'savedRecords'), where('department', '==', currentAccount.role));
 
@@ -642,11 +820,13 @@ export function useWorkspaceListeners({
       monthlySlices[`${effectiveRoleId}_${prevMonth}`],
       monthlySlices[`${effectiveRoleId}_${activeMonth}`]
     );
+    const outlets = roleConfigs[effectiveRoleId]?.outlets || [];
     return {
       ...merged,
+      visit: mergeAssignsIntoVisitMap(merged.visit, calendarEvents, effectiveRoleId, outlets),
       start: `${activeMonth}-01`,
     };
-  }, [legacySlice, monthlySlices, effectiveRoleId, activeMonth]);
+  }, [legacySlice, monthlySlices, effectiveRoleId, activeMonth, calendarEvents, roleConfigs]);
 
   const adminAllWorkspaces: Record<OperationalRoleId, OutletStoreState> = useMemo(() => {
     const result = {} as Record<OperationalRoleId, OutletStoreState>;
@@ -654,13 +834,15 @@ export function useWorkspaceListeners({
     for (const rId of roleIds) {
       const monthStates = selectableMonths.map((m) => adminMonthlySlices[`${rId}_${m}`]);
       const merged = mergeWorkspaceStates(adminLegacySlices[rId], ...monthStates);
+      const outlets = roleConfigs[rId]?.outlets || [];
       result[rId] = {
         ...merged,
+        visit: mergeAssignsIntoVisitMap(merged.visit, calendarEvents, rId, outlets),
         start: `${activeMonth}-01`,
       };
     }
     return result;
-  }, [adminLegacySlices, adminMonthlySlices, selectableMonths, activeMonth]);
+  }, [adminLegacySlices, adminMonthlySlices, selectableMonths, activeMonth, calendarEvents, roleConfigs]);
 
   const firebaseStorage: FirebaseStorageStats | null = useMemo(() => {
     if (currentAccount?.role !== 'admin') return null;
@@ -725,6 +907,11 @@ export function useWorkspaceListeners({
       totalDocs += 1;
     }
 
+    for (const rem of personalReminders) {
+      usedBytes += estimateFirestoreDocBytes(`personalReminders/${rem.id}`, rem);
+      totalDocs += 1;
+    }
+
     for (const rec of savedRecords) {
       usedBytes += estimateFirestoreDocBytes(`savedRecords/${rec.id}`, rec);
       totalDocs += 1;
@@ -754,6 +941,7 @@ export function useWorkspaceListeners({
     inputLogs,
     totalInputLogCount,
     calendarEvents,
+    personalReminders,
     calendarBanners,
     savedRecords,
   ]);
@@ -766,6 +954,7 @@ export function useWorkspaceListeners({
     resetSecurity,
     inputLogs,
     calendarEvents,
+    personalReminders,
     calendarBanners,
     savedRecords,
     firebaseStorage,

@@ -78,6 +78,8 @@ export interface VisitEntry {
   f: string;
   t: string;
   n: string;
+  assignEventId?: string;
+  assignStatus?: CalendarAssignStatus;
 }
 
 export interface VisitItem {
@@ -173,6 +175,15 @@ export interface FirebaseStorageStats {
 }
 
 export type CalendarRecurrenceFreq = 'none' | 'daily' | 'weekly' | 'monthly' | 'yearly';
+export type CalendarEventType = 'assign' | 'general';
+export type CalendarAssignScope = 'pic' | 'division';
+export type CalendarAssignStatus = 'assigned' | 'completed' | 'cancelled';
+
+export interface CalendarPicResponse {
+  status: CalendarAssignStatus;
+  returnTime: string;
+  cancelReason: string;
+}
 
 export interface CalendarEvent {
   id: string;
@@ -180,6 +191,39 @@ export interface CalendarEvent {
   date: string;
   startTime: string;
   visibleTo: OperationalRoleId[];
+  notes: string;
+  eventType?: CalendarEventType;
+  assignScope?: CalendarAssignScope;
+  assignedDivision?: OperationalRoleId | '';
+  assignedPic?: string;
+  assignedPicUpper?: string;
+  assignedEmail?: string;
+  assignedRole?: OperationalRoleId;
+  assignedOutlet?: string;
+  assignStatus?: CalendarAssignStatus;
+  returnTime?: string;
+  cancelReason?: string;
+  notificationDismissed?: boolean;
+  dismissedBy?: string[];
+  picResponses?: Record<string, CalendarPicResponse>;
+  repeatFreq?: CalendarRecurrenceFreq;
+  repeatInterval?: number;
+  repeatUntil?: string;
+  repeatWeekdays?: number[];
+  excludedDates?: string[];
+  createdBy: string;
+  updatedBy: string;
+  createdByEmail: string;
+  createdByName: string;
+  createdAtIso?: string;
+  updatedAtIso?: string;
+}
+
+export interface PersonalReminder {
+  id: string;
+  title: string;
+  date: string;
+  startTime: string;
   notes: string;
   repeatFreq?: CalendarRecurrenceFreq;
   repeatInterval?: number;
