@@ -8,7 +8,9 @@ import {
   fmtMonth,
   fmtWeek,
   fmtWeekShort,
+  formatTaskScheduleLabel,
   getTaskInputType,
+  isCustomScheduledTask,
   prevMonthFirstDay,
   prevWeekMonday,
   prevWorkingDay,
@@ -101,14 +103,27 @@ export function InputHarianTaskRow({
       }
     >
       <td className="px-5 py-3.5 align-middle">
-        <div
-          className={`font-medium ${
-            canEditDay
-              ? 'text-slate-900 dark:text-slate-100'
-              : 'text-slate-500 dark:text-slate-400'
-          }`}
-        >
-          {def.label}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span
+            className={`font-medium ${
+              canEditDay
+                ? 'text-slate-900 dark:text-slate-100'
+                : 'text-slate-500 dark:text-slate-400'
+            }`}
+          >
+            {def.label}
+          </span>
+          {isCustomScheduledTask(def) && (
+            <span
+              className={`rounded-md px-1.5 py-0.5 text-[10px] font-semibold ${
+                def.scheduleMode === 'once'
+                  ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300'
+                  : 'bg-blue-100 text-blue-700 dark:bg-blue-950/70 dark:text-blue-300'
+              }`}
+            >
+              {formatTaskScheduleLabel(def)}
+            </span>
+          )}
         </div>
         {isAdmin && (
           <div className="mt-0.5 text-xs text-slate-400 dark:text-slate-500">

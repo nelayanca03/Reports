@@ -6,6 +6,7 @@ import {
 import {
   calcTask,
   fmtWeek,
+  getActiveTasksForDay,
   getTaskInputType,
   parseUtcDate,
   shiftMonthKey,
@@ -217,8 +218,9 @@ export function buildPhotoOutletBlocks(params: {
 
   const workingMonth = targetDay.slice(0, 7);
   const workingYear = targetDay.slice(0, 4);
+  const activeDayTasks = getActiveTasksForDay(config.tasks, targetDay);
   const { memoTask, bmTask, jualTask, otherTasks } = detectStockDiscrepancyTasks(
-    config.tasks
+    activeDayTasks
   );
   const hasDiscLayout = Boolean(memoTask || (bmTask && jualTask));
 
@@ -296,7 +298,7 @@ export function buildPhotoOutletBlocks(params: {
         });
       }
     } else {
-      for (const t of config.tasks) {
+      for (const t of activeDayTasks) {
         const c = calcTask(store, days, config.tasks, outlet, targetDay, t.key, today);
         lines.push({
           kind: 'simple',

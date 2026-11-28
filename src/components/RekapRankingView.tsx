@@ -10,9 +10,12 @@ import {
   fmtMonth,
   fmtWeek,
   formatTaskDateByType,
+  formatTaskScheduleLabel,
   getAdjustmentForPersonDay,
   getPersonList,
   getTaskInputType,
+  isCustomScheduledTask,
+  isTaskActiveOnDay,
   nearestWorkingDay,
   todayIso,
 } from '../utils/outletLogic';
@@ -294,6 +297,9 @@ export function RekapRankingView({
                 {recapDateMode === 'range'
                   ? `Periode ${fmtDate(effectiveRangeFrom)} – ${fmtDate(effectiveRangeTo)}`
                   : `Per tanggal ${fmtDate(effectiveRecapDate)}`}
+                {isCustomScheduledTask(activeTaskDef)
+                  ? ` · ${formatTaskScheduleLabel(activeTaskDef)}`
+                  : ''}
                 {recapDateMode === 'single' && recapDate > today ? ` (dibatasi hari ini)` : ''}
                 {neverInputOutlets > 0 ? ` · ${neverInputOutlets} belum pernah input` : ''}
               </span>
@@ -334,7 +340,11 @@ export function RekapRankingView({
                           {row.person}
                         </td>
                         <td className="px-4 py-3 font-mono text-xs text-slate-600 tabular-nums dark:text-slate-300">
-                          {!row.hasAnyInput ? (
+                          {row.totalDays === 0 ? (
+                            <span className="font-sans text-slate-400 dark:text-slate-500">
+                              Tidak terjadwal
+                            </span>
+                          ) : !row.hasAnyInput ? (
                             <span className="font-sans text-slate-400 dark:text-slate-500">
                               Belum pernah input
                             </span>
@@ -347,7 +357,11 @@ export function RekapRankingView({
                           )}
                         </td>
                         <td className="px-4 py-3">
-                          {!row.hasAnyInput ? (
+                          {row.totalDays === 0 ? (
+                            <span className="text-xs font-medium text-slate-400 dark:text-slate-500">
+                              TIDAK TERJADWAL
+                            </span>
+                          ) : !row.hasAnyInput ? (
                             <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-red-600 dark:text-red-400">
                               <AlertCircle className="h-3.5 w-3.5 shrink-0" />
                               <span>BELUM INPUT</span>
@@ -366,13 +380,19 @@ export function RekapRankingView({
                         </td>
                         <td
                           className={`px-4 py-3 text-right font-mono font-semibold tabular-nums ${
-                            !row.hasAnyInput || row.avg < 0
-                              ? 'text-red-600 dark:text-red-400'
-                              : 'text-emerald-700 dark:text-emerald-400'
+                            row.totalDays === 0
+                              ? 'text-slate-400 dark:text-slate-500'
+                              : !row.hasAnyInput || row.avg < 0
+                                ? 'text-red-600 dark:text-red-400'
+                                : 'text-emerald-700 dark:text-emerald-400'
                           }`}
                         >
                           <div>
-                            {row.avg > 0 ? `+${row.avg.toFixed(1)}` : row.avg.toFixed(1)}
+                            {row.totalDays === 0
+                              ? '—'
+                              : row.avg > 0
+                                ? `+${row.avg.toFixed(1)}`
+                                : row.avg.toFixed(1)}
                           </div>
                           {(row.adjustedDays || 0) > 0 && (
                             <div className="font-sans text-[10px] font-medium text-blue-700 dark:text-blue-400">
@@ -472,6 +492,22 @@ export function RekapRankingView({
                           effectiveFromDate,
                           config.dayAdjustments
                         );
+                        if (r.totalDays === 0) {
+                          return (
+                            <td
+                              key={t.key}
+                              title={formatTaskScheduleLabel(t)}
+                              className="px-3 py-3 text-right font-mono tabular-nums"
+                            >
+                              <div className="font-semibold text-slate-400 dark:text-slate-500">
+                                —
+                              </div>
+                              <div className="text-[11px] text-slate-400 dark:text-slate-500">
+                                Tdk jadwal
+                              </div>
+                            </td>
+                          );
+                        }
                         return (
                           <td key={t.key} className="px-3 py-3 text-right font-mono tabular-nums">
                             <div
@@ -486,6 +522,23 @@ export function RekapRankingView({
                             <div className="text-[11px] text-slate-400 dark:text-slate-500">
                               {r.pend > 0 ? `${r.pend} pend` : 'Lengkap'}
                               {(r.adjustedDays || 0) > 0 ? ` · ${r.effectiveDays}hr` : ''}
+                            </div>
+                          </td>
+                        );
+                      }
+
+                      if (!isTaskActiveOnDay(t, activeDayForMatrix)) {
+                        return (
+                          <td
+                            key={t.key}
+                            title={formatTaskScheduleLabel(t)}
+                            className="px-3 py-3 text-right font-mono tabular-nums"
+                          >
+                            <div className="font-semibold text-slate-400 dark:text-slate-500">
+                              —
+                            </div>
+                            <div className="text-[11px] text-slate-400 dark:text-slate-500">
+                              Tdk jadwal
                             </div>
                           </td>
                         );

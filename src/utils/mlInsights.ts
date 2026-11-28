@@ -21,6 +21,7 @@ import {
   getTaskInputType,
   getVisitEntries,
   isSunday,
+  isTaskActiveOnDay,
   parseUtcDate,
   shiftIsoDays,
   toWibIsoDate,
@@ -569,11 +570,13 @@ export function computeMlInsightsSuite(params: ComputeMlSuiteParams): MlInsights
           const postCalcs: CalculatedTask[] = [];
           for (const dPre of preDays) {
             for (const t of cfg.tasks) {
+              if (!isTaskActiveOnDay(t, dPre)) continue;
               preCalcs.push(calcTask(ws, allRoleDays, cfg.tasks, vOutlet, dPre, t.key, today));
             }
           }
           for (const dPost of postDays) {
             for (const t of cfg.tasks) {
+              if (!isTaskActiveOnDay(t, dPost)) continue;
               postCalcs.push(calcTask(ws, allRoleDays, cfg.tasks, vOutlet, dPost, t.key, today));
             }
           }
@@ -628,7 +631,9 @@ export function computeMlInsightsSuite(params: ComputeMlSuiteParams): MlInsights
       if (personEvalDays.length === 0) continue;
 
       for (const task of cfg.tasks) {
-        const calcs = personEvalDays.map((d) =>
+        const taskEvalDays = personEvalDays.filter((d) => isTaskActiveOnDay(task, d));
+        if (!taskEvalDays.length) continue;
+        const calcs = taskEvalDays.map((d) =>
           calcTask(ws, allRoleDays.length ? allRoleDays : safeEvalDays, cfg.tasks, outlet, d, task.key, today)
         );
         if (!calcs.length) continue;
@@ -644,7 +649,7 @@ export function computeMlInsightsSuite(params: ComputeMlSuiteParams): MlInsights
         const backfillRate = ownCalcs.length > 0 ? backfillCount / ownCalcs.length : 0;
 
         // Same-weekday historical pending rate
-        const sameDowCalcs = calcs.filter((_, i) => parseUtcDate(personEvalDays[i]).getUTCDay() === nextWeekdayDow);
+        const sameDowCalcs = calcs.filter((_, i) => parseUtcDate(taskEvalDays[i]).getUTCDay() === nextWeekdayDow);
         const sameDowPendRate = sameDowCalcs.length
           ? sameDowCalcs.filter((c) => c.pend).length / sameDowCalcs.length
           : pendingRate;
@@ -740,7 +745,7 @@ export function computeMlInsightsSuite(params: ComputeMlSuiteParams): MlInsights
           pic: person,
           outlet,
           task,
-          days: safeEvalDays,
+          days: taskEvalDays,
           calcs,
           latest,
           avgPm,
@@ -963,6 +968,7 @@ export function computeMlInsightsSuite(params: ComputeMlSuiteParams): MlInsights
 
         for (const { code: outlet } of scopedOutlets) {
           for (const d of safeEvalDays) {
+            if (!isTaskActiveOnDay(upstream, d) || !isTaskActiveOnDay(downstream, d)) continue;
             const cUp = calcTask(ws, allRoleDays, cfg.tasks, outlet, d, upstream.key, today);
             const cDown = calcTask(ws, allRoleDays, cfg.tasks, outlet, d, downstream.key, today);
             upVec.push(cUp.pm);

@@ -20,6 +20,7 @@ import {
   SavedRecord,
   TaskDefinition,
   TaskInputType,
+  TaskScheduleMode,
   VisitEntry,
   VisitItem,
   VisitPersonStats,
@@ -153,6 +154,273 @@ export function buildFormulaNote(
       : `Selisih hari terhadap tgl update ${refLabel} (${toleranceOffset >= 0 ? `+${toleranceOffset}` : toleranceOffset})`;
   }
   return `Selisih hari terhadap tanggal kerja ${signed}`;
+}
+
+export const TASK_WEEKDAY_OPTIONS: Array<{ value: number; short: string; label: string }> = [
+  { value: 1, short: 'Sen', label: 'Senin' },
+  { value: 2, short: 'Sel', label: 'Selasa' },
+  { value: 3, short: 'Rab', label: 'Rabu' },
+  { value: 4, short: 'Kam', label: 'Kamis' },
+  { value: 5, short: 'Jum', label: 'Jumat' },
+  { value: 6, short: 'Sab', label: 'Sabtu' },
+];
+
+const TASK_WEEKDAY_SHORT_MAP: Record<number, string> = {
+  0: 'Min',
+  1: 'Sen',
+  2: 'Sel',
+  3: 'Rab',
+  4: 'Kam',
+  5: 'Jum',
+  6: 'Sab',
+};
+
+export function sanitizeTaskDefinition(raw: unknown): TaskDefinition | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const t = raw as Record<string, unknown>;
+  const key = typeof t.key === 'string' ? t.key.trim().slice(0, 40) : '';
+  const label = typeof t.label === 'string' ? t.label.trim().slice(0, 100) : '';
+  if (!key || !label) return null;
+  const shortLabel =
+    typeof t.shortLabel === 'string' && t.shortLabel.trim()
+      ? t.shortLabel.trim().slice(0, 24)
+      : label.slice(0, 24);
+  const defaultDate = typeof t.defaultDate === 'string' ? t.defaultDate.trim().slice(0, 10) : '';
+  const formulaType: FormulaType =
+    t.formulaType === 'weekly_plus_1' ||
+    t.formulaType === 'memo_month' ||
+    t.formulaType === 'ref_task'
+      ? t.formulaType
+      : 'daily_plus_1';
+  const inputType: TaskInputType | undefined =
+    t.inputType === 'date' || t.inputType === 'week' || t.inputType === 'month'
+      ? t.inputType
+      : undefined;
+  const refTaskKey =
+    formulaType === 'ref_task' && typeof t.refTaskKey === 'string' && t.refTaskKey.trim()
+      ? t.refTaskKey.trim().slice(0, 40)
+      : undefined;
+  const toleranceOffset =
+    typeof t.toleranceOffset === 'number' && Number.isFinite(t.toleranceOffset)
+      ? Math.max(-15, Math.min(31, Math.round(t.toleranceOffset)))
+      : undefined;
+  const formulaNote =
+    typeof t.formulaNote === 'string'
+      ? t.formulaNote.slice(0, 160)
+      : buildFormulaNote(formulaType, toleranceOffset ?? (formulaType === 'ref_task' ? 0 : 1));
+
+  const rawMode = t.scheduleMode;
+  const scheduleMode: TaskScheduleMode =
+    rawMode === 'weekdays' || rawMode === 'monthly_dates' || rawMode === 'once'
+      ? rawMode
+      : 'always';
+
+  const scheduleWeekdays =
+    scheduleMode === 'weekdays' && Array.isArray(t.scheduleWeekdays)
+      ? Array.from(
+          new Set(
+            t.scheduleWeekdays
+              .map((n) => Number(n))
+              .filter((n) => Number.isInteger(n) && n >= 1 && n <= 6)
+          )
+        ).sort((a, b) => a - b)
+      : [];
+
+  const scheduleMonthDays =
+    scheduleMode === 'monthly_dates' && Array.isArray(t.scheduleMonthDays)
+      ? Array.from(
+          new Set(
+            t.scheduleMonthDays
+              .map((n) => Number(n))
+              .filter((n) => Number.isInteger(n) && n >= 1 && n <= 31)
+          )
+        ).sort((a, b) => a - b)
+      : [];
+
+  const scheduleDates =
+    scheduleMode === 'once' && Array.isArray(t.scheduleDates)
+      ? Array.from(
+          new Set(
+            t.scheduleDates
+              .filter(
+                (d): d is string =>
+                  typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d.trim())
+              )
+              .map((d) => d.trim())
+          )
+        )
+          .sort()
+          .slice(0, 31)
+      : [];
+
+  const scheduleRepeatEnd =
+    (scheduleMode === 'weekdays' || scheduleMode === 'monthly_dates') &&
+    typeof t.scheduleRepeatEnd === 'string' &&
+    /^\d{4}-\d{2}-\d{2}$/.test(t.scheduleRepeatEnd.trim())
+      ? t.scheduleRepeatEnd.trim()
+      : '';
+
+  const effectiveMode: TaskScheduleMode =
+    scheduleMode === 'weekdays' && scheduleWeekdays.length === 0
+      ? 'always'
+      : scheduleMode === 'monthly_dates' && scheduleMonthDays.length === 0
+        ? 'always'
+        : scheduleMode === 'once' && scheduleDates.length === 0
+          ? 'always'
+          : scheduleMode;
+
+  return {
+    key,
+    label,
+    shortLabel,
+    defaultDate,
+    ...(inputType ? { inputType } : {}),
+    formulaType,
+    ...(refTaskKey ? { refTaskKey } : {}),
+    ...(toleranceOffset !== undefined ? { toleranceOffset } : {}),
+    formulaNote,
+    ...(effectiveMode !== 'always' ? { scheduleMode: effectiveMode } : {}),
+    ...(effectiveMode === 'weekdays' ? { scheduleWeekdays } : {}),
+    ...(effectiveMode === 'monthly_dates' ? { scheduleMonthDays } : {}),
+    ...(effectiveMode === 'once' ? { scheduleDates } : {}),
+    ...(scheduleRepeatEnd && (effectiveMode === 'weekdays' || effectiveMode === 'monthly_dates')
+      ? { scheduleRepeatEnd }
+      : {}),
+  };
+}
+
+export function sanitizeTaskDefinitions(raw: unknown): TaskDefinition[] {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set<string>();
+  const list: TaskDefinition[] = [];
+  for (const item of raw) {
+    const clean = sanitizeTaskDefinition(item);
+    if (!clean || seen.has(clean.key)) continue;
+    seen.add(clean.key);
+    list.push(clean);
+    if (list.length >= 30) break;
+  }
+  return list;
+}
+
+export function isCustomScheduledTask(task?: TaskDefinition | null): boolean {
+  if (!task) return false;
+  return (
+    task.scheduleMode === 'weekdays' ||
+    task.scheduleMode === 'monthly_dates' ||
+    task.scheduleMode === 'once'
+  );
+}
+
+export function isTaskActiveOnDay(
+  task: TaskDefinition | undefined | null,
+  dayIso: string
+): boolean {
+  if (!task) return false;
+  const mode = task.scheduleMode || 'always';
+  if (mode === 'always') return true;
+  if (!dayIso || !/^\d{4}-\d{2}-\d{2}$/.test(dayIso)) return false;
+
+  if (mode === 'once') {
+    const dates = task.scheduleDates || [];
+    if (dates.length === 0) return true;
+    return dates.includes(dayIso);
+  }
+
+  if (task.scheduleRepeatEnd && /^\d{4}-\d{2}-\d{2}$/.test(task.scheduleRepeatEnd)) {
+    if (dayIso > task.scheduleRepeatEnd) return false;
+  }
+
+  const parsed = parseUtcDate(dayIso);
+  if (Number.isNaN(parsed.getTime())) return false;
+
+  if (mode === 'weekdays') {
+    const weekdays = task.scheduleWeekdays || [];
+    if (weekdays.length === 0) return true;
+    return weekdays.includes(parsed.getUTCDay());
+  }
+
+  if (mode === 'monthly_dates') {
+    const monthDays = task.scheduleMonthDays || [];
+    if (monthDays.length === 0) return true;
+    const year = parsed.getUTCFullYear();
+    const monthIdx = parsed.getUTCMonth();
+    const daysInMonth = new Date(Date.UTC(year, monthIdx + 1, 0)).getUTCDate();
+    const dom = parsed.getUTCDate();
+    return monthDays.some((target) => Math.min(target, daysInMonth) === dom);
+  }
+
+  return true;
+}
+
+export function getActiveTasksForDay(
+  tasks: TaskDefinition[],
+  dayIso: string
+): TaskDefinition[] {
+  return tasks.filter((t) => isTaskActiveOnDay(t, dayIso));
+}
+
+export function isScheduledTaskExpired(
+  task: TaskDefinition,
+  today: string = todayIso()
+): boolean {
+  const mode = task.scheduleMode || 'always';
+  if (mode === 'once') {
+    const dates = task.scheduleDates || [];
+    if (dates.length === 0) return false;
+    const latest = dates[dates.length - 1];
+    return Boolean(latest && latest < today);
+  }
+  if (
+    (mode === 'weekdays' || mode === 'monthly_dates') &&
+    task.scheduleRepeatEnd &&
+    /^\d{4}-\d{2}-\d{2}$/.test(task.scheduleRepeatEnd)
+  ) {
+    return task.scheduleRepeatEnd < today;
+  }
+  return false;
+}
+
+export function formatTaskScheduleLabel(task: TaskDefinition): string {
+  const mode = task.scheduleMode || 'always';
+  if (mode === 'always') return 'Setiap Hari Kerja';
+  if (mode === 'weekdays') {
+    const daysText = (task.scheduleWeekdays || [])
+      .map((d) => TASK_WEEKDAY_SHORT_MAP[d] || String(d))
+      .join(', ');
+    const base = daysText ? `Berulang · Tiap ${daysText}` : 'Setiap Hari Kerja';
+    return task.scheduleRepeatEnd ? `${base} (s.d. ${fmtDateLong(task.scheduleRepeatEnd)})` : base;
+  }
+  if (mode === 'monthly_dates') {
+    const doms = task.scheduleMonthDays || [];
+    const domText =
+      doms.length > 5
+        ? `${doms.slice(0, 4).join(', ')} +${doms.length - 4}`
+        : doms.join(', ');
+    const base = domText ? `Berulang · Tiap Tgl ${domText}` : 'Setiap Hari Kerja';
+    return task.scheduleRepeatEnd ? `${base} (s.d. ${fmtDateLong(task.scheduleRepeatEnd)})` : base;
+  }
+  const dates = task.scheduleDates || [];
+  if (dates.length === 0) return 'Setiap Hari Kerja';
+  if (dates.length === 1) {
+    return `Sekali Muncul · ${fmtDateFull(dates[0])}`;
+  }
+  const preview = dates
+    .slice(0, 2)
+    .map((d) => fmtDateLong(d))
+    .join(', ');
+  return dates.length > 2
+    ? `Sekali Muncul · ${preview} (+${dates.length - 2})`
+    : `Sekali Muncul · ${preview}`;
+}
+
+export function nextDateForWeekday(weekday: number, fromIso: string = todayIso()): string {
+  const base = parseUtcDate(fromIso);
+  if (Number.isNaN(base.getTime())) return fromIso;
+  const currentDow = base.getUTCDay();
+  const delta = (weekday - currentDow + 7) % 7;
+  base.setUTCDate(base.getUTCDate() + delta);
+  return toIsoUtc(base);
 }
 
 export const STOCK_ACCOUNTING_OUTLETS: OutletAssignment[] = [
@@ -679,7 +947,8 @@ export function isOutletDayFilled(
   if (!outlet || !day) return false;
   const outletMap = state.ent[outlet];
   if (!outletMap) return false;
-  return tasks.some((t) => {
+  const activeTasks = getActiveTasksForDay(tasks, day);
+  return activeTasks.some((t) => {
     const entry = outletMap[`${day}|${t.key}`];
     return Boolean(entry && (entry.d || entry.n));
   });
@@ -782,7 +1051,12 @@ export function calcTask(
   const tol = getTaskTolerance(taskDef);
 
   const periodStart = days[0] && days[0] <= day ? days[0] : `${day.slice(0, 7)}-01`;
-  const daysSincePeriodStart = Math.max(1, diffWorkingDays(day, periodStart) + 1);
+  const daysSincePeriodStart = isCustomScheduledTask(taskDef)
+    ? Math.max(
+        1,
+        days.filter((d) => d <= day && !isSunday(d) && isTaskActiveOnDay(taskDef, d)).length
+      )
+    : Math.max(1, diffWorkingDays(day, periodStart) + 1);
 
   let rumus: string;
   let pm: number;
@@ -1057,11 +1331,16 @@ export function calcRecap(
   fromDate?: string,
   dayAdjustments?: WorkingDayAdjustment[]
 ): OutletRecap {
+  const taskDef = tasks.find((t) => t.key === taskKey);
   const effectiveUpto = upto && upto > today ? today : upto;
   const effectiveFrom =
     fromDate && effectiveUpto && fromDate > effectiveUpto ? effectiveUpto : fromDate || '';
   const allScopedDays = days.filter(
-    (d) => (!effectiveFrom || d >= effectiveFrom) && d <= effectiveUpto && !isSunday(d)
+    (d) =>
+      (!effectiveFrom || d >= effectiveFrom) &&
+      d <= effectiveUpto &&
+      !isSunday(d) &&
+      (!taskDef || isTaskActiveOnDay(taskDef, d))
   );
   const ds =
     dayAdjustments && dayAdjustments.length > 0
@@ -1070,20 +1349,23 @@ export function calcRecap(
   const adjustedDays = allScopedDays.length - ds.length;
 
   if (!ds.length) {
+    const noScheduledDays = allScopedDays.length === 0;
     const fallbackDay = allScopedDays[allScopedDays.length - 1] || days[0] || effectiveUpto;
-    const fallback = calcTask(state, days, tasks, outlet, fallbackDay, taskKey, today);
+    const fallback = noScheduledDays
+      ? null
+      : calcTask(state, days, tasks, outlet, fallbackDay, taskKey, today);
     const allDaysAdjusted = allScopedDays.length > 0 && adjustedDays === allScopedDays.length;
     return {
       outlet,
       person,
       avg: 0,
       pend: 0,
-      latestDate: fallback.d,
-      latestPm: fallback.d ? fallback.pm : 0,
-      latestPend: allDaysAdjusted ? false : fallback.d ? fallback.pend : false,
-      latestNote: fallback.n,
-      hasAnyInput: Boolean(fallback.d),
-      backfillCount: allDaysAdjusted ? 0 : fallback.backfillDays ? 1 : 0,
+      latestDate: fallback?.d || '',
+      latestPm: fallback?.d ? fallback.pm : 0,
+      latestPend: noScheduledDays || allDaysAdjusted ? false : fallback?.d ? fallback.pend : false,
+      latestNote: fallback?.n || '',
+      hasAnyInput: Boolean(fallback?.d),
+      backfillCount: noScheduledDays || allDaysAdjusted ? 0 : fallback?.backfillDays ? 1 : 0,
       effectiveDays: 0,
       totalDays: allScopedDays.length,
       adjustedDays,
@@ -1276,8 +1558,9 @@ export function buildDailyFleetTable(
   ];
   const rows: Array<Array<string | number>> = [];
 
+  const activeTasks = getActiveTasksForDay(config.tasks, day);
   for (const { code: outlet, person } of config.outlets) {
-    for (const t of config.tasks) {
+    for (const t of activeTasks) {
       const c = calcTask(state, days, config.tasks, outlet, day, t.key, today);
       const tsFormatted = c.ts ? fmtDateTimeWithSeconds(c.ts) : '';
       const sourceLabel =

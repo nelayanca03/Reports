@@ -15,6 +15,7 @@ import {
   fmtDateLong,
   fmtMonth,
   fmtWeek,
+  getActiveTasksForDay,
   getPeopleMap,
   getPersonList,
   getTaskInputType,
@@ -158,8 +159,12 @@ export function InputHarianView({
   const dayKey = `${activeOutlet}|${selectedDay}`;
   const currentDraftMap = drafts[dayKey] || {};
 
+  const activeDayTasks = hasDailySetup
+    ? getActiveTasksForDay(config.tasks, selectedDay)
+    : [];
+
   const calculatedTasks = hasDailySetup
-    ? config.tasks.map((t) => {
+    ? activeDayTasks.map((t) => {
         const calc = calcTask(store, days, config.tasks, activeOutlet, selectedDay, t.key, today);
         const draft = currentDraftMap[t.key];
         const displayD = draft ? draft.d : calc.d;

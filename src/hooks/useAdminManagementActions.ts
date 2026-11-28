@@ -33,6 +33,7 @@ import {
   buildOutletsByPicMap,
   currentMonthKey,
   parseDayAdjustments,
+  sanitizeTaskDefinitions,
   shiftMonthKey,
   todayIso,
 } from '../utils/outletLogic';
@@ -79,6 +80,7 @@ export function useAdminManagementActions({
     const validDayAdjustments = parseDayAdjustments(nextConfig.dayAdjustments);
     try {
       const boundedOutlets = nextConfig.outlets.slice(0, 100);
+      const cleanTasks = sanitizeTaskDefinitions(nextConfig.tasks);
       await setDoc(doc(db, 'roleConfigs', roleId), {
         roleId,
         label: nextConfig.label.slice(0, 60),
@@ -87,7 +89,7 @@ export function useAdminManagementActions({
         ...(validOpenMonth ? { openUntilMonth: validOpenMonth } : {}),
         ...(validUnlockedPast.length > 0 ? { unlockedPastMonths: validUnlockedPast } : {}),
         ...(validDayAdjustments.length > 0 ? { dayAdjustments: validDayAdjustments } : {}),
-        tasks: nextConfig.tasks.slice(0, 30),
+        tasks: cleanTasks,
         outlets: boundedOutlets,
         outletsByPic: buildOutletsByPicMap(boundedOutlets),
         updatedAt: serverTimestamp(),

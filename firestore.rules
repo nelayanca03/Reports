@@ -616,8 +616,67 @@ service cloud.firestore {
         && nextData.dismissedBy is list
         && nextData.dismissedBy.size() <= 100
         && request.auth.uid in nextData.dismissedBy
-        && nextData.dismissedBy.hasAll(prevList)
+        && (prevList.size() == 0 || nextData.dismissedBy.hasAll(prevList))
         && nextData.dismissedBy.size() <= prevList.size() + 1;
+    }
+
+    function isValidCalendarAssignInvariants(data) {
+      let isAssign = 'eventType' in data && data.eventType == 'assign';
+      let isDiv = 'assignScope' in data && data.assignScope == 'division';
+      return !isAssign
+        ? (
+          (!('assignedPicUpper' in data) || data.assignedPicUpper == '')
+          && (!('assignedEmail' in data) || data.assignedEmail == '')
+          && (!('assignedDivision' in data) || data.assignedDivision == '')
+        )
+        : (
+          isDiv
+            ? (
+              'assignedDivision' in data && isOperationalRole(data.assignedDivision)
+              && 'assignedRole' in data && data.assignedRole == data.assignedDivision
+              && (!('assignedPicUpper' in data) || data.assignedPicUpper == '')
+              && (!('assignedEmail' in data) || data.assignedEmail == '')
+              && 'assignStatus' in data && data.assignStatus in ['assigned', 'completed', 'cancelled']
+            )
+            : (
+              'assignedPic' in data && data.assignedPic is string && data.assignedPic.size() >= 1 && data.assignedPic.size() <= 60
+              && 'assignedPicUpper' in data && data.assignedPicUpper is string && data.assignedPicUpper.size() >= 1 && data.assignedPicUpper.size() <= 60
+              && 'assignedRole' in data && isOperationalRole(data.assignedRole)
+              && (!('assignedDivision' in data) || data.assignedDivision == '')
+              && 'assignStatus' in data && data.assignStatus in ['assigned', 'completed', 'cancelled']
+              && 'notificationDismissed' in data && data.notificationDismissed is bool
+            )
+        );
+    }
+
+    function isValidCalendarRecurrenceFields(data) {
+      return (!('repeatFreq' in data) || (
+          data.repeatFreq is string
+          && data.repeatFreq in ['none', 'daily', 'weekly', 'monthly', 'yearly']
+        ))
+        && (!('repeatInterval' in data) || (
+          data.repeatInterval is int
+          && data.repeatInterval >= 1
+          && data.repeatInterval <= 12
+        ))
+        && (!('repeatUntil' in data) || (
+          data.repeatUntil is string
+          && (data.repeatUntil == '' || (data.repeatUntil.size() == 10 && data.repeatUntil.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')))
+        ))
+        && (!('repeatWeekdays' in data) || (
+          data.repeatWeekdays is list
+          && data.repeatWeekdays.size() <= 7
+          && (data.repeatWeekdays.size() == 0 || data.repeatWeekdays.hasOnly([0, 1, 2, 3, 4, 5, 6]))
+        ))
+        && (!('excludedDates' in data) || (
+          data.excludedDates is list
+          && data.excludedDates.size() <= 200
+          && (data.excludedDates.size() == 0 || (
+            data.excludedDates[0] is string
+            && data.excludedDates[0].size() == 10
+            && data.excludedDates[0].matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
+          ))
+        ));
     }
 
     function isValidCalendarEvent(data) {
@@ -655,68 +714,8 @@ service cloud.firestore {
         && (!('notificationDismissed' in data) || data.notificationDismissed is bool)
         && (!('dismissedBy' in data) || (data.dismissedBy is list && data.dismissedBy.size() <= 100))
         && (!('picResponses' in data) || (data.picResponses is map && data.picResponses.size() <= 60))
-        // PIC-scoped assign invariants
-        && (
-          !('eventType' in data) || data.eventType != 'assign'
-          || ('assignScope' in data && data.assignScope == 'division')
-          || (
-            'assignedPic' in data && data.assignedPic.size() >= 1
-            && 'assignedPicUpper' in data && data.assignedPicUpper.size() >= 1
-            && data.assignedPicUpper == data.assignedPic.trim().upper()
-            && 'assignedRole' in data && isOperationalRole(data.assignedRole)
-            && (!('assignedDivision' in data) || data.assignedDivision == '')
-            && 'assignStatus' in data && data.assignStatus in ['assigned', 'completed', 'cancelled']
-            && 'notificationDismissed' in data && data.notificationDismissed is bool
-          )
-        )
-        // Division-scoped assign invariants
-        && (
-          !('eventType' in data) || data.eventType != 'assign'
-          || !('assignScope' in data) || data.assignScope != 'division'
-          || (
-            'assignedDivision' in data && isOperationalRole(data.assignedDivision)
-            && 'assignedRole' in data && data.assignedRole == data.assignedDivision
-            && (!('assignedPicUpper' in data) || data.assignedPicUpper == '')
-            && (!('assignedEmail' in data) || data.assignedEmail == '')
-            && 'assignStatus' in data && data.assignStatus in ['assigned', 'completed', 'cancelled']
-          )
-        )
-        // Non-assign docs cannot populate query partition keys
-        && (
-          ('eventType' in data && data.eventType == 'assign')
-          || (
-            (!('assignedPicUpper' in data) || data.assignedPicUpper == '')
-            && (!('assignedEmail' in data) || data.assignedEmail == '')
-            && (!('assignedDivision' in data) || data.assignedDivision == '')
-          )
-        )
-        && (!('repeatFreq' in data) || (
-          data.repeatFreq is string
-          && data.repeatFreq in ['none', 'daily', 'weekly', 'monthly', 'yearly']
-        ))
-        && (!('repeatInterval' in data) || (
-          data.repeatInterval is int
-          && data.repeatInterval >= 1
-          && data.repeatInterval <= 12
-        ))
-        && (!('repeatUntil' in data) || (
-          data.repeatUntil is string
-          && (data.repeatUntil == '' || (data.repeatUntil.size() == 10 && data.repeatUntil.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')))
-        ))
-        && (!('repeatWeekdays' in data) || (
-          data.repeatWeekdays is list
-          && data.repeatWeekdays.size() <= 7
-          && (data.repeatWeekdays.size() == 0 || data.repeatWeekdays.hasOnly([0, 1, 2, 3, 4, 5, 6]))
-        ))
-        && (!('excludedDates' in data) || (
-          data.excludedDates is list
-          && data.excludedDates.size() <= 200
-          && (data.excludedDates.size() == 0 || (
-            data.excludedDates[0] is string
-            && data.excludedDates[0].size() == 10
-            && data.excludedDates[0].matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$')
-          ))
-        ))
+        && isValidCalendarAssignInvariants(data)
+        && isValidCalendarRecurrenceFields(data)
         && data.createdAt is timestamp
         && data.updatedAt is timestamp
         && data.createdBy is string && data.createdBy.size() >= 1 && data.createdBy.size() <= 128

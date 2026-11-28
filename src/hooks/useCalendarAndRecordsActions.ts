@@ -100,7 +100,9 @@ export function useCalendarAndRecordsActions({
             : 'stock_accounting';
 
       const cleanPic =
-        assignScope === 'division' ? '' : (input.assignedPic || '').trim().slice(0, 60).trim();
+        assignScope === 'division'
+          ? ''
+          : (input.assignedPic || '').replace(/\s+/g, ' ').trim().slice(0, 60).trim();
       if (assignScope === 'pic' && !cleanPic) {
         throw new Error('Pilih PIC tujuan penugasan terlebih dahulu.');
       }
@@ -141,11 +143,6 @@ export function useCalendarAndRecordsActions({
           notificationDismissed: false,
           dismissedBy: [],
           picResponses: {},
-          repeatFreq: 'none',
-          repeatInterval: 1,
-          repeatUntil: '',
-          repeatWeekdays: [],
-          excludedDates: [],
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
           createdBy: uid,
@@ -213,7 +210,9 @@ export function useCalendarAndRecordsActions({
             : 'stock_accounting';
 
       const cleanPic =
-        assignScope === 'division' ? '' : (input.assignedPic || '').trim().slice(0, 60).trim();
+        assignScope === 'division'
+          ? ''
+          : (input.assignedPic || '').replace(/\s+/g, ' ').trim().slice(0, 60).trim();
       if (assignScope === 'pic' && !cleanPic) {
         throw new Error('PIC tujuan penugasan wajib diisi.');
       }
@@ -257,11 +256,6 @@ export function useCalendarAndRecordsActions({
           assignStatus === 'cancelled'
             ? (input.cancelReason || '').trim().slice(0, 200)
             : '',
-        repeatFreq: 'none',
-        repeatInterval: 1,
-        repeatUntil: '',
-        repeatWeekdays: [],
-        excludedDates: [],
         updatedAt: serverTimestamp(),
         updatedBy: uid,
       };
@@ -326,7 +320,9 @@ export function useCalendarAndRecordsActions({
           chunk.forEach((row, idx) => {
             const eventId = `asg_${Date.now()}_${i + idx}_${Math.random().toString(36).slice(2, 6)}`;
             const isDivision = row.assignScope === 'division';
-            const cleanPic = isDivision ? '' : row.assignedPic.trim().slice(0, 60).trim();
+            const cleanPic = isDivision
+              ? ''
+              : row.assignedPic.replace(/\s+/g, ' ').trim().slice(0, 60).trim();
             batch.set(doc(db, 'calendarEvents', eventId), {
               title: row.title.trim().slice(0, 120),
               date: row.date,
@@ -349,11 +345,6 @@ export function useCalendarAndRecordsActions({
               notificationDismissed: false,
               dismissedBy: [],
               picResponses: {},
-              repeatFreq: 'none',
-              repeatInterval: 1,
-              repeatUntil: '',
-              repeatWeekdays: [],
-              excludedDates: [],
               createdAt: serverTimestamp(),
               updatedAt: serverTimestamp(),
               createdBy: uid,

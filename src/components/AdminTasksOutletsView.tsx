@@ -1,4 +1,4 @@
-import { CalendarCheck2, Copy, Lock, LockOpen, Plus, RotateCcw, Trash2 } from 'lucide-react';
+import { CalendarCheck2, CalendarClock, Copy, Lock, LockOpen, Plus, RotateCcw, Save, Trash2, X } from 'lucide-react';
 import { FormEvent, useState } from 'react';
 import {
   AccountProfile,
@@ -19,15 +19,23 @@ import {
   buildMonthWorkingDays,
   currentMonthKey,
   fmtMonth,
+  formatTaskScheduleLabel,
   getPastMonths,
   getPeopleMap,
   getPersonList,
   getTaskInputType,
   getTaskTolerance,
+  isCustomScheduledTask,
+  isScheduledTaskExpired,
   shiftMonthKey,
   todayIso,
 } from '../utils/outletLogic';
 import { AdminDayAdjustmentsSection } from './admin/AdminDayAdjustmentsSection';
+import {
+  DEFAULT_TASK_SCHEDULE_DRAFT,
+  TaskScheduleDraft,
+  TaskScheduleFields,
+} from './admin/TaskScheduleFields';
 import { ConfirmModal } from './ConfirmModal';
 
 interface AdminTasksOutletsViewProps {
@@ -82,14 +90,20 @@ export function AdminTasksOutletsView({
   const [taskFormula, setTaskFormula] = useState<FormulaType>('daily_plus_1');
   const [taskRefKey, setTaskRefKey] = useState('');
   const [taskTolerance, setTaskTolerance] = useState<string>('1');
+  const [taskSchedule, setTaskSchedule] = useState<TaskScheduleDraft>(DEFAULT_TASK_SCHEDULE_DRAFT);
   const [toleranceDrafts, setToleranceDrafts] = useState<Record<string, string>>({});
+  const [editingScheduleTask, setEditingScheduleTask] = useState<TaskDefinition | null>(null);
+  const [editScheduleDraft, setEditScheduleDraft] = useState<TaskScheduleDraft>(
+    DEFAULT_TASK_SCHEDULE_DRAFT
+  );
 
   // Outlet form state
   const [outletPerson, setOutletPerson] = useState('');
   const [outletCode, setOutletCode] = useState('');
 
   // Month access state (defaults to configured openUntilMonth or Dec 2027 for convenience)
-  const activeCalMonth = currentMonthKey(todayIso());
+  const today = todayIso();
+  const activeCalMonth = currentMonthKey(today);
   const autoOpenMonth = shiftMonthKey(activeCalMonth, 1);
   const [openUntilDraft, setOpenUntilDraft] = useState<string>(
     () => config.openUntilMonth || '2027-12'
@@ -205,10 +219,88 @@ export function AdminTasksOutletsView({
     }
   };
 
+  const isScheduleDraftValid = (draft: TaskScheduleDraft): boolean => {
+    if (draft.scheduleMode === 'weekdays') return draft.scheduleWeekdays.length > 0;
+    if (draft.scheduleMode === 'monthly_dates') return draft.scheduleMonthDays.length > 0;
+    if (draft.scheduleMode === 'once') return draft.scheduleDates.length > 0;
+    return true;
+  };
+
+  const buildSchedulePatch = (draft: TaskScheduleDraft): Partial<TaskDefinition> => {
+    if (draft.scheduleMode === 'weekdays') {
+      return {
+        scheduleMode: 'weekdays',
+        scheduleWeekdays: draft.scheduleWeekdays,
+        ...(draft.scheduleRepeatEnd ? { scheduleRepeatEnd: draft.scheduleRepeatEnd } : {}),
+      };
+    }
+    if (draft.scheduleMode === 'monthly_dates') {
+      return {
+        scheduleMode: 'monthly_dates',
+        scheduleMonthDays: draft.scheduleMonthDays,
+        ...(draft.scheduleRepeatEnd ? { scheduleRepeatEnd: draft.scheduleRepeatEnd } : {}),
+      };
+    }
+    if (draft.scheduleMode === 'once') {
+      return {
+        scheduleMode: 'once',
+        scheduleDates: draft.scheduleDates,
+      };
+    }
+    return {};
+  };
+
+  const openEditScheduleModal = (task: TaskDefinition) => {
+    setEditingScheduleTask(task);
+    setEditScheduleDraft({
+      scheduleMode: task.scheduleMode || 'always',
+      scheduleWeekdays: task.scheduleWeekdays?.length ? [...task.scheduleWeekdays] : [1],
+      scheduleMonthDays: task.scheduleMonthDays?.length ? [...task.scheduleMonthDays] : [1],
+      scheduleDates: task.scheduleDates?.length ? [...task.scheduleDates] : [],
+      scheduleRepeatEnd: task.scheduleRepeatEnd || '',
+    });
+  };
+
+  const handleSaveTaskSchedule = async () => {
+    if (!editingScheduleTask || !isScheduleDraftValid(editScheduleDraft)) return;
+    const updatedTasks = config.tasks.map((t) => {
+      if (t.key !== editingScheduleTask.key) return t;
+      const base: TaskDefinition = {
+        key: t.key,
+        label: t.label,
+        shortLabel: t.shortLabel,
+        defaultDate: t.defaultDate,
+        ...(t.inputType ? { inputType: t.inputType } : {}),
+        formulaType: t.formulaType,
+        ...(t.refTaskKey ? { refTaskKey: t.refTaskKey } : {}),
+        ...(t.toleranceOffset !== undefined ? { toleranceOffset: t.toleranceOffset } : {}),
+        formulaNote: t.formulaNote,
+        ...buildSchedulePatch(editScheduleDraft),
+      };
+      return base;
+    });
+    setBusy(true);
+    try {
+      await onSaveRoleConfig(targetRole, {
+        ...config,
+        tasks: updatedTasks,
+      });
+      const updatedDef = updatedTasks.find((t) => t.key === editingScheduleTask.key);
+      setFeedback(
+        `Jadwal tugas "${editingScheduleTask.label}" diperbarui: ${
+          updatedDef ? formatTaskScheduleLabel(updatedDef) : 'Setiap Hari Kerja'
+        }.`
+      );
+      setEditingScheduleTask(null);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleAddTask = async (e: FormEvent) => {
     e.preventDefault();
     const cleanLabel = taskLabel.trim();
-    if (!cleanLabel) return;
+    if (!cleanLabel || !isScheduleDraftValid(taskSchedule) || config.tasks.length >= 30) return;
     const baseKey = slugifyKey(cleanLabel) || `tugas_${config.tasks.length + 1}`;
     let finalKey = baseKey;
     let counter = 2;
@@ -233,6 +325,7 @@ export function AdminTasksOutletsView({
       ...(taskFormula === 'ref_task' && taskRefKey ? { refTaskKey: taskRefKey } : {}),
       toleranceOffset: parsedTolerance,
       formulaNote,
+      ...buildSchedulePatch(taskSchedule),
     };
 
     setBusy(true);
@@ -243,7 +336,10 @@ export function AdminTasksOutletsView({
       });
       setTaskLabel('');
       setTaskShort('');
-      setFeedback(`Tugas "${newTask.label}" ditambahkan ke ${config.label}.`);
+      setTaskSchedule(DEFAULT_TASK_SCHEDULE_DRAFT);
+      setFeedback(
+        `Tugas "${newTask.label}" (${formatTaskScheduleLabel(newTask)}) ditambahkan ke ${config.label}.`
+      );
     } finally {
       setBusy(false);
     }
@@ -829,11 +925,30 @@ export function AdminTasksOutletsView({
             </div>
           )}
 
-          <div className="lg:col-span-2">
+          <div className="sm:col-span-2 lg:col-span-12">
+            <TaskScheduleFields
+              value={taskSchedule}
+              onChange={setTaskSchedule}
+              disabled={busy}
+              idPrefix="new-task-sched"
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-2 sm:col-span-2 lg:col-span-12">
+            <span className="text-xs text-slate-500 dark:text-slate-400">
+              {config.tasks.length >= 30
+                ? 'Maksimal 30 tugas per divisi sudah tercapai.'
+                : `Tugas custom hanya tampil di Input Harian & dihitung KPI sesuai jadwal kemunculannya (${config.tasks.length}/30).`}
+            </span>
             <button
               type="submit"
-              disabled={busy || !taskLabel.trim()}
-              className="flex min-h-[40px] w-full items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-blue-700 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-800 disabled:opacity-50 dark:bg-blue-600 dark:hover:bg-blue-500"
+              disabled={
+                busy ||
+                !taskLabel.trim() ||
+                !isScheduleDraftValid(taskSchedule) ||
+                config.tasks.length >= 30
+              }
+              className="flex min-h-[40px] items-center justify-center gap-1.5 whitespace-nowrap rounded-lg bg-blue-700 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-800 disabled:opacity-50 dark:bg-blue-600 dark:hover:bg-blue-500"
             >
               <Plus className="h-4 w-4" />
               <span>Tambah Tugas</span>
@@ -847,11 +962,12 @@ export function AdminTasksOutletsView({
           </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] border-collapse text-left text-sm">
+            <table className="w-full min-w-[920px] border-collapse text-left text-sm">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50/70 text-xs font-medium text-slate-500 dark:border-slate-800 dark:bg-slate-800/40 dark:text-slate-400">
                   <th className="px-5 py-3">Nama Tugas</th>
                   <th className="px-4 py-3">Singkatan</th>
+                  <th className="px-4 py-3">Jadwal Muncul</th>
                   <th className="px-4 py-3">Jenis Input</th>
                   <th className="px-4 py-3">Rumus</th>
                   <th className="px-4 py-3">Toleransi Keterlambatan</th>
@@ -870,13 +986,49 @@ export function AdminTasksOutletsView({
                         ? 'mgg'
                         : 'hari';
                   const currentInputType = getTaskInputType(t);
+                  const isCustomSched = isCustomScheduledTask(t);
+                  const isExpired = isCustomSched && isScheduledTaskExpired(t, today);
+                  const scheduleLabel = formatTaskScheduleLabel(t);
                   return (
                     <tr key={t.key} className="hover:bg-slate-50/70 dark:hover:bg-slate-800/30">
                       <td className="px-5 py-3 font-medium text-slate-900 dark:text-slate-100">
-                        {t.label}
+                        <div>{t.label}</div>
                       </td>
                       <td className="px-4 py-3 text-xs text-slate-600 dark:text-slate-300">
                         {t.shortLabel}
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span
+                            className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-medium ${
+                              !isCustomSched
+                                ? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
+                                : isExpired
+                                  ? 'bg-slate-200 text-slate-500 line-through dark:bg-slate-800 dark:text-slate-500'
+                                  : t.scheduleMode === 'once'
+                                    ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300'
+                                    : 'bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300'
+                            }`}
+                          >
+                            {scheduleLabel}
+                          </span>
+                          {isExpired && (
+                            <span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold text-slate-500 dark:bg-slate-800 dark:text-slate-400">
+                              Sudah lewat
+                            </span>
+                          )}
+                          <button
+                            type="button"
+                            disabled={busy}
+                            onClick={() => openEditScheduleModal(t)}
+                            title={`Atur jadwal muncul ${t.label}`}
+                            aria-label={`Atur jadwal ${t.label}`}
+                            className="inline-flex h-7 items-center gap-1 rounded-md border border-slate-200 bg-white px-2 text-[11px] font-medium text-slate-600 transition-colors hover:bg-slate-100 hover:text-blue-700 disabled:opacity-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700 dark:hover:text-blue-400"
+                          >
+                            <CalendarClock className="h-3.5 w-3.5" />
+                            <span>Atur</span>
+                          </button>
+                        </div>
                       </td>
                       <td className="px-4 py-3">
                         <select
@@ -947,7 +1099,7 @@ export function AdminTasksOutletsView({
               </tbody>
             </table>
             <div className="border-t border-slate-100 px-5 py-2.5 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
-              Toleransi +1 berarti input H-1 masih berstatus UPDATE (0 dianggap tepat batas); ubah ke 0 jika harus tepat hari H, atau +2 / lebih untuk memperlonggar batas keterlambatan.
+              Toleransi +1 berarti input H-1 masih berstatus UPDATE (0 dianggap tepat batas); ubah ke 0 jika harus tepat hari H, atau +2 / lebih untuk memperlonggar batas keterlambatan. Tugas custom dengan jadwal "Sekali Muncul Lalu Hilang" hanya tampil pada tanggal terpilih dan otomatis hilang pada hari lain.
             </div>
           </div>
         )}
@@ -1121,6 +1273,71 @@ export function AdminTasksOutletsView({
           }
         }}
       />
+
+      {editingScheduleTask && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/55 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="edit-task-schedule-title"
+          onClick={() => !busy && setEditingScheduleTask(null)}
+        >
+          <div
+            className="w-full max-w-2xl overflow-hidden rounded-xl border border-slate-200 bg-white shadow-xl dark:border-slate-800 dark:bg-slate-900"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3 border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+              <div>
+                <h3
+                  id="edit-task-schedule-title"
+                  className="text-base font-semibold text-slate-900 dark:text-slate-100"
+                >
+                  Atur Jadwal Muncul Tugas
+                </h3>
+                <p className="mt-0.5 text-xs text-slate-500 dark:text-slate-400">
+                  {editingScheduleTask.label} · {config.label}
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setEditingScheduleTask(null)}
+                aria-label="Tutup modal jadwal tugas"
+                className="flex h-8 w-8 items-center justify-center rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-100"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div className="max-h-[70vh] overflow-y-auto p-5">
+              <TaskScheduleFields
+                value={editScheduleDraft}
+                onChange={setEditScheduleDraft}
+                disabled={busy}
+                idPrefix="edit-task-sched"
+              />
+            </div>
+            <div className="flex items-center justify-end gap-2 border-t border-slate-200 bg-slate-50/70 px-5 py-3.5 dark:border-slate-800 dark:bg-slate-800/40">
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => setEditingScheduleTask(null)}
+                className="min-h-[38px] rounded-lg border border-slate-200 bg-white px-3.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700"
+              >
+                Batal
+              </button>
+              <button
+                type="button"
+                disabled={busy || !isScheduleDraftValid(editScheduleDraft)}
+                onClick={handleSaveTaskSchedule}
+                className="inline-flex min-h-[38px] items-center gap-1.5 rounded-lg bg-blue-700 px-4 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-blue-800 disabled:opacity-50 dark:bg-blue-600 dark:hover:bg-blue-500"
+              >
+                <Save className="h-3.5 w-3.5" />
+                <span>{busy ? 'Menyimpan...' : 'Simpan Jadwal'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <ConfirmModal
         open={Boolean(pendingDelete)}

@@ -12,6 +12,7 @@ import {
   fmtDateLong,
   fmtDateWeekdayLong,
   formatPicTitle,
+  getActiveTasksForDay,
 } from '../../utils/outletLogic';
 import { InputHarianTaskRow } from './InputHarianTaskRow';
 
@@ -336,7 +337,8 @@ export function InputHarianDailyModal({
             <div className="mt-4 flex flex-wrap items-center justify-between gap-2.5 border-t border-slate-100 pt-4 dark:border-slate-800">
               <div className="flex flex-wrap items-center gap-1.5">
                 {outletsForPerson.map((o) => {
-                  const oPend = config.tasks.filter(
+                  const activeDayTasks = getActiveTasksForDay(config.tasks, selectedDay);
+                  const oPend = activeDayTasks.filter(
                     (t) => calcTask(store, days, config.tasks, o, selectedDay, t.key, today).pend
                   ).length;
                   const isActive = o === activeOutlet;
@@ -465,23 +467,34 @@ export function InputHarianDailyModal({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                  {calculatedTasks.map(({ def, calc, displayD, displayN, isDirty }) => (
-                    <InputHarianTaskRow
-                      key={def.key}
-                      def={def}
-                      calc={calc}
-                      displayD={displayD}
-                      displayN={displayN}
-                      isDirty={isDirty}
-                      canEditDay={canEditDay}
-                      isAdmin={isAdmin}
-                      days={days}
-                      selectedDay={selectedDay}
-                      today={today}
-                      onSetDraft={onSetTaskDraft}
-                      onClearDraft={onClearTaskDraft}
-                    />
-                  ))}
+                  {calculatedTasks.length === 0 ? (
+                    <tr>
+                      <td
+                        colSpan={isAdmin ? 7 : 5}
+                        className="px-5 py-8 text-center text-sm text-slate-500 dark:text-slate-400"
+                      >
+                        Tidak ada tugas yang dijadwalkan untuk tanggal {fmtDateLong(selectedDay)}.
+                      </td>
+                    </tr>
+                  ) : (
+                    calculatedTasks.map(({ def, calc, displayD, displayN, isDirty }) => (
+                      <InputHarianTaskRow
+                        key={def.key}
+                        def={def}
+                        calc={calc}
+                        displayD={displayD}
+                        displayN={displayN}
+                        isDirty={isDirty}
+                        canEditDay={canEditDay}
+                        isAdmin={isAdmin}
+                        days={days}
+                        selectedDay={selectedDay}
+                        today={today}
+                        onSetDraft={onSetTaskDraft}
+                        onClearDraft={onClearTaskDraft}
+                      />
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>

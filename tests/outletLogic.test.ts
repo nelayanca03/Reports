@@ -11,7 +11,13 @@ import {
   canAccountEditPic,
   escapeCsv,
   expandCalendarEventsForRange,
+  formatTaskScheduleLabel,
   generateDailyFleetCsv,
+  getActiveTasksForDay,
+  isScheduledTaskExpired,
+  isTaskActiveOnDay,
+  nextDateForWeekday,
+  sanitizeTaskDefinitions,
 } from '../src/utils/outletLogic';
 import {
   AccountProfile,
@@ -286,3 +292,144 @@ describe('outletLogic: PIC ownership & permission helpers', () => {
     assert.equal(byPic.MELVIN.includes('NKPM'), false);
   });
 });
+
+describe('outletLogic: custom task visibility schedules (recurring & one-time)', () => {
+  const baseTask: TaskDefinition = {
+    key: 'custom_check',
+    label: 'Cek Khusus',
+    shortLabel: 'Cek Khusus',
+    defaultDate: '',
+    inputType: 'date',
+    formulaType: 'daily_plus_1',
+    toleranceOffset: 1,
+    formulaNote: 'Selisih hari terhadap tanggal kerja + 1',
+  };
+
+  it('shows recurring weekday tasks only on selected weekdays and respects scheduleRepeatEnd', () => {
+    const monWedTask: TaskDefinition = {
+      ...baseTask,
+      scheduleMode: 'weekdays',
+      scheduleWeekdays: [1, 3], // Monday & Wednesday
+      scheduleRepeatEnd: '2026-11-11',
+    };
+    assert.equal(isTaskActiveOnDay(monWedTask, '2026-11-02'), true); // Mon
+    assert.equal(isTaskActiveOnDay(monWedTask, '2026-11-03'), false); // Tue
+    assert.equal(isTaskActiveOnDay(monWedTask, '2026-11-04'), true); // Wed
+    assert.equal(isTaskActiveOnDay(monWedTask, '2026-11-11'), true); // Wed (inclusive end)
+    assert.equal(isTaskActiveOnDay(monWedTask, '2026-11-16'), false); // Mon after repeatEnd
+    assert.equal(isScheduledTaskExpired(monWedTask, '2026-11-12'), true);
+    assert.equal(isScheduledTaskExpired(monWedTask, '2026-11-11'), false);
+    assert.ok(formatTaskScheduleLabel(monWedTask).includes('Sen, Rab'));
+  });
+
+  it('shows recurring monthly_dates tasks on target day(s) of month and clamps 31st to shorter months', () => {
+    const monthlyTask: TaskDefinition = {
+      ...baseTask,
+      scheduleMode: 'monthly_dates',
+      scheduleMonthDays: [1, 31],
+    };
+    assert.equal(isTaskActiveOnDay(monthlyTask, '2026-01-01'), true);
+    assert.equal(isTaskActiveOnDay(monthlyTask, '2026-01-31'), true);
+    assert.equal(isTaskActiveOnDay(monthlyTask, '2026-02-28'), true); // Feb clamped 31 -> 28
+    assert.equal(isTaskActiveOnDay(monthlyTask, '2026-02-27'), false);
+    assert.equal(isTaskActiveOnDay(monthlyTask, '2026-11-30'), true); // Nov clamped 31 -> 30
+    assert.equal(isTaskActiveOnDay(monthlyTask, '2026-11-15'), false);
+  });
+
+  it('shows one-time tasks strictly on scheduled date(s) and hides them on all other days', () => {
+    const onceTask: TaskDefinition = {
+      ...baseTask,
+      scheduleMode: 'once',
+      scheduleDates: ['2026-11-28'],
+    };
+    assert.equal(isTaskActiveOnDay(onceTask, '2026-11-27'), false);
+    assert.equal(isTaskActiveOnDay(onceTask, '2026-11-28'), true);
+    assert.equal(isTaskActiveOnDay(onceTask, '2026-11-29'), false);
+    assert.equal(isScheduledTaskExpired(onceTask, '2026-11-28'), false);
+    assert.equal(isScheduledTaskExpired(onceTask, '2026-11-29'), true);
+
+    const activeNov27 = getActiveTasksForDay([STOCK_ACCOUNTING_TASKS[0], onceTask], '2026-11-27');
+    const activeNov28 = getActiveTasksForDay([STOCK_ACCOUNTING_TASKS[0], onceTask], '2026-11-28');
+    assert.equal(activeNov27.length, 1);
+    assert.equal(activeNov28.length, 2);
+  });
+
+  it('evaluates calcRecap only across active scheduled days for custom tasks', () => {
+    const novDays = buildMonthWorkingDays('2026-11');
+    const onceTask: TaskDefinition = {
+      ...baseTask,
+      key: 'audit_once',
+      label: 'Audit Khusus',
+      scheduleMode: 'once',
+      scheduleDates: ['2026-11-20'],
+    };
+    const state: OutletStoreState = {
+      start: '2026-11-01',
+      ent: {
+        DLS: {
+          '2026-11-20|audit_once': { d: '2026-11-19', n: 'OK' },
+        },
+      },
+      visit: {},
+    };
+
+    // Before target date: 0 scheduled days -> not penalized as pending
+    const beforeRecap = calcRecap(
+      state,
+      novDays,
+      [onceTask],
+      'DLS',
+      'PETER',
+      'audit_once',
+      '2026-11-19',
+      '2026-11-30'
+    );
+    assert.equal(beforeRecap.totalDays, 0);
+    assert.equal(beforeRecap.effectiveDays, 0);
+    assert.equal(beforeRecap.pend, 0);
+    assert.equal(beforeRecap.latestPend, false);
+
+    // After target date (filled on time): 1 scheduled day, 0 pending, avg 0
+    const afterRecap = calcRecap(
+      state,
+      novDays,
+      [onceTask],
+      'DLS',
+      'PETER',
+      'audit_once',
+      '2026-11-28',
+      '2026-11-30'
+    );
+    assert.equal(afterRecap.totalDays, 1);
+    assert.equal(afterRecap.effectiveDays, 1);
+    assert.equal(afterRecap.pend, 0);
+    assert.equal(afterRecap.avg, 0);
+    assert.equal(afterRecap.hasAnyInput, true);
+  });
+
+  it('sanitizes task schedule definitions cleanly and computes nextDateForWeekday', () => {
+    const cleaned = sanitizeTaskDefinitions([
+      {
+        ...baseTask,
+        scheduleMode: 'weekdays',
+        scheduleWeekdays: [5, 1, 1, 0, 9], // 0 and 9 filtered out, deduped & sorted
+        scheduleRepeatEnd: '2026-12-31',
+      },
+      {
+        ...baseTask,
+        key: 'empty_once',
+        scheduleMode: 'once',
+        scheduleDates: ['bad-date'],
+      },
+    ]);
+    assert.equal(cleaned.length, 2);
+    assert.deepEqual(cleaned[0].scheduleWeekdays, [1, 5]);
+    assert.equal(cleaned[0].scheduleRepeatEnd, '2026-12-31');
+    assert.equal(cleaned[1].scheduleMode, undefined); // falls back cleanly to default always
+
+    // 2026-11-27 is Friday (5); next Monday (1) is 2026-11-30
+    assert.equal(nextDateForWeekday(1, '2026-11-27'), '2026-11-30');
+    assert.equal(nextDateForWeekday(5, '2026-11-27'), '2026-11-27');
+  });
+});
+

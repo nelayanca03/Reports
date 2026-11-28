@@ -47,6 +47,7 @@ import {
   normalizeCalendarWeekdays,
   normalizeExcludedDates,
   parseDayAdjustments,
+  sanitizeTaskDefinitions,
   shiftMonthKey,
 } from '../utils/outletLogic';
 import { parseUnlockedPastMonths } from './useAdminManagementActions';
@@ -158,7 +159,7 @@ export function useWorkspaceListeners({
               ? { openUntilMonth: d.openUntilMonth }
               : {}),
             ...(unlockedPastMonths.length > 0 ? { unlockedPastMonths } : {}),
-            tasks: Array.isArray(d.tasks) ? d.tasks : [],
+            tasks: sanitizeTaskDefinitions(d.tasks),
             outlets: Array.isArray(d.outlets) ? d.outlets : [],
             ...(parsedOutletsByPic ? { outletsByPic: parsedOutletsByPic } : {}),
             ...(parsedDayAdjustments.length > 0 ? { dayAdjustments: parsedDayAdjustments } : {}),
@@ -243,7 +244,7 @@ export function useWorkspaceListeners({
                     ? { openUntilMonth: d.openUntilMonth }
                     : {}),
                   ...(unlockedPastMonths.length > 0 ? { unlockedPastMonths } : {}),
-                  tasks: Array.isArray(d.tasks) ? d.tasks : [],
+                  tasks: sanitizeTaskDefinitions(d.tasks),
                   outlets: Array.isArray(d.outlets) ? d.outlets : [],
                   ...(parsedOutletsByPic ? { outletsByPic: parsedOutletsByPic } : {}),
                   ...(parsedDayAdjustments.length > 0 ? { dayAdjustments: parsedDayAdjustments } : {}),
@@ -624,7 +625,7 @@ export function useWorkspaceListeners({
                     ? { openUntilMonth: d.openUntilMonth }
                     : {}),
                   ...(unlockedPastMonths.length > 0 ? { unlockedPastMonths } : {}),
-                  tasks: Array.isArray(d.tasks) ? d.tasks : [],
+                  tasks: sanitizeTaskDefinitions(d.tasks),
                   outlets: parsedOutlets,
                   outletsByPic: areOutletsByPicEqual(parsedOutletsByPic, expectedOutletsByPic)
                     ? parsedOutletsByPic || expectedOutletsByPic

@@ -18,6 +18,7 @@ import {
   fmtDateTimeWithSeconds,
   fmtMonth,
   fmtWeek,
+  getActiveTasksForDay,
   getAdjustmentForPersonDay,
   getPeopleMap,
   getPersonList,
@@ -25,6 +26,7 @@ import {
   getTaskInputType,
   getVisitEntries,
   isSunday,
+  isTaskActiveOnDay,
   parseUtcDate,
   toIsoUtc,
 } from './outletLogic';
@@ -359,7 +361,7 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
           const dayAdj = getAdjustmentForPersonDay(cfg.dayAdjustments, person, dayItem);
           if (onlyPending && dayAdj) continue;
 
-          for (const t of cfg.tasks) {
+          for (const t of getActiveTasksForDay(cfg.tasks, dayItem)) {
             const c = calcTask(ws, rDays, cfg.tasks, outlet, dayItem, t.key, today);
             if (onlyPending && !c.pend) continue;
 
@@ -487,12 +489,13 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
             continue;
           }
 
+          const activeTasks = getActiveTasksForDay(cfg.tasks, dayItem);
           let completeOutlets = 0;
           let updatedTasks = 0;
           let pendingTasks = 0;
           for (const outlet of outlets) {
             let outletPend = 0;
-            for (const t of cfg.tasks) {
+            for (const t of activeTasks) {
               const c = calcTask(ws, rDays, cfg.tasks, outlet, dayItem, t.key, today);
               if (c.pend) {
                 pendingTasks++;
@@ -501,7 +504,7 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
                 updatedTasks++;
               }
             }
-            if (cfg.tasks.length > 0 && outletPend === 0) completeOutlets++;
+            if (activeTasks.length > 0 && outletPend === 0) completeOutlets++;
           }
           const totalTasks = updatedTasks + pendingTasks;
           const pct = totalTasks > 0 ? Math.round((updatedTasks / totalTasks) * 100) : 0;
@@ -604,7 +607,7 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
           let upd = 0;
           let pend = 0;
           const dayCells = wDays.map((d) => {
-            if (!rDays.includes(d)) return '—';
+            if (!rDays.includes(d) || !isTaskActiveOnDay(t, d)) return '—';
             const c = calcTask(ws, rDays, cfg.tasks, outlet, d, t.key, today);
             if (c.pend) {
               pend++;
@@ -713,8 +716,9 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
 
         for (const d of activeWeekDays) {
           if (getAdjustmentForPersonDay(cfg.dayAdjustments, person, d)) continue;
+          const activeTasks = getActiveTasksForDay(cfg.tasks, d);
           for (const outlet of outlets) {
-            for (const t of cfg.tasks) {
+            for (const t of activeTasks) {
               const c = calcTask(ws, rDays, cfg.tasks, outlet, d, t.key, today);
               totalSlots++;
               pmSum += c.pm;
@@ -821,8 +825,9 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
             continue;
           }
           personEffectiveDays++;
+          const activeTasks = getActiveTasksForDay(cfg.tasks, d);
           for (const outlet of outlets) {
-            for (const t of cfg.tasks) {
+            for (const t of activeTasks) {
               const c = calcTask(ws, rDays, cfg.tasks, outlet, d, t.key, today);
               totalSlots++;
               pmSum += c.pm;
@@ -939,6 +944,7 @@ export function buildExportReport(params: BuildExportReportParams): ExportReport
             hasCustomRange ? effRangeFrom : daysToCalc[0],
             cfg.dayAdjustments
           );
+          if (recap.totalDays === 0) return '—';
           totalPend += recap.pend;
           avgSum += recap.avg;
           taskCount++;

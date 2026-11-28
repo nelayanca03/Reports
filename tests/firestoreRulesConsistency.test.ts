@@ -125,7 +125,7 @@ describe('firestore.rules structural invariants & blueprint sync', () => {
     }
   });
 
-  it('guards empty repeatWeekdays lists, avoids {} map literals, and matches createCalendarEvent keys', () => {
+  it('guards empty repeatWeekdays and dismissedBy lists, avoids {} map literals, and matches createCalendarEvent keys', () => {
     assert.ok(
       !rulesText.includes(': {}'),
       'firestore.rules must not contain {} empty map literals (unsupported in CEL rules)'
@@ -136,7 +136,11 @@ describe('firestore.rules structural invariants & blueprint sync', () => {
     assert.equal(
       repeatMatches.length,
       2,
-      'Expected both isValidCalendarEvent and isValidPersonalReminder to guard empty repeatWeekdays before hasOnly'
+      'Expected both calendar recurrence and personal reminder rules to guard empty repeatWeekdays before hasOnly'
+    );
+    assert.match(
+      rulesText,
+      /prevList\.size\(\) == 0 \|\| nextData\.dismissedBy\.hasAll\(prevList\)/
     );
     assert.match(rulesText, /function canListCalendarEvent\(/);
 
@@ -166,11 +170,6 @@ describe('firestore.rules structural invariants & blueprint sync', () => {
       'notificationDismissed',
       'dismissedBy',
       'picResponses',
-      'repeatFreq',
-      'repeatInterval',
-      'repeatUntil',
-      'repeatWeekdays',
-      'excludedDates',
       'createdAt',
       'updatedAt',
       'createdBy',

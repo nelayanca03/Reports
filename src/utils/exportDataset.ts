@@ -17,6 +17,8 @@ import {
   diffWorkingDays,
   escapeCsvCell,
   expandCalendarEventsForRange,
+  formatTaskScheduleLabel,
+  getActiveTasksForDay,
   getAdjustmentForPersonDay,
   getPersonList,
   getSelectableMonths,
@@ -24,6 +26,7 @@ import {
   getTaskTolerance,
   getVisitEntries,
   isSunday,
+  isTaskActiveOnDay,
   parseUtcDate,
   toWibIsoDate,
   toWibTimeString,
@@ -263,6 +266,8 @@ export function buildDataset(params: BuildDatasetParams): BuiltDataset {
         tolerance_offset: getTaskTolerance(t),
         ref_task_key: t.refTaskKey || '',
         formula_note: t.formulaNote || '',
+        jadwal_mode: t.scheduleMode || 'always',
+        jadwal_detail: formatTaskScheduleLabel(t),
         urutan_tugas: idx + 1,
       });
     });
@@ -291,6 +296,7 @@ export function buildDataset(params: BuildDatasetParams): BuiltDataset {
         const inputType = getTaskInputType(task);
         for (const d of allDaysUpToMax) {
           if (getAdjustmentForPersonDay(cfg.dayAdjustments, person, d)) continue;
+          if (!isTaskActiveOnDay(task, d)) continue;
           const c = calcTask(ws, baseWorkingDays, cfg.tasks, outlet, d, task.key, today);
           streak = c.pend ? streak + 1 : 0;
           if (!evalDaysSet.has(d)) continue;
@@ -344,6 +350,7 @@ export function buildDataset(params: BuildDatasetParams): BuiltDataset {
           .map((o) => o.code);
         if (picOutlets.length === 0) continue;
 
+        const activeTasksForDay = getActiveTasksForDay(cfg.tasks, d);
         let slotUpdate = 0;
         let slotPending = 0;
         let slotBelumInput = 0;
@@ -351,7 +358,7 @@ export function buildDataset(params: BuildDatasetParams): BuiltDataset {
         let sumSelisih = 0;
 
         for (const outlet of picOutlets) {
-          for (const task of cfg.tasks) {
+          for (const task of activeTasksForDay) {
             const recap = calcRecap(
               ws,
               baseWorkingDays,
@@ -380,7 +387,7 @@ export function buildDataset(params: BuildDatasetParams): BuiltDataset {
           }
         }
 
-        const totalSlot = picOutlets.length * cfg.tasks.length;
+        const totalSlot = picOutlets.length * activeTasksForDay.length;
         const compliancePct =
           totalSlot > 0 ? Number(((slotUpdate / totalSlot) * 100).toFixed(2)) : 0;
         const avgSelisih =
@@ -410,7 +417,7 @@ export function buildDataset(params: BuildDatasetParams): BuiltDataset {
           hari: getWeekdayShort(d),
           hari_kerja_ke: monthWorkingDayIndexMap.get(d) || 0,
           jumlah_outlet: picOutlets.length,
-          jumlah_tugas: cfg.tasks.length,
+          jumlah_tugas: activeTasksForDay.length,
           total_slot: totalSlot,
           slot_update: slotUpdate,
           slot_pending: slotPending,
@@ -746,6 +753,8 @@ export function buildDataset(params: BuildDatasetParams): BuiltDataset {
         'tolerance_offset',
         'ref_task_key',
         'formula_note',
+        'jadwal_mode',
+        'jadwal_detail',
         'urutan_tugas',
       ],
       rows: dimTaskRows,

@@ -4,6 +4,7 @@ export type RecordPrefix = 'SA' | 'GL';
 export type RecordDepartment = 'stock_accounting' | 'gl';
 export type FormulaType = 'daily_plus_1' | 'weekly_plus_1' | 'memo_month' | 'ref_task';
 export type TaskInputType = 'date' | 'week' | 'month';
+export type TaskScheduleMode = 'always' | 'weekdays' | 'monthly_dates' | 'once';
 export type InputLogActionType = 'input_harian' | 'kunjungan';
 export type InputLogItemAction = 'set' | 'clear' | 'edit';
 
@@ -17,6 +18,11 @@ export interface TaskDefinition {
   refTaskKey?: string;
   toleranceOffset?: number;
   formulaNote: string;
+  scheduleMode?: TaskScheduleMode;
+  scheduleWeekdays?: number[];
+  scheduleMonthDays?: number[];
+  scheduleDates?: string[];
+  scheduleRepeatEnd?: string;
 }
 
 export interface OutletAssignment {
