@@ -1,4 +1,4 @@
-import { Bell, Repeat, UserCheck, Users, X } from 'lucide-react';
+import { Bell, CheckSquare, Repeat, Square, UserCheck, Users, X } from 'lucide-react';
 import { FormEvent } from 'react';
 import {
   CalendarAssignScope,
@@ -13,7 +13,13 @@ import {
   normalizeCalendarInterval,
   parseUtcDate,
 } from '../../utils/outletLogic';
-import { CalendarFormMode, WEEKDAY_DOW_MAP } from './calendarUtils';
+import {
+  ALL_DEPARTMENTS,
+  ASSIGN_TITLE_PRESETS,
+  AssignTitleDropdownValue,
+  CalendarFormMode,
+  WEEKDAY_DOW_MAP,
+} from './calendarUtils';
 
 interface KalenderFormModalProps {
   open: boolean;
@@ -23,6 +29,7 @@ interface KalenderFormModalProps {
   busy: boolean;
   formError: string | null;
   formTitle: string;
+  formTitlePreset: AssignTitleDropdownValue;
   formDate: string;
   formStartTime: string;
   formNotes: string;
@@ -30,10 +37,10 @@ interface KalenderFormModalProps {
   assignablePics: AssignablePicOption[];
   allMasterOutlets: string[];
   formAssignScope: CalendarAssignScope;
-  formAssignedDivision: OperationalRoleId;
-  formAssignedPicKey: string;
+  formAssignedDivisions: OperationalRoleId[];
+  formAssignedPicKeys: string[];
   formAssignedOutlet: string;
-  // Personal reminder recurrence fields
+  // Recurrence fields (Personal reminder & Assign Divisi)
   formRepeatFreq: CalendarRecurrenceFreq;
   formRepeatInterval: number;
   formRepeatWeekdays: number[];
@@ -44,12 +51,16 @@ interface KalenderFormModalProps {
   onChangeMode: (nextMode: CalendarFormMode) => void;
   onSubmit: (e: FormEvent) => Promise<void>;
   onChangeTitle: (value: string) => void;
+  onChangeTitlePreset: (preset: AssignTitleDropdownValue) => void;
   onChangeDate: (value: string) => void;
   onChangeStartTime: (value: string) => void;
   onChangeNotes: (value: string) => void;
   onChangeAssignScope: (scope: CalendarAssignScope) => void;
-  onChangeAssignedDivision: (roleId: OperationalRoleId) => void;
-  onChangeAssignedPicKey: (picKey: string) => void;
+  onToggleAssignedDivision: (roleId: OperationalRoleId) => void;
+  onToggleAllAssignedDivisions: () => void;
+  onToggleAssignedPicKey: (picKey: string) => void;
+  onSelectAllAssignedPics: () => void;
+  onClearAssignedPics: () => void;
   onChangeAssignedOutlet: (outlet: string) => void;
   onChangeRepeatFreq: (freq: CalendarRecurrenceFreq) => void;
   onChangeRepeatInterval: (interval: number) => void;
@@ -67,14 +78,15 @@ export function KalenderFormModal({
   busy,
   formError,
   formTitle,
+  formTitlePreset,
   formDate,
   formStartTime,
   formNotes,
   assignablePics,
   allMasterOutlets,
   formAssignScope,
-  formAssignedDivision,
-  formAssignedPicKey,
+  formAssignedDivisions,
+  formAssignedPicKeys,
   formAssignedOutlet,
   formRepeatFreq,
   formRepeatInterval,
@@ -86,12 +98,16 @@ export function KalenderFormModal({
   onChangeMode,
   onSubmit,
   onChangeTitle,
+  onChangeTitlePreset,
   onChangeDate,
   onChangeStartTime,
   onChangeNotes,
   onChangeAssignScope,
-  onChangeAssignedDivision,
-  onChangeAssignedPicKey,
+  onToggleAssignedDivision,
+  onToggleAllAssignedDivisions,
+  onToggleAssignedPicKey,
+  onSelectAllAssignedPics,
+  onClearAssignedPics,
   onChangeAssignedOutlet,
   onChangeRepeatFreq,
   onChangeRepeatInterval,
@@ -104,13 +120,18 @@ export function KalenderFormModal({
 
   const isAssignMode = mode === 'assign';
   const isDivisionScope = formAssignScope === 'division';
-  const selectedPicOption = assignablePics.find(
-    (p) => `${p.roleId}|${p.picUpper}` === formAssignedPicKey
+  const showRecurrenceSection = !isAssignMode || isDivisionScope;
+
+  const selectedPicOptions = assignablePics.filter((p) =>
+    formAssignedPicKeys.includes(`${p.roleId}|${p.picUpper}`)
   );
-  const picOutlets = isDivisionScope ? [] : selectedPicOption?.outlets || [];
+  const picOutlets = isDivisionScope
+    ? []
+    : Array.from(new Set(selectedPicOptions.flatMap((p) => p.outlets)));
   const otherOutlets = allMasterOutlets.filter((o) => !picOutlets.includes(o));
 
-  const rolesOrder: OperationalRoleId[] = ['stock_accounting', 'gl', 'accounting'];
+  const rolesOrder: OperationalRoleId[] = ALL_DEPARTMENTS;
+  const isAllDivisionsSelected = rolesOrder.every((r) => formAssignedDivisions.includes(r));
 
   return (
     <div
@@ -212,168 +233,42 @@ export function KalenderFormModal({
             </div>
           )}
 
+          {/* 1. Target Penugasan (Assign Mode) */}
           {isAssignMode && (
-            <div className="space-y-3">
-              <div>
-                <span className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300">
-                  Target Penugasan
-                </span>
-                <div className="grid grid-cols-2 gap-2">
-                  <button
-                    type="button"
-                    onClick={() => onChangeAssignScope('pic')}
-                    className={`flex min-h-[38px] items-center justify-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
-                      !isDivisionScope
-                        ? 'border-blue-700 bg-blue-50 text-blue-800 dark:border-blue-500 dark:bg-blue-950/60 dark:text-blue-200'
-                        : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
-                    }`}
-                  >
-                    <UserCheck className="h-3.5 w-3.5" />
-                    <span>PIC Khusus</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onChangeAssignScope('division')}
-                    className={`flex min-h-[38px] items-center justify-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
-                      isDivisionScope
-                        ? 'border-blue-700 bg-blue-50 text-blue-800 dark:border-blue-500 dark:bg-blue-950/60 dark:text-blue-200'
-                        : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
-                    }`}
-                  >
-                    <Users className="h-3.5 w-3.5" />
-                    <span>Assign Divisi</span>
-                  </button>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                {!isDivisionScope ? (
-                  <div>
-                    <label
-                      htmlFor="assign-pic-select"
-                      className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300"
-                    >
-                      PIC Tujuan
-                    </label>
-                    <select
-                      id="assign-pic-select"
-                      required
-                      value={formAssignedPicKey}
-                      onChange={(e) => onChangeAssignedPicKey(e.target.value)}
-                      className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-                    >
-                      <option value="">Pilih PIC...</option>
-                      {rolesOrder.map((roleId) => {
-                        const group = assignablePics.filter((p) => p.roleId === roleId);
-                        if (group.length === 0) return null;
-                        return (
-                          <optgroup key={roleId} label={ROLE_LABELS[roleId]}>
-                            {group.map((opt) => (
-                              <option
-                                key={`${opt.roleId}|${opt.picUpper}`}
-                                value={`${opt.roleId}|${opt.picUpper}`}
-                              >
-                                {opt.pic}
-                                {opt.outlets.length > 0 ? ` (${opt.outlets.length} outlet)` : ''}
-                              </option>
-                            ))}
-                          </optgroup>
-                        );
-                      })}
-                    </select>
-                  </div>
-                ) : (
-                  <div>
-                    <label
-                      htmlFor="assign-division-select"
-                      className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300"
-                    >
-                      Divisi Tujuan
-                    </label>
-                    <select
-                      id="assign-division-select"
-                      required
-                      value={formAssignedDivision}
-                      onChange={(e) =>
-                        onChangeAssignedDivision(e.target.value as OperationalRoleId)
-                      }
-                      className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-                    >
-                      {rolesOrder.map((roleId) => (
-                        <option key={roleId} value={roleId}>
-                          {ROLE_LABELS[roleId]}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                )}
-
-                <div>
-                  <label
-                    htmlFor="assign-outlet-select"
-                    className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300"
-                  >
-                    Outlet Tujuan (Opsional)
-                  </label>
-                  <select
-                    id="assign-outlet-select"
-                    value={formAssignedOutlet}
-                    onChange={(e) => onChangeAssignedOutlet(e.target.value)}
-                    className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-                  >
-                    <option value="">Tanpa outlet khusus</option>
-                    {picOutlets.length > 0 && (
-                      <optgroup label={`Outlet ${selectedPicOption?.pic || 'PIC'}`}>
-                        {picOutlets.map((code) => (
-                          <option key={code} value={code}>
-                            {code}
-                          </option>
-                        ))}
-                      </optgroup>
-                    )}
-                    {otherOutlets.length > 0 && (
-                      <optgroup label={picOutlets.length > 0 ? 'Outlet Lainnya' : 'Daftar Outlet'}>
-                        {otherOutlets.map((code) => (
-                          <option key={code} value={code}>
-                            {code}
-                          </option>
-                        ))}
-                      </optgroup>
-                    )}
-                    {formAssignedOutlet &&
-                      !picOutlets.includes(formAssignedOutlet) &&
-                      !otherOutlets.includes(formAssignedOutlet) && (
-                        <option value={formAssignedOutlet}>{formAssignedOutlet}</option>
-                      )}
-                  </select>
-                </div>
+            <div>
+              <span className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300">
+                Target Penugasan
+              </span>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => onChangeAssignScope('pic')}
+                  className={`flex min-h-[38px] items-center justify-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                    !isDivisionScope
+                      ? 'border-blue-700 bg-blue-50 text-blue-800 dark:border-blue-500 dark:bg-blue-950/60 dark:text-blue-200'
+                      : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
+                  }`}
+                >
+                  <UserCheck className="h-3.5 w-3.5" />
+                  <span>PIC Khusus</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onChangeAssignScope('division')}
+                  className={`flex min-h-[38px] items-center justify-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition-colors ${
+                    isDivisionScope
+                      ? 'border-blue-700 bg-blue-50 text-blue-800 dark:border-blue-500 dark:bg-blue-950/60 dark:text-blue-200'
+                      : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
+                  }`}
+                >
+                  <Users className="h-3.5 w-3.5" />
+                  <span>Assign Divisi</span>
+                </button>
               </div>
             </div>
           )}
 
-          <div>
-            <label
-              htmlFor="evt-title"
-              className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300"
-            >
-              {isAssignMode ? 'Judul Tugas / Penugasan' : 'Judul Reminder'}
-            </label>
-            <input
-              id="evt-title"
-              type="text"
-              required
-              maxLength={120}
-              value={formTitle}
-              onChange={(e) => onChangeTitle(e.target.value)}
-              placeholder={
-                isAssignMode
-                  ? 'Contoh: Stock Opname Outlet DLS, Cek Asset, Audit Kas'
-                  : 'Contoh: Kirim laporan mingguan, Cek selisih stok'
-              }
-              className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-            />
-          </div>
-
+          {/* 2. Tanggal & Jam Berangkat */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label
@@ -414,7 +309,244 @@ export function KalenderFormModal({
             </div>
           </div>
 
-          {!isAssignMode && (
+          {/* 3. Judul Tugas / Penugasan */}
+          <div>
+            <label
+              htmlFor="evt-title"
+              className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300"
+            >
+              {isAssignMode ? 'Judul Tugas / Penugasan' : 'Judul Reminder'}
+            </label>
+            {isAssignMode ? (
+              <div className="space-y-2">
+                <select
+                  id="evt-title"
+                  value={formTitlePreset}
+                  onChange={(e) =>
+                    onChangeTitlePreset(e.target.value as AssignTitleDropdownValue)
+                  }
+                  className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                >
+                  {ASSIGN_TITLE_PRESETS.map((preset) => (
+                    <option key={preset} value={preset}>
+                      {preset}
+                    </option>
+                  ))}
+                  <option value="custom">Lainnya : Isi sendiri</option>
+                </select>
+
+                {formTitlePreset === 'custom' && (
+                  <input
+                    id="evt-title-custom"
+                    type="text"
+                    required
+                    maxLength={120}
+                    value={formTitle}
+                    onChange={(e) => onChangeTitle(e.target.value)}
+                    placeholder="Isi judul tugas / penugasan sendiri..."
+                    className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                  />
+                )}
+              </div>
+            ) : (
+              <input
+                id="evt-title"
+                type="text"
+                required
+                maxLength={120}
+                value={formTitle}
+                onChange={(e) => onChangeTitle(e.target.value)}
+                placeholder="Contoh: Kirim laporan mingguan, Cek selisih stok"
+                className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+              />
+            )}
+          </div>
+
+          {/* 4. PIC / Divisi & Outlet Tujuan */}
+          {isAssignMode && (
+            <div className="space-y-3">
+              {!isDivisionScope ? (
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                      PIC Tujuan ({formAssignedPicKeys.length} dipilih)
+                    </span>
+                    <div className="flex items-center gap-2 text-[11px]">
+                      <button
+                        type="button"
+                        onClick={onSelectAllAssignedPics}
+                        className="font-semibold text-blue-700 hover:underline dark:text-blue-400"
+                      >
+                        Pilih Semua
+                      </button>
+                      <span className="text-slate-300 dark:text-slate-600">·</span>
+                      <button
+                        type="button"
+                        onClick={onClearAssignedPics}
+                        className="font-semibold text-slate-500 hover:underline dark:text-slate-400"
+                      >
+                        Reset
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="max-h-44 space-y-2.5 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50/70 p-2.5 dark:border-slate-700 dark:bg-slate-800/50">
+                    {assignablePics.length === 0 ? (
+                      <p className="py-2 text-center text-xs text-slate-500 dark:text-slate-400">
+                        Belum ada daftar PIC.
+                      </p>
+                    ) : (
+                      rolesOrder.map((roleId) => {
+                        const group = assignablePics.filter((p) => p.roleId === roleId);
+                        if (group.length === 0) return null;
+                        return (
+                          <div key={roleId}>
+                            <div className="mb-1 text-[10px] font-bold tracking-wider text-slate-500 uppercase dark:text-slate-400">
+                              {ROLE_LABELS[roleId]}
+                            </div>
+                            <div className="grid grid-cols-1 gap-1 sm:grid-cols-2">
+                              {group.map((opt) => {
+                                const key = `${opt.roleId}|${opt.picUpper}`;
+                                const checked = formAssignedPicKeys.includes(key);
+                                return (
+                                  <button
+                                    key={key}
+                                    type="button"
+                                    onClick={() => onToggleAssignedPicKey(key)}
+                                    className={`flex items-center gap-2 rounded-md border px-2.5 py-1.5 text-left text-xs font-medium transition-colors ${
+                                      checked
+                                        ? 'border-blue-600 bg-blue-50 text-blue-900 dark:border-blue-500 dark:bg-blue-950/60 dark:text-blue-200'
+                                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'
+                                    }`}
+                                  >
+                                    {checked ? (
+                                      <CheckSquare className="h-3.5 w-3.5 shrink-0 text-blue-700 dark:text-blue-400" />
+                                    ) : (
+                                      <Square className="h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-slate-500" />
+                                    )}
+                                    <span className="truncate">
+                                      {opt.pic}
+                                      {opt.outlets.length > 0
+                                        ? ` (${opt.outlets.length} outlet)`
+                                        : ''}
+                                    </span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <div className="mb-1.5 flex items-center justify-between gap-2">
+                    <span className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                      Divisi Tujuan ({formAssignedDivisions.length} dipilih)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={onToggleAllAssignedDivisions}
+                      className="text-[11px] font-semibold text-blue-700 hover:underline dark:text-blue-400"
+                    >
+                      {isAllDivisionsSelected ? 'Pilih Satu Saja' : 'Pilih Semua Divisi'}
+                    </button>
+                  </div>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      onClick={onToggleAllAssignedDivisions}
+                      className={`flex min-h-[38px] items-center gap-2 rounded-lg border px-3 py-1.5 text-left text-xs font-semibold transition-colors ${
+                        isAllDivisionsSelected
+                          ? 'border-blue-700 bg-blue-50 text-blue-900 dark:border-blue-500 dark:bg-blue-950/60 dark:text-blue-200'
+                          : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
+                      }`}
+                    >
+                      {isAllDivisionsSelected ? (
+                        <CheckSquare className="h-3.5 w-3.5 shrink-0 text-blue-700 dark:text-blue-400" />
+                      ) : (
+                        <Square className="h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-slate-500" />
+                      )}
+                      <span>Semua Divisi (All Divisi)</span>
+                    </button>
+                    {rolesOrder.map((roleId) => {
+                      const checked = formAssignedDivisions.includes(roleId);
+                      return (
+                        <button
+                          key={roleId}
+                          type="button"
+                          onClick={() => onToggleAssignedDivision(roleId)}
+                          className={`flex min-h-[38px] items-center gap-2 rounded-lg border px-3 py-1.5 text-left text-xs font-semibold transition-colors ${
+                            checked
+                              ? 'border-blue-700 bg-blue-50 text-blue-900 dark:border-blue-500 dark:bg-blue-950/60 dark:text-blue-200'
+                              : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700'
+                          }`}
+                        >
+                          {checked ? (
+                            <CheckSquare className="h-3.5 w-3.5 shrink-0 text-blue-700 dark:text-blue-400" />
+                          ) : (
+                            <Square className="h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-slate-500" />
+                          )}
+                          <span>{ROLE_LABELS[roleId]}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <label
+                  htmlFor="assign-outlet-select"
+                  className="mb-1.5 block text-xs font-semibold text-slate-700 dark:text-slate-300"
+                >
+                  Outlet Tujuan (Opsional)
+                </label>
+                <select
+                  id="assign-outlet-select"
+                  value={formAssignedOutlet}
+                  onChange={(e) => onChangeAssignedOutlet(e.target.value)}
+                  className="min-h-[42px] w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-900 focus:border-blue-600 focus:outline-none dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                >
+                  <option value="">Tanpa outlet khusus</option>
+                  {picOutlets.length > 0 && (
+                    <optgroup
+                      label={
+                        selectedPicOptions.length === 1
+                          ? `Outlet ${selectedPicOptions[0].pic}`
+                          : 'Outlet PIC Terpilih'
+                      }
+                    >
+                      {picOutlets.map((code) => (
+                        <option key={code} value={code}>
+                          {code}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {otherOutlets.length > 0 && (
+                    <optgroup label={picOutlets.length > 0 ? 'Outlet Lainnya' : 'Daftar Outlet'}>
+                      {otherOutlets.map((code) => (
+                        <option key={code} value={code}>
+                          {code}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
+                  {formAssignedOutlet &&
+                    !picOutlets.includes(formAssignedOutlet) &&
+                    !otherOutlets.includes(formAssignedOutlet) && (
+                      <option value={formAssignedOutlet}>{formAssignedOutlet}</option>
+                    )}
+                </select>
+              </div>
+            </div>
+          )}
+
+          {/* 5. Pengulangan Reminder (Personal Reminder & Assign Divisi) */}
+          {showRecurrenceSection && (
             <div>
               <label
                 htmlFor="evt-repeat-freq"
@@ -526,7 +658,9 @@ export function KalenderFormModal({
                               onClick={() => onToggleRepeatWeekday(dow)}
                               className={`min-h-[32px] rounded-md border px-2.5 py-1 text-[11px] font-semibold transition-colors ${
                                 active
-                                  ? 'border-violet-700 bg-violet-700 text-white dark:border-violet-600 dark:bg-violet-600'
+                                  ? isAssignMode
+                                    ? 'border-blue-700 bg-blue-700 text-white dark:border-blue-600 dark:bg-blue-600'
+                                    : 'border-violet-700 bg-violet-700 text-white dark:border-violet-600 dark:bg-violet-600'
                                   : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'
                               }`}
                             >
@@ -540,7 +674,13 @@ export function KalenderFormModal({
 
                   <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200/80 pt-2 text-[11px] text-slate-600 dark:border-slate-700 dark:text-slate-300">
                     <span className="inline-flex items-center gap-1.5">
-                      <Repeat className="h-3.5 w-3.5 text-violet-700 dark:text-violet-400" />
+                      <Repeat
+                        className={`h-3.5 w-3.5 ${
+                          isAssignMode
+                            ? 'text-blue-700 dark:text-blue-400'
+                            : 'text-violet-700 dark:text-violet-400'
+                        }`}
+                      />
                       <span>
                         {formatCalendarRecurrenceLabel({
                           date: formDate,
@@ -561,7 +701,11 @@ export function KalenderFormModal({
                       <button
                         type="button"
                         onClick={onRestoreExcludedDates}
-                        className="font-semibold text-violet-700 hover:underline dark:text-violet-400"
+                        className={`font-semibold hover:underline ${
+                          isAssignMode
+                            ? 'text-blue-700 dark:text-blue-400'
+                            : 'text-violet-700 dark:text-violet-400'
+                        }`}
                       >
                         Pulihkan {formExcludedDates.length} tgl dilewati
                       </button>
@@ -572,6 +716,7 @@ export function KalenderFormModal({
             </div>
           )}
 
+          {/* 6. Catatan (Opsional) */}
           <div>
             <label
               htmlFor="evt-notes"

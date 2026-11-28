@@ -1,11 +1,15 @@
 import { Bell, CheckCircle2, Plus, Repeat, X, XCircle } from 'lucide-react';
 import {
-  ROLE_LABELS,
   fmtDateWeekdayLong,
   getEffectiveAssignResponse,
   parseUtcDate,
 } from '../../utils/outletLogic';
-import { CalendarGridItem, WEEKDAY_UPPER } from './calendarUtils';
+import {
+  CalendarGridItem,
+  WEEKDAY_UPPER,
+  formatGridItemTitle,
+  formatTimeAmPm,
+} from './calendarUtils';
 
 interface KalenderDayPopupProps {
   dayPopup: { date: string; top: number; left: number };
@@ -85,36 +89,23 @@ export function KalenderDayPopup({
                   ? 'bg-rose-500 dark:bg-rose-400'
                   : 'bg-blue-600 dark:bg-blue-400';
 
-            const labelPrefix = !isPersonal
-              ? item.event.assignScope === 'division'
-                ? `[Divisi ${
-                    item.event.assignedDivision
-                      ? ROLE_LABELS[item.event.assignedDivision] || item.event.assignedDivision
-                      : ''
-                  }] `
-                : isAdmin && item.event.assignedPic
-                  ? `[${item.event.assignedPic}] `
-                  : ''
-              : '';
-
             return (
               <button
                 key={item.key}
                 type="button"
                 onClick={() => onSelectItem(item)}
-                className="flex w-full items-center gap-2 rounded-md border border-transparent bg-slate-50/70 px-2 py-1.5 text-left text-xs text-slate-900 transition-colors hover:border-blue-200 hover:bg-blue-50/90 dark:bg-slate-800/50 dark:text-slate-100 dark:hover:border-blue-800/70 dark:hover:bg-blue-950/50"
+                className="flex w-full items-center gap-1.5 rounded-md border border-transparent bg-slate-50/70 px-2 py-1.5 text-left text-xs text-slate-900 transition-colors hover:border-blue-200 hover:bg-blue-50/90 dark:bg-slate-800/50 dark:text-slate-100 dark:hover:border-blue-800/70 dark:hover:bg-blue-950/50"
               >
                 <span className={`h-2 w-2 shrink-0 rounded-full ${dotColor}`} />
                 <span className="shrink-0 font-mono text-[11px] font-semibold text-blue-800 tabular-nums dark:text-blue-400">
-                  {item.startTime}
+                  {formatTimeAmPm(item.startTime)}
                 </span>
                 <span
                   className={`min-w-0 flex-1 truncate font-medium ${
                     status === 'cancelled' ? 'text-slate-400 line-through' : ''
                   }`}
                 >
-                  {labelPrefix}
-                  {item.title}
+                  {formatGridItemTitle(item)}
                 </span>
                 {isPersonal ? (
                   item.isRecurring ? (
@@ -126,6 +117,8 @@ export function KalenderDayPopup({
                   <CheckCircle2 className="h-3 w-3 shrink-0 text-emerald-600 dark:text-emerald-400" />
                 ) : status === 'cancelled' ? (
                   <XCircle className="h-3 w-3 shrink-0 text-rose-500 dark:text-rose-400" />
+                ) : item.isRecurring ? (
+                  <Repeat className="h-3 w-3 shrink-0 text-blue-600 dark:text-blue-400" />
                 ) : null}
               </button>
             );

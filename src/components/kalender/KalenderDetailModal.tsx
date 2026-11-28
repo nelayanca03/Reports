@@ -333,17 +333,23 @@ export function KalenderDetailModal({
               </div>
             </div>
 
-            {!isAssign && personalReminder && selectedItem.isRecurring && (
+            {selectedItem.isRecurring && (assignEvent || personalReminder) && (
               <div className="flex items-start gap-3 text-slate-700 dark:text-slate-200">
-                <Repeat className="mt-0.5 h-4 w-4 shrink-0 text-violet-700 dark:text-violet-400" />
+                <Repeat
+                  className={`mt-0.5 h-4 w-4 shrink-0 ${
+                    isAssign
+                      ? 'text-blue-700 dark:text-blue-400'
+                      : 'text-violet-700 dark:text-violet-400'
+                  }`}
+                />
                 <div>
                   <span className="text-xs text-slate-500 dark:text-slate-400">Pengulangan: </span>
                   <span className="font-semibold">
-                    {formatCalendarRecurrenceLabel(personalReminder)}
+                    {formatCalendarRecurrenceLabel((assignEvent || personalReminder)!)}
                   </span>
-                  {selectedItem.occurrenceDate !== personalReminder.date && (
+                  {selectedItem.occurrenceDate !== (assignEvent || personalReminder)!.date && (
                     <div className="mt-0.5 text-[11px] text-slate-500 dark:text-slate-400">
-                      Mulai seri: {fmtDateSlash(personalReminder.date)}
+                      Mulai seri: {fmtDateSlash((assignEvent || personalReminder)!.date)}
                     </div>
                   )}
                 </div>

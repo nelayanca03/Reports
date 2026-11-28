@@ -2,12 +2,17 @@ import { Bell, Calendar as CalendarIcon, CheckCircle2, Repeat, XCircle } from 'l
 import { MouseEvent } from 'react';
 import {
   CALENDAR_TIME_SLOTS,
-  ROLE_LABELS,
   fmtDateWeekdayLong,
   getEffectiveAssignResponse,
   parseUtcDate,
 } from '../../utils/outletLogic';
-import { CalendarGridItem, CalendarViewMode, WEEKDAY_SHORT } from './calendarUtils';
+import {
+  CalendarGridItem,
+  CalendarViewMode,
+  WEEKDAY_SHORT,
+  formatGridItemTitle,
+  formatTimeAmPm,
+} from './calendarUtils';
 
 interface KalenderGridViewsProps {
   viewMode: CalendarViewMode;
@@ -66,44 +71,6 @@ function getItemStyles(
   };
 }
 
-function formatGridItemTitle(item: CalendarGridItem, isAdmin: boolean): string {
-  if (item.kind === 'personal') return item.title;
-  const parts: string[] = [];
-  if (item.event.assignScope === 'division') {
-    const divKey = item.event.assignedDivision || item.event.assignedRole;
-    const divShort =
-      divKey === 'stock_accounting'
-        ? 'SA'
-        : divKey === 'gl'
-          ? 'GL'
-          : divKey
-            ? ROLE_LABELS[divKey]
-            : 'Divisi';
-    parts.push(`[Divisi ${divShort}]`);
-  } else if (isAdmin && item.event.assignedPic) {
-    parts.push(`[${item.event.assignedPic}]`);
-  }
-  if (item.event.assignedOutlet) {
-    parts.push(`${item.event.assignedOutlet} ·`);
-  }
-  parts.push(item.title);
-  return parts.join(' ');
-}
-
-function formatGridItemTime(
-  item: CalendarGridItem,
-  isAdmin: boolean,
-  viewerPicUpper: string
-): string {
-  if (item.kind === 'assign') {
-    const resp = getEffectiveAssignResponse(item.event, isAdmin ? undefined : viewerPicUpper);
-    if (resp.status === 'completed' && resp.returnTime) {
-      return `${item.startTime}–${resp.returnTime}`;
-    }
-  }
-  return item.startTime;
-}
-
 export function KalenderGridViews({
   viewMode,
   today,
@@ -149,6 +116,14 @@ export function KalenderGridViews({
         <XCircle
           aria-label="Tidak jadi pergi"
           className="h-3 w-3 shrink-0 text-rose-600 dark:text-rose-400"
+        />
+      );
+    }
+    if (item.isRecurring) {
+      return (
+        <Repeat
+          aria-label="Assign berulang"
+          className="h-3 w-3 shrink-0 text-blue-700/75 dark:text-blue-300/80"
         />
       );
     }
@@ -219,15 +194,15 @@ export function KalenderGridViews({
                           e.stopPropagation();
                           onSelectItem(item);
                         }}
-                        className={`flex w-full items-center gap-1.5 rounded-md border px-1.5 py-[3px] text-left text-[11px] leading-tight transition-colors ${styles.buttonClass}`}
+                        className={`flex w-full items-center gap-1 rounded-md border px-1.5 py-[3px] text-left text-[11px] leading-tight transition-colors ${styles.buttonClass}`}
                       >
                         <span
                           className={`shrink-0 font-mono text-[10px] font-semibold tabular-nums ${styles.timeClass}`}
                         >
-                          {formatGridItemTime(item, isAdmin, viewerPicUpper)}
+                          {formatTimeAmPm(item.startTime)}
                         </span>
                         <span className={`min-w-0 flex-1 truncate font-medium ${styles.titleClass}`}>
-                          {formatGridItemTitle(item, isAdmin)}
+                          {formatGridItemTitle(item)}
                         </span>
                         {renderTrailingIcon(item)}
                       </button>
@@ -338,12 +313,12 @@ export function KalenderGridViews({
                                   <span
                                     className={`shrink-0 font-mono text-[10px] font-semibold tabular-nums ${styles.timeClass}`}
                                   >
-                                    {formatGridItemTime(item, isAdmin, viewerPicUpper)}
+                                    {formatTimeAmPm(item.startTime)}
                                   </span>
                                   <span
                                     className={`min-w-0 flex-1 truncate font-medium ${styles.titleClass}`}
                                   >
-                                    {formatGridItemTitle(item, isAdmin)}
+                                    {formatGridItemTitle(item)}
                                   </span>
                                   {renderTrailingIcon(item)}
                                 </button>
@@ -415,13 +390,13 @@ export function KalenderGridViews({
                         e.stopPropagation();
                         onSelectItem(item);
                       }}
-                      className={`inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-left text-xs transition-colors ${styles.buttonClass}`}
+                      className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-left text-xs transition-colors ${styles.buttonClass}`}
                     >
                       <span className={`font-mono font-semibold tabular-nums ${styles.timeClass}`}>
-                        {formatGridItemTime(item, isAdmin, viewerPicUpper)}
+                        {formatTimeAmPm(item.startTime)}
                       </span>
                       <span className={`font-semibold ${styles.titleClass}`}>
-                        {formatGridItemTitle(item, isAdmin)}
+                        {formatGridItemTitle(item)}
                       </span>
                       {renderTrailingIcon(item)}
                     </button>

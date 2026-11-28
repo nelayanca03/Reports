@@ -28,6 +28,37 @@ export interface CalendarEventFormPayload {
   notificationDismissed?: boolean;
   resetDismissedBy?: boolean;
   visibleTo?: OperationalRoleId[];
+  repeatFreq?: CalendarRecurrenceFreq;
+  repeatInterval?: number;
+  repeatUntil?: string;
+  repeatWeekdays?: number[];
+  excludedDates?: string[];
+}
+
+export const ASSIGN_TITLE_PRESETS = ['Stock Opname', 'Cek Asset', 'Meeting'] as const;
+export type AssignTitlePreset = (typeof ASSIGN_TITLE_PRESETS)[number];
+export type AssignTitleDropdownValue = AssignTitlePreset | 'custom';
+
+export function formatTimeAmPm(timeHm: string): string {
+  const trimmed = (timeHm || '').trim();
+  const match = /^(\d{1,2}):(\d{2})$/.exec(trimmed);
+  if (!match) return trimmed;
+  const hour24 = Number(match[1]);
+  const minutes = match[2];
+  if (!Number.isFinite(hour24) || hour24 < 0 || hour24 > 23) return trimmed;
+  const period = hour24 >= 12 ? 'pm' : 'am';
+  const hour12 = hour24 % 12 === 0 ? 12 : hour24 % 12;
+  return minutes === '00' ? `${hour12} ${period}` : `${hour12}:${minutes} ${period}`;
+}
+
+export function formatGridItemTitle(item: CalendarGridItem): string {
+  if (item.kind === 'personal') return item.title;
+  const outlet = (item.event.assignedOutlet || '').trim();
+  return outlet ? `${outlet}-${item.title}` : item.title;
+}
+
+export function formatGridItemChipLabel(item: CalendarGridItem): string {
+  return `${formatTimeAmPm(item.startTime)} ${formatGridItemTitle(item)}`;
 }
 
 export interface PersonalReminderFormPayload {

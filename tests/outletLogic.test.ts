@@ -431,5 +431,65 @@ describe('outletLogic: custom task visibility schedules (recurring & one-time)',
     assert.equal(nextDateForWeekday(1, '2026-11-27'), '2026-11-30');
     assert.equal(nextDateForWeekday(5, '2026-11-27'), '2026-11-27');
   });
+
+  it('formats calendar date box chip labels with 12-hour am/pm and Outlet-Judul Tugas', async () => {
+    const {
+      formatTimeAmPm,
+      formatGridItemTitle,
+      formatGridItemChipLabel,
+    } = await import('../src/components/kalender/calendarUtils');
+
+    assert.equal(formatTimeAmPm('08:00'), '8 am');
+    assert.equal(formatTimeAmPm('10:00'), '10 am');
+    assert.equal(formatTimeAmPm('10:30'), '10:30 am');
+    assert.equal(formatTimeAmPm('12:00'), '12 pm');
+    assert.equal(formatTimeAmPm('14:00'), '2 pm');
+    assert.equal(formatTimeAmPm('14:30'), '2:30 pm');
+    assert.equal(formatTimeAmPm('23:00'), '11 pm');
+
+    const assignWithOutlet = {
+      kind: 'assign' as const,
+      key: 'assign_1_2026-11-28',
+      occurrenceDate: '2026-11-28',
+      startTime: '10:00',
+      title: 'Cek Asset',
+      isRecurring: false,
+      event: {
+        id: '1',
+        title: 'Cek Asset',
+        date: '2026-11-28',
+        startTime: '10:00',
+        visibleTo: ['stock_accounting' as const],
+        notes: '',
+        eventType: 'assign' as const,
+        assignScope: 'pic' as const,
+        assignedPic: 'PETER',
+        assignedPicUpper: 'PETER',
+        assignedRole: 'stock_accounting' as const,
+        assignedOutlet: 'DLS',
+        createdBy: 'u1',
+        updatedBy: 'u1',
+        createdByEmail: 'admin@example.com',
+        createdByName: 'Admin',
+      },
+    };
+
+    assert.equal(formatGridItemTitle(assignWithOutlet), 'DLS-Cek Asset');
+    assert.equal(formatGridItemChipLabel(assignWithOutlet), '10 am DLS-Cek Asset');
+
+    const assignWithoutOutlet = {
+      ...assignWithOutlet,
+      startTime: '14:00',
+      title: 'Meeting',
+      event: {
+        ...assignWithOutlet.event,
+        startTime: '14:00',
+        title: 'Meeting',
+        assignedOutlet: '',
+      },
+    };
+    assert.equal(formatGridItemTitle(assignWithoutOutlet), 'Meeting');
+    assert.equal(formatGridItemChipLabel(assignWithoutOutlet), '2 pm Meeting');
+  });
 });
 

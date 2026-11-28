@@ -26,6 +26,7 @@ import {
   CALENDAR_TIME_SLOTS,
   ROLE_LABELS,
   canUserViewCalendarEvent,
+  expandCalendarEventsForRange,
   expandPersonalRemindersForRange,
   fmtDateSlash,
   fmtDateWeekdayLong,
@@ -47,6 +48,10 @@ import { KalenderDetailModal } from './kalender/KalenderDetailModal';
 import { KalenderFormModal } from './kalender/KalenderFormModal';
 import { KalenderGridViews } from './kalender/KalenderGridViews';
 import {
+  ALL_DEPARTMENTS,
+  ASSIGN_TITLE_PRESETS,
+  AssignTitleDropdownValue,
+  AssignTitlePreset,
   CalendarEventFormPayload,
   CalendarFormMode,
   CalendarGridItem,
@@ -59,6 +64,14 @@ import {
 } from './kalender/calendarUtils';
 
 export type { CalendarEventFormPayload, PersonalReminderFormPayload };
+
+function resolveTitlePreset(title: string): AssignTitleDropdownValue {
+  const trimmed = (title || '').trim();
+  if ((ASSIGN_TITLE_PRESETS as readonly string[]).includes(trimmed)) {
+    return trimmed as AssignTitlePreset;
+  }
+  return 'custom';
+}
 
 interface KalenderViewProps {
   account: AccountProfile;
@@ -134,6 +147,8 @@ export function KalenderView({
   const [viewMode, setViewMode] = useState<CalendarViewMode>('month');
   const [cursorDate, setCursorDate] = useState<string>(today);
   const [adminPicFilter, setAdminPicFilter] = useState<string>('ALL');
+  const [showAssigned, setShowAssigned] = useState<boolean>(true);
+  const [showPersonal, setShowPersonal] = useState<boolean>(true);
   const [feedback, setFeedback] = useState<{ type: 'ok' | 'err'; message: string } | null>(null);
 
   const [selectedItem, setSelectedItem] = useState<CalendarGridItem | null>(null);
@@ -169,14 +184,16 @@ export function KalenderView({
   const [formOpen, setFormOpen] = useState(false);
   const [formMode, setFormMode] = useState<CalendarFormMode>(isAdmin ? 'assign' : 'personal');
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [formTitle, setFormTitle] = useState('');
+  const [formTitle, setFormTitle] = useState('Stock Opname');
+  const [formTitlePreset, setFormTitlePreset] = useState<AssignTitleDropdownValue>('Stock Opname');
   const [formDate, setFormDate] = useState(today);
   const [formStartTime, setFormStartTime] = useState('09:00');
   const [formNotes, setFormNotes] = useState('');
   const [formAssignScope, setFormAssignScope] = useState<CalendarAssignScope>('pic');
-  const [formAssignedDivision, setFormAssignedDivision] =
-    useState<OperationalRoleId>('stock_accounting');
-  const [formAssignedPicKey, setFormAssignedPicKey] = useState('');
+  const [formAssignedDivisions, setFormAssignedDivisions] = useState<OperationalRoleId[]>([
+    'stock_accounting',
+  ]);
+  const [formAssignedPicKeys, setFormAssignedPicKeys] = useState<string[]>([]);
   const [formAssignedOutlet, setFormAssignedOutlet] = useState('');
   const [formRepeatFreq, setFormRepeatFreq] = useState<CalendarRecurrenceFreq>('none');
   const [formRepeatInterval, setFormRepeatInterval] = useState(1);
@@ -203,7 +220,7 @@ export function KalenderView({
         occurrenceDate: target.date,
         startTime: target.startTime,
         title: target.title,
-        isRecurring: false,
+        isRecurring: normalizeCalendarRecurrenceFreq(target.repeatFreq) !== 'none',
         event: target,
       });
     }
@@ -216,7 +233,10 @@ export function KalenderView({
       if (isAdmin && adminPicFilter !== 'ALL') {
         if (adminPicFilter.startsWith('DIV|')) {
           const divRole = adminPicFilter.slice(4);
-          return evt.assignScope === 'division' && (evt.assignedDivision || evt.assignedRole) === divRole;
+          return (
+            evt.assignScope === 'division' &&
+            (evt.assignedDivision || evt.assignedRole) === divRole
+          );
         }
         if (evt.assignScope === 'division') {
           const [filterRole] = adminPicFilter.split('|');
@@ -263,35 +283,42 @@ export function KalenderView({
       map.set(item.occurrenceDate, list);
     };
 
-    for (const evt of visibleAssignEvents) {
-      if (evt.date >= visibleRange.start && evt.date <= visibleRange.end) {
+    if (showAssigned) {
+      const expandedAssigns = expandCalendarEventsForRange(
+        visibleAssignEvents,
+        visibleRange.start,
+        visibleRange.end
+      );
+      for (const occ of expandedAssigns) {
         pushItem({
           kind: 'assign',
-          key: `assign_${evt.id}_${evt.date}`,
-          occurrenceDate: evt.date,
-          startTime: evt.startTime,
-          title: evt.title,
-          isRecurring: false,
-          event: evt,
+          key: `assign_${occ.event.id}_${occ.occurrenceDate}`,
+          occurrenceDate: occ.occurrenceDate,
+          startTime: occ.event.startTime,
+          title: occ.event.title,
+          isRecurring: occ.isRecurring,
+          event: occ.event,
         });
       }
     }
 
-    const expandedReminders = expandPersonalRemindersForRange(
-      personalReminders,
-      visibleRange.start,
-      visibleRange.end
-    );
-    for (const occ of expandedReminders) {
-      pushItem({
-        kind: 'personal',
-        key: `personal_${occ.reminder.id}_${occ.occurrenceDate}`,
-        occurrenceDate: occ.occurrenceDate,
-        startTime: occ.reminder.startTime,
-        title: occ.reminder.title,
-        isRecurring: occ.isRecurring,
-        reminder: occ.reminder,
-      });
+    if (showPersonal) {
+      const expandedReminders = expandPersonalRemindersForRange(
+        personalReminders,
+        visibleRange.start,
+        visibleRange.end
+      );
+      for (const occ of expandedReminders) {
+        pushItem({
+          kind: 'personal',
+          key: `personal_${occ.reminder.id}_${occ.occurrenceDate}`,
+          occurrenceDate: occ.occurrenceDate,
+          startTime: occ.reminder.startTime,
+          title: occ.reminder.title,
+          isRecurring: occ.isRecurring,
+          reminder: occ.reminder,
+        });
+      }
     }
 
     for (const [d, list] of map.entries()) {
@@ -305,7 +332,7 @@ export function KalenderView({
     }
 
     return map;
-  }, [visibleAssignEvents, personalReminders, visibleRange]);
+  }, [visibleAssignEvents, personalReminders, visibleRange, showAssigned, showPersonal]);
 
   // Keep selectedItem live-synced with Firestore snapshot updates
   const liveSelectedItem = useMemo<CalendarGridItem | null>(() => {
@@ -313,11 +340,13 @@ export function KalenderView({
     if (selectedItem.kind === 'assign') {
       const latest = events.find((e) => e.id === selectedItem.event.id);
       if (!latest) return null;
+      const isRec = normalizeCalendarRecurrenceFreq(latest.repeatFreq) !== 'none';
       return {
         ...selectedItem,
-        occurrenceDate: latest.date,
+        occurrenceDate: isRec ? selectedItem.occurrenceDate : latest.date,
         startTime: latest.startTime,
         title: latest.title,
+        isRecurring: isRec,
         event: latest,
       };
     }
@@ -344,6 +373,17 @@ export function KalenderView({
     }
   };
 
+  const resetRecurrenceState = (targetDate: string) => {
+    setFormRepeatFreq('none');
+    setFormRepeatInterval(1);
+    setFormRepeatWeekdays(
+      /^\d{4}-\d{2}-\d{2}$/.test(targetDate) ? [parseUtcDate(targetDate).getUTCDay()] : [1]
+    );
+    setFormRepeatEndMode('never');
+    setFormRepeatUntil('');
+    setFormExcludedDates([]);
+  };
+
   const openCreateModal = (
     prefillDate?: string,
     prefillTime?: string,
@@ -356,41 +396,39 @@ export function KalenderView({
     setDayPopup(null);
     setFormMode(modeToOpen);
     setEditingId(null);
-    setFormTitle('');
     setFormDate(targetDate);
     setFormStartTime(
       prefillTime && CALENDAR_TIME_SLOTS.includes(prefillTime) ? prefillTime : '09:00'
     );
     setFormNotes('');
+    resetRecurrenceState(targetDate);
 
     if (modeToOpen === 'assign') {
+      setFormTitlePreset('Stock Opname');
+      setFormTitle('Stock Opname');
       if (adminPicFilter.startsWith('DIV|')) {
         const divRole = adminPicFilter.slice(4) as OperationalRoleId;
         setFormAssignScope('division');
-        setFormAssignedDivision(divRole);
-        setFormAssignedPicKey(
-          assignablePics[0] ? `${assignablePics[0].roleId}|${assignablePics[0].picUpper}` : ''
+        setFormAssignedDivisions([divRole]);
+        setFormAssignedPicKeys(
+          assignablePics[0] ? [`${assignablePics[0].roleId}|${assignablePics[0].picUpper}`] : []
         );
         setFormAssignedOutlet('');
       } else {
         setFormAssignScope('pic');
-        setFormAssignedDivision('stock_accounting');
+        setFormAssignedDivisions(['stock_accounting']);
         const preselected =
           adminPicFilter !== 'ALL'
             ? assignablePics.find((p) => `${p.roleId}|${p.picUpper}` === adminPicFilter)
             : assignablePics[0];
-        setFormAssignedPicKey(
-          preselected ? `${preselected.roleId}|${preselected.picUpper}` : ''
+        setFormAssignedPicKeys(
+          preselected ? [`${preselected.roleId}|${preselected.picUpper}`] : []
         );
         setFormAssignedOutlet(preselected?.outlets[0] || '');
       }
     } else {
-      setFormRepeatFreq('none');
-      setFormRepeatInterval(1);
-      setFormRepeatWeekdays([parseUtcDate(targetDate).getUTCDay()]);
-      setFormRepeatEndMode('never');
-      setFormRepeatUntil('');
-      setFormExcludedDates([]);
+      setFormTitlePreset('custom');
+      setFormTitle('');
     }
     setFormError(null);
     setFormOpen(true);
@@ -401,21 +439,40 @@ export function KalenderView({
     setSelectedItem(null);
     setFormMode('assign');
     setEditingId(evt.id);
+    const preset = resolveTitlePreset(evt.title);
+    setFormTitlePreset(preset);
     setFormTitle(evt.title);
     setFormDate(evt.date);
     setFormStartTime(CALENDAR_TIME_SLOTS.includes(evt.startTime) ? evt.startTime : '09:00');
     setFormNotes(evt.notes || '');
     const isDiv = evt.assignScope === 'division';
-    const roleId: OperationalRoleId = evt.assignedDivision || evt.assignedRole || 'stock_accounting';
+    const roleId: OperationalRoleId =
+      evt.assignedDivision || evt.assignedRole || 'stock_accounting';
     setFormAssignScope(isDiv ? 'division' : 'pic');
-    setFormAssignedDivision(roleId);
+    setFormAssignedDivisions([roleId]);
     const picUpper = (
       evt.assignedPicUpper ||
       (evt.assignedPic || '').trim().toUpperCase()
     ).trim();
     const key = picUpper ? `${roleId}|${picUpper}` : '';
-    setFormAssignedPicKey(key);
+    setFormAssignedPicKeys(key ? [key] : []);
     setFormAssignedOutlet(evt.assignedOutlet || '');
+
+    const freq = normalizeCalendarRecurrenceFreq(evt.repeatFreq);
+    setFormRepeatFreq(freq);
+    setFormRepeatInterval(normalizeCalendarInterval(evt.repeatInterval));
+    const existingDays = normalizeCalendarWeekdays(evt.repeatWeekdays);
+    setFormRepeatWeekdays(
+      existingDays.length > 0 ? existingDays : [parseUtcDate(evt.date).getUTCDay()]
+    );
+    if (evt.repeatUntil && /^\d{4}-\d{2}-\d{2}$/.test(evt.repeatUntil)) {
+      setFormRepeatEndMode('until');
+      setFormRepeatUntil(evt.repeatUntil);
+    } else {
+      setFormRepeatEndMode('never');
+      setFormRepeatUntil('');
+    }
+    setFormExcludedDates(evt.excludedDates || []);
     setFormError(null);
     setFormOpen(true);
   };
@@ -424,6 +481,7 @@ export function KalenderView({
     setSelectedItem(null);
     setFormMode('personal');
     setEditingId(rem.id);
+    setFormTitlePreset('custom');
     setFormTitle(rem.title);
     setFormDate(rem.date);
     setFormStartTime(CALENDAR_TIME_SLOTS.includes(rem.startTime) ? rem.startTime : '09:00');
@@ -471,20 +529,65 @@ export function KalenderView({
     });
   };
 
-  const handleChangeAssignedPicKey = (nextKey: string) => {
-    setFormAssignedPicKey(nextKey);
-    const opt = assignablePics.find((p) => `${p.roleId}|${p.picUpper}` === nextKey);
-    if (opt) {
-      setFormAssignedOutlet(opt.outlets[0] || '');
-    } else {
-      setFormAssignedOutlet('');
+  const handleToggleAssignedPicKey = (picKey: string) => {
+    setFormAssignedPicKeys((prev) => {
+      const next = prev.includes(picKey)
+        ? prev.filter((k) => k !== picKey)
+        : [...prev, picKey];
+      if (next.length === 1) {
+        const singleOpt = assignablePics.find(
+          (p) => `${p.roleId}|${p.picUpper}` === next[0]
+        );
+        if (singleOpt && !formAssignedOutlet) {
+          setFormAssignedOutlet(singleOpt.outlets[0] || '');
+        }
+      }
+      return next;
+    });
+  };
+
+  const handleSelectAllAssignedPics = () => {
+    setFormAssignedPicKeys(assignablePics.map((p) => `${p.roleId}|${p.picUpper}`));
+  };
+
+  const handleClearAssignedPics = () => {
+    setFormAssignedPicKeys([]);
+  };
+
+  const handleToggleAssignedDivision = (roleId: OperationalRoleId) => {
+    setFormAssignedDivisions((prev) => {
+      if (prev.includes(roleId)) {
+        if (prev.length === 1) return prev;
+        return prev.filter((r) => r !== roleId);
+      }
+      return ALL_DEPARTMENTS.filter((r) => prev.includes(r) || r === roleId);
+    });
+  };
+
+  const handleToggleAllAssignedDivisions = () => {
+    setFormAssignedDivisions((prev) => {
+      const isAll = ALL_DEPARTMENTS.every((r) => prev.includes(r));
+      return isAll ? ['stock_accounting'] : [...ALL_DEPARTMENTS];
+    });
+  };
+
+  const handleChangeTitlePreset = (preset: AssignTitleDropdownValue) => {
+    setFormTitlePreset(preset);
+    if (preset !== 'custom') {
+      setFormTitle(preset);
+    } else if ((ASSIGN_TITLE_PRESETS as readonly string[]).includes(formTitle)) {
+      setFormTitle('');
     }
   };
 
   const handleSubmitForm = async (e: FormEvent) => {
     e.preventDefault();
     setFormError(null);
-    if (!formTitle.trim()) {
+    const effectiveTitle =
+      formMode === 'assign' && formTitlePreset !== 'custom'
+        ? formTitlePreset
+        : formTitle.trim();
+    if (!effectiveTitle) {
       setFormError(
         formMode === 'assign' ? 'Judul penugasan wajib diisi.' : 'Judul reminder wajib diisi.'
       );
@@ -499,146 +602,199 @@ export function KalenderView({
       return;
     }
 
+    const usesRecurrence =
+      formMode === 'personal' || (formMode === 'assign' && formAssignScope === 'division');
+    const activeRepeatFreq: CalendarRecurrenceFreq = usesRecurrence ? formRepeatFreq : 'none';
+    const repeatUntilVal =
+      activeRepeatFreq !== 'none' && formRepeatEndMode === 'until'
+        ? formRepeatUntil.trim()
+        : '';
+
+    if (
+      activeRepeatFreq !== 'none' &&
+      formRepeatEndMode === 'until' &&
+      !/^\d{4}-\d{2}-\d{2}$/.test(repeatUntilVal)
+    ) {
+      setFormError('Pilih tanggal berakhir pengulangan.');
+      return;
+    }
+    if (repeatUntilVal && repeatUntilVal < formDate) {
+      setFormError('Tanggal akhir pengulangan harus sama atau setelah tanggal mulai.');
+      return;
+    }
+
+    const recurrenceFields = {
+      repeatFreq: activeRepeatFreq,
+      repeatInterval: normalizeCalendarInterval(formRepeatInterval),
+      repeatUntil: repeatUntilVal,
+      repeatWeekdays:
+        activeRepeatFreq === 'weekly'
+          ? formRepeatWeekdays.length > 0
+            ? formRepeatWeekdays
+            : [parseUtcDate(formDate).getUTCDay()]
+          : [],
+      excludedDates: activeRepeatFreq === 'none' ? [] : formExcludedDates,
+    };
+
     setBusy(true);
     try {
       if (formMode === 'assign') {
         const existingEvt = editingId ? events.find((ev) => ev.id === editingId) : undefined;
         if (formAssignScope === 'division') {
-          const targetChanged =
-            existingEvt &&
-            (existingEvt.assignScope !== 'division' ||
-              existingEvt.assignedDivision !== formAssignedDivision);
-          const payload: CalendarEventFormPayload = {
-            title: formTitle.trim(),
-            date: formDate,
-            startTime: formStartTime,
-            assignScope: 'division',
-            assignedDivision: formAssignedDivision,
-            assignedPic: '',
-            assignedRole: formAssignedDivision,
-            assignedEmail: '',
-            assignedOutlet: formAssignedOutlet.trim(),
-            notes: formNotes.trim(),
-            ...(existingEvt
-              ? {
-                  assignStatus: existingEvt.assignStatus,
-                  returnTime: existingEvt.returnTime,
-                  cancelReason: existingEvt.cancelReason,
-                  notificationDismissed: targetChanged ? false : existingEvt.notificationDismissed,
-                  resetDismissedBy: Boolean(targetChanged),
-                }
-              : {}),
-          };
-
-          const divLabel = ROLE_LABELS[formAssignedDivision] || formAssignedDivision;
-          if (editingId) {
-            await onUpdateEvent(editingId, payload);
-            setFeedback({
-              type: 'ok',
-              message: `Assign Divisi "${formTitle.trim()}" (${divLabel}) berhasil diperbarui.`,
-            });
-          } else {
-            await onCreateEvent(payload);
-            setFeedback({
-              type: 'ok',
-              message: `Assign Divisi "${formTitle.trim()}" untuk ${divLabel} berhasil dibuat (langsung tampil saat login, notifikasi aktif, & +1 kunjungan).`,
-            });
-          }
-        } else {
-          const selectedPic = assignablePics.find(
-            (p) => `${p.roleId}|${p.picUpper}` === formAssignedPicKey
-          );
-          if (!selectedPic) {
-            setFormError('Pilih PIC tujuan penugasan terlebih dahulu.');
+          if (formAssignedDivisions.length === 0) {
+            setFormError('Pilih minimal 1 divisi tujuan penugasan.');
             setBusy(false);
             return;
           }
-          const targetChanged =
-            existingEvt &&
-            (existingEvt.assignScope === 'division' ||
-              existingEvt.assignedPicUpper !== selectedPic.picUpper);
-          const payload: CalendarEventFormPayload = {
-            title: formTitle.trim(),
-            date: formDate,
-            startTime: formStartTime,
-            assignScope: 'pic',
-            assignedDivision: '',
-            assignedPic: selectedPic.pic,
-            assignedRole: selectedPic.roleId,
-            assignedEmail: selectedPic.email,
-            assignedOutlet: formAssignedOutlet.trim(),
-            notes: formNotes.trim(),
-            ...(existingEvt
-              ? {
-                  assignStatus: existingEvt.assignStatus,
-                  returnTime: existingEvt.returnTime,
-                  cancelReason: existingEvt.cancelReason,
-                  notificationDismissed: targetChanged ? false : existingEvt.notificationDismissed,
-                  resetDismissedBy: Boolean(targetChanged),
-                }
-              : {}),
+
+          const buildDivPayload = (
+            divRole: OperationalRoleId,
+            forUpdate: boolean
+          ): CalendarEventFormPayload => {
+            const targetChanged =
+              forUpdate &&
+              existingEvt &&
+              (existingEvt.assignScope !== 'division' ||
+                existingEvt.assignedDivision !== divRole);
+            return {
+              title: effectiveTitle,
+              date: formDate,
+              startTime: formStartTime,
+              assignScope: 'division',
+              assignedDivision: divRole,
+              assignedPic: '',
+              assignedRole: divRole,
+              assignedEmail: '',
+              assignedOutlet: formAssignedOutlet.trim(),
+              notes: formNotes.trim(),
+              ...recurrenceFields,
+              ...(forUpdate && existingEvt
+                ? {
+                    assignStatus: existingEvt.assignStatus,
+                    returnTime: existingEvt.returnTime,
+                    cancelReason: existingEvt.cancelReason,
+                    notificationDismissed: targetChanged
+                      ? false
+                      : existingEvt.notificationDismissed,
+                    resetDismissedBy: Boolean(targetChanged),
+                  }
+                : {}),
+            };
           };
 
+          const divLabels = formAssignedDivisions
+            .map((d) => ROLE_LABELS[d] || d)
+            .join(', ');
+
           if (editingId) {
-            await onUpdateEvent(editingId, payload);
+            const [firstDiv, ...extraDivs] = formAssignedDivisions;
+            await onUpdateEvent(editingId, buildDivPayload(firstDiv, true));
+            for (const extraDiv of extraDivs) {
+              await onCreateEvent(buildDivPayload(extraDiv, false));
+            }
             setFeedback({
               type: 'ok',
-              message: `Assign "${formTitle.trim()}" untuk ${selectedPic.pic} berhasil diperbarui.`,
+              message: `Assign Divisi "${effectiveTitle}" (${divLabels}) berhasil diperbarui.`,
             });
           } else {
-            await onCreateEvent(payload);
+            for (const divRole of formAssignedDivisions) {
+              await onCreateEvent(buildDivPayload(divRole, false));
+            }
             setFeedback({
               type: 'ok',
-              message: `Assign "${formTitle.trim()}" untuk ${selectedPic.pic} berhasil dibuat (langsung tampil saat login, notifikasi aktif, & +1 kunjungan).`,
+              message: `Assign Divisi "${effectiveTitle}" untuk ${divLabels} berhasil dibuat.`,
+            });
+          }
+        } else {
+          const selectedPics = assignablePics.filter((p) =>
+            formAssignedPicKeys.includes(`${p.roleId}|${p.picUpper}`)
+          );
+          if (selectedPics.length === 0) {
+            setFormError('Pilih minimal 1 PIC tujuan penugasan terlebih dahulu.');
+            setBusy(false);
+            return;
+          }
+
+          const buildPicPayload = (
+            picOpt: (typeof selectedPics)[number],
+            forUpdate: boolean
+          ): CalendarEventFormPayload => {
+            const targetChanged =
+              forUpdate &&
+              existingEvt &&
+              (existingEvt.assignScope === 'division' ||
+                existingEvt.assignedPicUpper !== picOpt.picUpper);
+            return {
+              title: effectiveTitle,
+              date: formDate,
+              startTime: formStartTime,
+              assignScope: 'pic',
+              assignedDivision: '',
+              assignedPic: picOpt.pic,
+              assignedRole: picOpt.roleId,
+              assignedEmail: picOpt.email,
+              assignedOutlet: formAssignedOutlet.trim(),
+              notes: formNotes.trim(),
+              repeatFreq: 'none',
+              repeatInterval: 1,
+              repeatUntil: '',
+              repeatWeekdays: [],
+              excludedDates: [],
+              ...(forUpdate && existingEvt
+                ? {
+                    assignStatus: existingEvt.assignStatus,
+                    returnTime: existingEvt.returnTime,
+                    cancelReason: existingEvt.cancelReason,
+                    notificationDismissed: targetChanged
+                      ? false
+                      : existingEvt.notificationDismissed,
+                    resetDismissedBy: Boolean(targetChanged),
+                  }
+                : {}),
+            };
+          };
+
+          const picNamesLabel = selectedPics.map((p) => p.pic).join(', ');
+          if (editingId) {
+            const [firstPic, ...extraPics] = selectedPics;
+            await onUpdateEvent(editingId, buildPicPayload(firstPic, true));
+            for (const extraPic of extraPics) {
+              await onCreateEvent(buildPicPayload(extraPic, false));
+            }
+            setFeedback({
+              type: 'ok',
+              message: `Assign "${effectiveTitle}" untuk ${picNamesLabel} berhasil diperbarui.`,
+            });
+          } else {
+            for (const picOpt of selectedPics) {
+              await onCreateEvent(buildPicPayload(picOpt, false));
+            }
+            setFeedback({
+              type: 'ok',
+              message: `Assign "${effectiveTitle}" untuk ${picNamesLabel} berhasil dibuat.`,
             });
           }
         }
       } else {
-        const repeatUntilVal =
-          formRepeatFreq !== 'none' && formRepeatEndMode === 'until' ? formRepeatUntil.trim() : '';
-        if (
-          formRepeatFreq !== 'none' &&
-          formRepeatEndMode === 'until' &&
-          !/^\d{4}-\d{2}-\d{2}$/.test(repeatUntilVal)
-        ) {
-          setFormError('Pilih tanggal berakhir pengulangan.');
-          setBusy(false);
-          return;
-        }
-        if (repeatUntilVal && repeatUntilVal < formDate) {
-          setFormError('Tanggal akhir pengulangan harus sama atau setelah tanggal reminder.');
-          setBusy(false);
-          return;
-        }
-
         const payload: PersonalReminderFormPayload = {
-          title: formTitle.trim(),
+          title: effectiveTitle,
           date: formDate,
           startTime: formStartTime,
           notes: formNotes.trim(),
-          repeatFreq: formRepeatFreq,
-          repeatInterval: normalizeCalendarInterval(formRepeatInterval),
-          repeatUntil: repeatUntilVal,
-          repeatWeekdays:
-            formRepeatFreq === 'weekly'
-              ? formRepeatWeekdays.length > 0
-                ? formRepeatWeekdays
-                : [parseUtcDate(formDate).getUTCDay()]
-              : [],
-          excludedDates: formRepeatFreq === 'none' ? [] : formExcludedDates,
+          ...recurrenceFields,
         };
 
         if (editingId) {
           await onUpdatePersonalReminder(editingId, payload);
           setFeedback({
             type: 'ok',
-            message: `Reminder personal "${formTitle.trim()}" berhasil diperbarui.`,
+            message: `Reminder personal "${effectiveTitle}" berhasil diperbarui.`,
           });
         } else {
           await onCreatePersonalReminder(payload);
           setFeedback({
             type: 'ok',
-            message: `Reminder personal "${formTitle.trim()}" berhasil ditambahkan.`,
+            message: `Reminder personal "${effectiveTitle}" berhasil ditambahkan.`,
           });
         }
       }
@@ -653,34 +809,67 @@ export function KalenderView({
   };
 
   const handleDeleteSingleOccurrence = async () => {
-    if (!liveSelectedItem || liveSelectedItem.kind !== 'personal') return;
-    const { reminder, occurrenceDate } = liveSelectedItem;
+    if (!liveSelectedItem) return;
     setDeleteBusy(true);
     try {
-      const nextExcluded = Array.from(
-        new Set([...(reminder.excludedDates || []), occurrenceDate])
-      ).sort();
-      await onUpdatePersonalReminder(reminder.id, {
-        title: reminder.title,
-        date: reminder.date,
-        startTime: reminder.startTime,
-        notes: reminder.notes,
-        repeatFreq: reminder.repeatFreq,
-        repeatInterval: reminder.repeatInterval,
-        repeatUntil: reminder.repeatUntil,
-        repeatWeekdays: reminder.repeatWeekdays,
-        excludedDates: nextExcluded,
-      });
+      if (liveSelectedItem.kind === 'personal') {
+        const { reminder, occurrenceDate } = liveSelectedItem;
+        const nextExcluded = Array.from(
+          new Set([...(reminder.excludedDates || []), occurrenceDate])
+        ).sort();
+        await onUpdatePersonalReminder(reminder.id, {
+          title: reminder.title,
+          date: reminder.date,
+          startTime: reminder.startTime,
+          notes: reminder.notes,
+          repeatFreq: reminder.repeatFreq,
+          repeatInterval: reminder.repeatInterval,
+          repeatUntil: reminder.repeatUntil,
+          repeatWeekdays: reminder.repeatWeekdays,
+          excludedDates: nextExcluded,
+        });
+        setFeedback({
+          type: 'ok',
+          message: `Reminder "${reminder.title}" pada ${fmtDateSlash(occurrenceDate)} dihapus.`,
+        });
+      } else {
+        const { event, occurrenceDate } = liveSelectedItem;
+        const nextExcluded = Array.from(
+          new Set([...(event.excludedDates || []), occurrenceDate])
+        ).sort();
+        await onUpdateEvent(event.id, {
+          title: event.title,
+          date: event.date,
+          startTime: event.startTime,
+          assignScope: event.assignScope,
+          assignedDivision: event.assignedDivision,
+          assignedPic: event.assignedPic || '',
+          assignedRole: event.assignedRole || 'stock_accounting',
+          assignedEmail: event.assignedEmail,
+          assignedOutlet: event.assignedOutlet,
+          notes: event.notes,
+          assignStatus: event.assignStatus,
+          returnTime: event.returnTime,
+          cancelReason: event.cancelReason,
+          notificationDismissed: event.notificationDismissed,
+          visibleTo: event.visibleTo,
+          repeatFreq: event.repeatFreq,
+          repeatInterval: event.repeatInterval,
+          repeatUntil: event.repeatUntil,
+          repeatWeekdays: event.repeatWeekdays,
+          excludedDates: nextExcluded,
+        });
+        setFeedback({
+          type: 'ok',
+          message: `Assign "${event.title}" pada ${fmtDateSlash(occurrenceDate)} dihapus.`,
+        });
+      }
       setConfirmDeleteOpen(false);
       setSelectedItem(null);
-      setFeedback({
-        type: 'ok',
-        message: `Reminder "${reminder.title}" pada ${fmtDateSlash(occurrenceDate)} dihapus.`,
-      });
     } catch (err) {
       setFeedback({
         type: 'err',
-        message: formatFriendlyFirestoreError(err, 'Gagal menghapus tanggal reminder.'),
+        message: formatFriendlyFirestoreError(err, 'Gagal menghapus tanggal jadwal.'),
       });
       setConfirmDeleteOpen(false);
     } finally {
@@ -838,6 +1027,28 @@ export function KalenderView({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            {/* Checkboxes to toggle Assigned and Personal visibility on Calendar */}
+            <div className="inline-flex min-h-[38px] items-center gap-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-xs font-semibold text-slate-800 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100">
+              <label className="inline-flex cursor-pointer items-center gap-1.5 select-none">
+                <input
+                  type="checkbox"
+                  checked={showAssigned}
+                  onChange={(e) => setShowAssigned(e.target.checked)}
+                  className="h-3.5 w-3.5 rounded border-slate-300 text-blue-700 focus:ring-blue-600 dark:border-slate-600"
+                />
+                <span>Assigned</span>
+              </label>
+              <label className="inline-flex cursor-pointer items-center gap-1.5 select-none">
+                <input
+                  type="checkbox"
+                  checked={showPersonal}
+                  onChange={(e) => setShowPersonal(e.target.checked)}
+                  className="h-3.5 w-3.5 rounded border-slate-300 text-violet-700 focus:ring-violet-600 dark:border-slate-600"
+                />
+                <span>Personal</span>
+              </label>
+            </div>
+
             {isAdmin && (
               <select
                 aria-label="Filter PIC atau Divisi kalender"
@@ -1021,14 +1232,15 @@ export function KalenderView({
         busy={busy}
         formError={formError}
         formTitle={formTitle}
+        formTitlePreset={formTitlePreset}
         formDate={formDate}
         formStartTime={formStartTime}
         formNotes={formNotes}
         assignablePics={assignablePics}
         allMasterOutlets={allMasterOutlets}
         formAssignScope={formAssignScope}
-        formAssignedDivision={formAssignedDivision}
-        formAssignedPicKey={formAssignedPicKey}
+        formAssignedDivisions={formAssignedDivisions}
+        formAssignedPicKeys={formAssignedPicKeys}
         formAssignedOutlet={formAssignedOutlet}
         formRepeatFreq={formRepeatFreq}
         formRepeatInterval={formRepeatInterval}
@@ -1040,19 +1252,19 @@ export function KalenderView({
         onChangeMode={(nextMode) => {
           setFormMode(nextMode);
           setFormError(null);
-          if (nextMode === 'personal') {
-            setFormRepeatFreq('none');
-            setFormRepeatInterval(1);
-            if (/^\d{4}-\d{2}-\d{2}$/.test(formDate)) {
-              setFormRepeatWeekdays([parseUtcDate(formDate).getUTCDay()]);
+          resetRecurrenceState(formDate);
+          if (nextMode === 'assign') {
+            if (!formTitle.trim()) {
+              setFormTitlePreset('Stock Opname');
+              setFormTitle('Stock Opname');
+            } else {
+              setFormTitlePreset(resolveTitlePreset(formTitle));
             }
-            setFormRepeatEndMode('never');
-            setFormRepeatUntil('');
-            setFormExcludedDates([]);
           }
         }}
         onSubmit={handleSubmitForm}
         onChangeTitle={setFormTitle}
+        onChangeTitlePreset={handleChangeTitlePreset}
         onChangeDate={(nextDate) => {
           setFormDate(nextDate);
           if (/^\d{4}-\d{2}-\d{2}$/.test(nextDate) && formRepeatWeekdays.length <= 1) {
@@ -1064,13 +1276,18 @@ export function KalenderView({
         onChangeAssignScope={(nextScope) => {
           setFormAssignScope(nextScope);
           setFormError(null);
-          if (nextScope === 'pic' && !formAssignedPicKey && assignablePics[0]) {
-            setFormAssignedPicKey(`${assignablePics[0].roleId}|${assignablePics[0].picUpper}`);
+          if (nextScope === 'pic' && formAssignedPicKeys.length === 0 && assignablePics[0]) {
+            setFormAssignedPicKeys([
+              `${assignablePics[0].roleId}|${assignablePics[0].picUpper}`,
+            ]);
             setFormAssignedOutlet(assignablePics[0].outlets[0] || '');
           }
         }}
-        onChangeAssignedDivision={setFormAssignedDivision}
-        onChangeAssignedPicKey={handleChangeAssignedPicKey}
+        onToggleAssignedDivision={handleToggleAssignedDivision}
+        onToggleAllAssignedDivisions={handleToggleAllAssignedDivisions}
+        onToggleAssignedPicKey={handleToggleAssignedPicKey}
+        onSelectAllAssignedPics={handleSelectAllAssignedPics}
+        onClearAssignedPics={handleClearAssignedPics}
         onChangeAssignedOutlet={setFormAssignedOutlet}
         onChangeRepeatFreq={(nextFreq) => {
           setFormRepeatFreq(nextFreq);

@@ -121,6 +121,19 @@ export function useCalendarAndRecordsActions({
       const createdByName =
         ((currentAccount.name || '').trim() || email).slice(0, 80).trim() || email.slice(0, 80);
 
+      const repeatFreq = normalizeCalendarRecurrenceFreq(input.repeatFreq);
+      const repeatInterval = normalizeCalendarInterval(input.repeatInterval);
+      const repeatUntil =
+        repeatFreq !== 'none' &&
+        input.repeatUntil &&
+        /^\d{4}-\d{2}-\d{2}$/.test(input.repeatUntil.trim())
+          ? input.repeatUntil.trim()
+          : '';
+      const repeatWeekdays =
+        repeatFreq === 'weekly' ? normalizeCalendarWeekdays(input.repeatWeekdays) : [];
+      const excludedDates =
+        repeatFreq !== 'none' ? normalizeExcludedDates(input.excludedDates) : [];
+
       const eventId = `asg_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
       const evtPath = `calendarEvents/${eventId}`;
       try {
@@ -144,6 +157,11 @@ export function useCalendarAndRecordsActions({
           notificationDismissed: false,
           dismissedBy: [],
           picResponses: {},
+          repeatFreq,
+          repeatInterval,
+          repeatUntil,
+          repeatWeekdays,
+          excludedDates,
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
           createdBy: uid,
@@ -179,6 +197,11 @@ export function useCalendarAndRecordsActions({
         notificationDismissed?: boolean;
         resetDismissedBy?: boolean;
         visibleTo?: OperationalRoleId[];
+        repeatFreq?: CalendarRecurrenceFreq;
+        repeatInterval?: number;
+        repeatUntil?: string;
+        repeatWeekdays?: number[];
+        excludedDates?: string[];
       }
     ) => {
       const uid = auth.currentUser?.uid;
@@ -237,6 +260,19 @@ export function useCalendarAndRecordsActions({
         input.visibleTo && input.visibleTo.length > 0 ? input.visibleTo : [assignedRole]
       );
 
+      const repeatFreq = normalizeCalendarRecurrenceFreq(input.repeatFreq);
+      const repeatInterval = normalizeCalendarInterval(input.repeatInterval);
+      const repeatUntil =
+        repeatFreq !== 'none' &&
+        input.repeatUntil &&
+        /^\d{4}-\d{2}-\d{2}$/.test(input.repeatUntil.trim())
+          ? input.repeatUntil.trim()
+          : '';
+      const repeatWeekdays =
+        repeatFreq === 'weekly' ? normalizeCalendarWeekdays(input.repeatWeekdays) : [];
+      const excludedDates =
+        repeatFreq !== 'none' ? normalizeExcludedDates(input.excludedDates) : [];
+
       const payload: Record<string, unknown> = {
         title: cleanTitle,
         date: input.date,
@@ -257,6 +293,11 @@ export function useCalendarAndRecordsActions({
           assignStatus === 'cancelled'
             ? (input.cancelReason || '').trim().slice(0, 200)
             : '',
+        repeatFreq,
+        repeatInterval,
+        repeatUntil,
+        repeatWeekdays,
+        excludedDates,
         updatedAt: serverTimestamp(),
         updatedBy: uid,
       };
