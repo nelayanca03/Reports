@@ -71,7 +71,7 @@ describe('firestore.rules structural invariants & blueprint sync', () => {
     assert.match(rulesText, /duration\.value\(31, 'h'\)/);
     assert.match(
       rulesText,
-      /match \/roleConfigs\/\{roleId\}[\s\S]*?allow get: if isVerifiedUser\(\) && isValidId\(roleId\) && isOperationalRole\(roleId\) && hasRoleAccess\(roleId\);/
+      /match \/roleConfigs\/\{roleId\}[\s\S]*?allow get: if isVerifiedUser\(\) && isValidId\(roleId\) && isOperationalRole\(roleId\) && \(hasRoleAccess\(roleId\) \|\| isAccountingOrAdmin\(\)\);/
     );
   });
 

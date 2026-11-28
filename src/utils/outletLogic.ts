@@ -312,7 +312,7 @@ export function isCustomScheduledTask(task?: TaskDefinition | null): boolean {
   );
 }
 
-export function isTaskActiveOnDay(
+export function isTaskScheduledOnDay(
   task: TaskDefinition | undefined | null,
   dayIso: string
 ): boolean {
@@ -353,11 +353,85 @@ export function isTaskActiveOnDay(
   return true;
 }
 
+export function getLatestScheduledDayOnOrBefore(
+  task: TaskDefinition | undefined | null,
+  dayIso: string,
+  minDateIso?: string
+): string | null {
+  if (!task || !isCustomScheduledTask(task)) return null;
+  if (!dayIso || !/^\d{4}-\d{2}-\d{2}$/.test(dayIso)) return null;
+
+  const floorIso =
+    minDateIso && /^\d{4}-\d{2}-\d{2}$/.test(minDateIso)
+      ? minDateIso
+      : `${MIN_WORKSPACE_MONTH}-01`;
+
+  if (task.scheduleMode === 'once') {
+    const dates = (task.scheduleDates || [])
+      .filter((d) => d >= floorIso && d <= dayIso && !isSunday(d))
+      .sort();
+    return dates.length > 0 ? dates[dates.length - 1] : null;
+  }
+
+  let cursor = dayIso;
+  let guard = 0;
+  while (cursor >= floorIso && guard < 45) {
+    if (!isSunday(cursor) && isTaskScheduledOnDay(task, cursor)) {
+      return cursor;
+    }
+    cursor = shiftIsoDays(cursor, -1);
+    guard++;
+  }
+  return null;
+}
+
+export function isTaskActiveOnDay(
+  task: TaskDefinition | undefined | null,
+  dayIso: string,
+  state?: OutletStoreState,
+  outlet?: string
+): boolean {
+  if (!task) return false;
+  if (!isCustomScheduledTask(task)) return true;
+  if (!dayIso || !/^\d{4}-\d{2}-\d{2}$/.test(dayIso)) return false;
+
+  if (isTaskScheduledOnDay(task, dayIso)) return true;
+
+  if (!state || !outlet) return false;
+  if (isSunday(dayIso)) return false;
+
+  const outletMap = state.ent?.[outlet] || {};
+  const ownEntry = outletMap[`${dayIso}|${task.key}`];
+  if (ownEntry && (ownEntry.d || ownEntry.n)) {
+    return true;
+  }
+
+  const latestScheduledDay = getLatestScheduledDayOnOrBefore(task, dayIso, state.start);
+  if (!latestScheduledDay || latestScheduledDay >= dayIso) {
+    return false;
+  }
+
+  let cursor = latestScheduledDay;
+  let guard = 0;
+  while (cursor < dayIso && guard < 45) {
+    const entry = outletMap[`${cursor}|${task.key}`];
+    if (entry && entry.d) {
+      return false;
+    }
+    cursor = shiftIsoDays(cursor, 1);
+    guard++;
+  }
+
+  return true;
+}
+
 export function getActiveTasksForDay(
   tasks: TaskDefinition[],
-  dayIso: string
+  dayIso: string,
+  state?: OutletStoreState,
+  outlet?: string
 ): TaskDefinition[] {
-  return tasks.filter((t) => isTaskActiveOnDay(t, dayIso));
+  return tasks.filter((t) => isTaskActiveOnDay(t, dayIso, state, outlet));
 }
 
 export function isScheduledTaskExpired(
@@ -531,6 +605,58 @@ export function shiftIsoDays(isoStr: string, offsetDays: number): string {
 export function prevWorkingDay(isoStr: string): string {
   const prev = shiftIsoDays(isoStr, -1);
   return isSunday(prev) ? shiftIsoDays(prev, -1) : prev;
+}
+
+export function shiftWorkingDays(isoStr: string, offsetWorkingDays: number): string {
+  if (!isoStr || !/^\d{4}-\d{2}-\d{2}$/.test(isoStr)) return isoStr;
+  let cursor = isSunday(isoStr) ? prevWorkingDay(isoStr) : isoStr;
+  const steps = Math.trunc(offsetWorkingDays);
+  if (steps === 0) return cursor;
+  if (steps < 0) {
+    const count = Math.min(120, Math.abs(steps));
+    for (let i = 0; i < count; i++) {
+      cursor = prevWorkingDay(cursor);
+    }
+    return cursor;
+  }
+  const count = Math.min(120, steps);
+  for (let i = 0; i < count; i++) {
+    const next = shiftIsoDays(cursor, 1);
+    cursor = isSunday(next) ? shiftIsoDays(next, 1) : next;
+  }
+  return cursor;
+}
+
+export function getTaskQuickSetTargetDate(
+  taskDef: TaskDefinition,
+  selectedDay: string,
+  today: string = todayIso(),
+  refDate?: string
+): string {
+  const inputType = getTaskInputType(taskDef);
+  const tol = getTaskTolerance(taskDef);
+  const anchorDay =
+    selectedDay && /^\d{4}-\d{2}-\d{2}$/.test(selectedDay) ? selectedDay : today;
+
+  if (inputType === 'month' || taskDef.formulaType === 'memo_month') {
+    const targetMonth = shiftMonthKey(anchorDay.slice(0, 7), -tol);
+    const maxMonth = today.slice(0, 7);
+    const clampedMonth = targetMonth > maxMonth ? maxMonth : targetMonth;
+    return `${clampedMonth}-01`;
+  }
+
+  if (inputType === 'week' || taskDef.formulaType === 'weekly_plus_1') {
+    const targetMonday = shiftIsoDays(weekStartIso(anchorDay), -tol * 7);
+    const maxMonday = weekStartIso(today);
+    return targetMonday > maxMonday ? maxMonday : targetMonday;
+  }
+
+  const baseDate =
+    taskDef.formulaType === 'ref_task' && refDate && /^\d{4}-\d{2}-\d{2}$/.test(refDate)
+      ? refDate
+      : anchorDay;
+  const targetDate = shiftWorkingDays(baseDate, -tol);
+  return targetDate > today ? today : targetDate;
 }
 
 export function toWibIsoDate(isoTimestamp?: string): string {
@@ -946,7 +1072,7 @@ export function isOutletDayFilled(
   if (!outlet || !day) return false;
   const outletMap = state.ent[outlet];
   if (!outletMap) return false;
-  const activeTasks = getActiveTasksForDay(tasks, day);
+  const activeTasks = getActiveTasksForDay(tasks, day, state, outlet);
   return activeTasks.some((t) => {
     const entry = outletMap[`${day}|${t.key}`];
     return Boolean(entry && (entry.d || entry.n));
@@ -973,16 +1099,23 @@ export function canEditOutletDay(
 export function getEntry(
   state: OutletStoreState,
   days: string[],
-  _tasks: TaskDefinition[],
+  tasks: TaskDefinition[],
   outlet: string,
   day: string,
   taskKey: string
 ): ResolvedEntry {
   const outletMap = state.ent[outlet] || {};
   const ownEntry: EntryItem | undefined = outletMap[`${day}|${taskKey}`];
+  const taskDef = tasks.find((t) => t.key === taskKey);
+  const cycleFloorDay =
+    taskDef && isCustomScheduledTask(taskDef)
+      ? getLatestScheduledDayOnOrBefore(taskDef, day, state.start) || day
+      : '';
+
   const idx = days.indexOf(day);
   for (let k = idx; k >= 0; k--) {
     const candidateDay = days[k];
+    if (cycleFloorDay && candidateDay < cycleFloorDay) break;
     const e: EntryItem | undefined = outletMap[`${candidateDay}|${taskKey}`];
     if (e && e.d) {
       const isOwn = k === idx;
@@ -1007,6 +1140,7 @@ export function getEntry(
     for (const [k, e] of Object.entries(outletMap)) {
       if (!k.endsWith(suffix) || !e?.d) continue;
       const entryDay = k.slice(0, k.length - suffix.length);
+      if (cycleFloorDay && entryDay < cycleFloorDay) continue;
       if (/^\d{4}-\d{2}-\d{2}$/.test(entryDay) && entryDay < day && entryDay > bestDay) {
         bestDay = entryDay;
         bestEntry = e;
@@ -1053,7 +1187,9 @@ export function calcTask(
   const daysSincePeriodStart = isCustomScheduledTask(taskDef)
     ? Math.max(
         1,
-        days.filter((d) => d <= day && !isSunday(d) && isTaskActiveOnDay(taskDef, d)).length
+        days.filter(
+          (d) => d <= day && !isSunday(d) && isTaskActiveOnDay(taskDef, d, state, outlet)
+        ).length
       )
     : Math.max(1, diffWorkingDays(day, periodStart) + 1);
 
@@ -1339,7 +1475,7 @@ export function calcRecap(
       (!effectiveFrom || d >= effectiveFrom) &&
       d <= effectiveUpto &&
       !isSunday(d) &&
-      (!taskDef || isTaskActiveOnDay(taskDef, d))
+      (!taskDef || isTaskActiveOnDay(taskDef, d, state, outlet))
   );
   const ds =
     dayAdjustments && dayAdjustments.length > 0
@@ -1557,8 +1693,8 @@ export function buildDailyFleetTable(
   ];
   const rows: Array<Array<string | number>> = [];
 
-  const activeTasks = getActiveTasksForDay(config.tasks, day);
   for (const { code: outlet, person } of config.outlets) {
+    const activeTasks = getActiveTasksForDay(config.tasks, day, state, outlet);
     for (const t of activeTasks) {
       const c = calcTask(state, days, config.tasks, outlet, day, t.key, today);
       const tsFormatted = c.ts ? fmtDateTimeWithSeconds(c.ts) : '';
@@ -1979,6 +2115,40 @@ export function getAccountPicUpper(
   return ((account.picName || '').trim() || (account.name || '').trim()).toUpperCase();
 }
 
+export function canAccountManageCalendarAssigns(
+  accountOrRole: AccountRole | Pick<AccountProfile, 'role'> | null | undefined
+): boolean {
+  const role = typeof accountOrRole === 'string' ? accountOrRole : accountOrRole?.role;
+  return role === 'admin' || role === 'accounting';
+}
+
+export function getAssignableRolesForAccount(
+  accountOrRole: AccountRole | Pick<AccountProfile, 'role'> | null | undefined
+): OperationalRoleId[] {
+  const role = typeof accountOrRole === 'string' ? accountOrRole : accountOrRole?.role;
+  if (role === 'admin') return ['stock_accounting', 'gl', 'accounting'];
+  if (role === 'accounting') return ['stock_accounting', 'gl'];
+  return [];
+}
+
+export function canAccountManageAssignEvent(
+  accountOrRole: AccountRole | Pick<AccountProfile, 'role'> | null | undefined,
+  event: Pick<
+    CalendarEvent,
+    'eventType' | 'assignScope' | 'assignedDivision' | 'assignedRole'
+  >
+): boolean {
+  const role = typeof accountOrRole === 'string' ? accountOrRole : accountOrRole?.role;
+  if (role === 'admin') return true;
+  if (role !== 'accounting') return false;
+  if (event.eventType && event.eventType !== 'assign') return false;
+  const targetRole =
+    event.assignScope === 'division'
+      ? event.assignedDivision || event.assignedRole
+      : event.assignedRole;
+  return targetRole === 'stock_accounting' || targetRole === 'gl';
+}
+
 export function canUserViewCalendarEvent(
   event: Pick<
     CalendarEvent,
@@ -1986,6 +2156,7 @@ export function canUserViewCalendarEvent(
     | 'eventType'
     | 'assignScope'
     | 'assignedDivision'
+    | 'assignedRole'
     | 'assignedPic'
     | 'assignedPicUpper'
     | 'assignedEmail'
@@ -1996,12 +2167,21 @@ export function canUserViewCalendarEvent(
 ): boolean {
   if (typeof accountOrRole === 'string') {
     if (accountOrRole === 'admin') return true;
+    if (accountOrRole === 'accounting' && canAccountManageAssignEvent(accountOrRole, event)) {
+      return true;
+    }
     if (event.eventType === 'assign') {
       return event.assignScope === 'division' && event.assignedDivision === accountOrRole;
     }
     return event.visibleTo.includes(accountOrRole);
   }
   if (accountOrRole.role === 'admin') return true;
+  if (
+    accountOrRole.role === 'accounting' &&
+    canAccountManageAssignEvent(accountOrRole, event)
+  ) {
+    return true;
+  }
   if (event.eventType !== 'assign') return false;
   if (event.assignScope === 'division') {
     return Boolean(event.assignedDivision && event.assignedDivision === accountOrRole.role);
@@ -2495,9 +2675,15 @@ export interface AssignablePicOption {
 
 export function resolveAllAssignablePics(
   roleConfigs: Record<OperationalRoleId, RoleConfig>,
-  managedAccounts: AccountProfile[] = []
+  managedAccounts: AccountProfile[] = [],
+  allowedRoles?: OperationalRoleId[]
 ): AssignablePicOption[] {
-  const roleOrder: OperationalRoleId[] = ['stock_accounting', 'gl', 'accounting'];
+  const defaultRoleOrder: OperationalRoleId[] = ['stock_accounting', 'gl', 'accounting'];
+  const roleOrder: OperationalRoleId[] =
+    allowedRoles && allowedRoles.length > 0
+      ? defaultRoleOrder.filter((r) => allowedRoles.includes(r))
+      : defaultRoleOrder;
+  const allowedSet = new Set<OperationalRoleId>(roleOrder);
   const byKey = new Map<string, AssignablePicOption>();
 
   const accountByRolePic = new Map<string, AccountProfile>();
@@ -2545,6 +2731,7 @@ export function resolveAllAssignablePics(
   for (const acc of managedAccounts) {
     if (!acc.active || acc.role === 'admin') continue;
     const roleId = acc.role as OperationalRoleId;
+    if (!allowedSet.has(roleId)) continue;
     const pic = (acc.picName || '').trim() || (acc.name || '').trim();
     if (!pic) continue;
     const picUpper = pic.toUpperCase();

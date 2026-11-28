@@ -14,6 +14,7 @@ import {
   formatTaskScheduleLabel,
   generateDailyFleetCsv,
   getActiveTasksForDay,
+  getTaskQuickSetTargetDate,
   isScheduledTaskExpired,
   isTaskActiveOnDay,
   nextDateForWeekday,
@@ -491,5 +492,132 @@ describe('outletLogic: custom task visibility schedules (recurring & one-time)',
     assert.equal(formatGridItemTitle(assignWithoutOutlet), 'Meeting');
     assert.equal(formatGridItemChipLabel(assignWithoutOutlet), '2 pm Meeting');
   });
+
+  it('carries over uncompleted weekly scheduled task (e.g. Friday) to subsequent working days until inputted', () => {
+    const novDays = buildMonthWorkingDays('2026-11');
+    const fridayTask: TaskDefinition = {
+      ...baseTask,
+      key: 'friday_weekly',
+      label: 'Rekonsiliasi Jumat',
+      scheduleMode: 'weekdays',
+      scheduleWeekdays: [5], // Every Friday (e.g., 2026-11-20 and 2026-11-27)
+    };
+
+    const emptyState: OutletStoreState = {
+      start: '2026-11-01',
+      ent: { DLS: {} },
+      visit: {},
+    };
+
+    // Before the first Friday (e.g., 2026-11-05 is Thursday, before Friday 2026-11-06)
+    assert.equal(isTaskActiveOnDay(fridayTask, '2026-11-05', emptyState, 'DLS'), false);
+
+    // On Friday 2026-11-20: task is due
+    assert.equal(isTaskActiveOnDay(fridayTask, '2026-11-20', emptyState, 'DLS'), true);
+
+    // Not inputted on Friday 2026-11-20 -> carries over to Saturday 2026-11-21 and Monday 2026-11-23
+    assert.equal(isTaskActiveOnDay(fridayTask, '2026-11-21', emptyState, 'DLS'), true);
+    assert.equal(isTaskActiveOnDay(fridayTask, '2026-11-23', emptyState, 'DLS'), true);
+
+    // User inputs the task on Monday 2026-11-23
+    const filledOnMondayState: OutletStoreState = {
+      start: '2026-11-01',
+      ent: {
+        DLS: {
+          '2026-11-23|friday_weekly': { d: '2026-11-21', n: 'Susulan Jumat' },
+        },
+      },
+      visit: {},
+    };
+
+    // Stays visible on Monday 2026-11-23 (the day it was inputted)
+    assert.equal(isTaskActiveOnDay(fridayTask, '2026-11-23', filledOnMondayState, 'DLS'), true);
+    const monCalc = calcTask(
+      filledOnMondayState,
+      novDays,
+      [fridayTask],
+      'DLS',
+      '2026-11-23',
+      'friday_weekly',
+      '2026-11-27'
+    );
+    assert.equal(monCalc.d, '2026-11-21');
+
+    // Disappears on Tuesday 2026-11-24, Wednesday 2026-11-25, Thursday 2026-11-26
+    assert.equal(isTaskActiveOnDay(fridayTask, '2026-11-24', filledOnMondayState, 'DLS'), false);
+    assert.equal(isTaskActiveOnDay(fridayTask, '2026-11-25', filledOnMondayState, 'DLS'), false);
+    assert.equal(isTaskActiveOnDay(fridayTask, '2026-11-26', filledOnMondayState, 'DLS'), false);
+
+    // Reappears fresh (unfilled) on the next Friday 2026-11-27
+    assert.equal(isTaskActiveOnDay(fridayTask, '2026-11-27', filledOnMondayState, 'DLS'), true);
+    const nextFriCalc = calcTask(
+      filledOnMondayState,
+      novDays,
+      [fridayTask],
+      'DLS',
+      '2026-11-27',
+      'friday_weekly',
+      '2026-11-27'
+    );
+    assert.equal(nextFriCalc.d, '');
+    assert.equal(nextFriCalc.pend, true);
+  });
+
+  it('calculates quick Set target date according to admin-configured task tolerance', () => {
+    const selectedDay = '2026-11-24'; // Tuesday (working days before: Mon 23, Sat 21, Fri 20)
+    const today = '2026-11-27';
+
+    const dailyTol0: TaskDefinition = { ...baseTask, toleranceOffset: 0 };
+    const dailyTol1: TaskDefinition = { ...baseTask, toleranceOffset: 1 };
+    const dailyTol2: TaskDefinition = { ...baseTask, toleranceOffset: 2 };
+    const dailyTol3: TaskDefinition = { ...baseTask, toleranceOffset: 3 };
+
+    assert.equal(getTaskQuickSetTargetDate(dailyTol0, selectedDay, today), '2026-11-24');
+    assert.equal(getTaskQuickSetTargetDate(dailyTol1, selectedDay, today), '2026-11-23');
+    assert.equal(getTaskQuickSetTargetDate(dailyTol2, selectedDay, today), '2026-11-21'); // skips Sunday 22
+    assert.equal(getTaskQuickSetTargetDate(dailyTol3, selectedDay, today), '2026-11-20');
+
+    const weeklyTol0: TaskDefinition = {
+      ...baseTask,
+      inputType: 'week',
+      formulaType: 'weekly_plus_1',
+      toleranceOffset: 0,
+    };
+    const weeklyTol2: TaskDefinition = {
+      ...baseTask,
+      inputType: 'week',
+      formulaType: 'weekly_plus_1',
+      toleranceOffset: 2,
+    };
+    assert.equal(getTaskQuickSetTargetDate(weeklyTol0, selectedDay, today), '2026-11-23');
+    assert.equal(getTaskQuickSetTargetDate(weeklyTol2, selectedDay, today), '2026-11-09');
+
+    const monthlyTol0: TaskDefinition = {
+      ...baseTask,
+      inputType: 'month',
+      formulaType: 'memo_month',
+      toleranceOffset: 0,
+    };
+    const monthlyTol2: TaskDefinition = {
+      ...baseTask,
+      inputType: 'month',
+      formulaType: 'memo_month',
+      toleranceOffset: 2,
+    };
+    assert.equal(getTaskQuickSetTargetDate(monthlyTol0, selectedDay, today), '2026-11-01');
+    assert.equal(getTaskQuickSetTargetDate(monthlyTol2, selectedDay, today), '2026-09-01');
+
+    const refTaskTol2: TaskDefinition = {
+      ...baseTask,
+      formulaType: 'ref_task',
+      refTaskKey: 'bm',
+      toleranceOffset: 2,
+    };
+    assert.equal(
+      getTaskQuickSetTargetDate(refTaskTol2, selectedDay, today, '2026-11-23'),
+      '2026-11-20'
+    );
+  });
 });
+
 

@@ -160,7 +160,7 @@ export function InputHarianView({
   const currentDraftMap = drafts[dayKey] || {};
 
   const activeDayTasks = hasDailySetup
-    ? getActiveTasksForDay(config.tasks, selectedDay)
+    ? getActiveTasksForDay(config.tasks, selectedDay, store, activeOutlet)
     : [];
 
   const calculatedTasks = hasDailySetup

@@ -527,7 +527,7 @@ export function RekapRankingView({
                         );
                       }
 
-                      if (!isTaskActiveOnDay(t, activeDayForMatrix)) {
+                      if (!isTaskActiveOnDay(t, activeDayForMatrix, store, code)) {
                         return (
                           <td
                             key={t.key}

@@ -25,12 +25,15 @@ import {
 import {
   CALENDAR_TIME_SLOTS,
   ROLE_LABELS,
+  canAccountManageAssignEvent,
+  canAccountManageCalendarAssigns,
   canUserViewCalendarEvent,
   expandCalendarEventsForRange,
   expandPersonalRemindersForRange,
   fmtDateSlash,
   fmtDateWeekdayLong,
   getAccountPicUpper,
+  getAssignableRolesForAccount,
   getMasterOutletOptions,
   normalizeCalendarInterval,
   normalizeCalendarRecurrenceFreq,
@@ -48,7 +51,6 @@ import { KalenderDetailModal } from './kalender/KalenderDetailModal';
 import { KalenderFormModal } from './kalender/KalenderFormModal';
 import { KalenderGridViews } from './kalender/KalenderGridViews';
 import {
-  ALL_DEPARTMENTS,
   ASSIGN_TITLE_PRESETS,
   AssignTitleDropdownValue,
   AssignTitlePreset,
@@ -142,6 +144,8 @@ export function KalenderView({
 }: KalenderViewProps) {
   const today = todayIso();
   const isAdmin = account.role === 'admin';
+  const canManageAssigns = canAccountManageCalendarAssigns(account);
+  const assignableRoles = useMemo(() => getAssignableRolesForAccount(account), [account]);
   const viewerPicUpper = getAccountPicUpper(account);
 
   const [viewMode, setViewMode] = useState<CalendarViewMode>('month');
@@ -172,8 +176,8 @@ export function KalenderView({
   }, [dayPopup]);
 
   const assignablePics = useMemo(
-    () => resolveAllAssignablePics(roleConfigs, managedAccounts),
-    [roleConfigs, managedAccounts]
+    () => resolveAllAssignablePics(roleConfigs, managedAccounts, assignableRoles),
+    [roleConfigs, managedAccounts, assignableRoles]
   );
 
   const allMasterOutlets = useMemo(
@@ -182,7 +186,9 @@ export function KalenderView({
   );
 
   const [formOpen, setFormOpen] = useState(false);
-  const [formMode, setFormMode] = useState<CalendarFormMode>(isAdmin ? 'assign' : 'personal');
+  const [formMode, setFormMode] = useState<CalendarFormMode>(
+    canManageAssigns ? 'assign' : 'personal'
+  );
   const [editingId, setEditingId] = useState<string | null>(null);
   const [formTitle, setFormTitle] = useState('Stock Opname');
   const [formTitlePreset, setFormTitlePreset] = useState<AssignTitleDropdownValue>('Stock Opname');
@@ -230,7 +236,7 @@ export function KalenderView({
     return events.filter((evt) => {
       if (evt.eventType !== 'assign') return false;
       if (!canUserViewCalendarEvent(evt, account)) return false;
-      if (isAdmin && adminPicFilter !== 'ALL') {
+      if (canManageAssigns && adminPicFilter !== 'ALL') {
         if (adminPicFilter.startsWith('DIV|')) {
           const divRole = adminPicFilter.slice(4);
           return (
@@ -250,7 +256,7 @@ export function KalenderView({
       }
       return true;
     });
-  }, [events, account, isAdmin, adminPicFilter]);
+  }, [events, account, canManageAssigns, adminPicFilter]);
 
   const monthGridDays = useMemo(() => buildMonthGridDays(cursorDate), [cursorDate]);
   const weekMonday = useMemo(() => getMondayOfWeek(cursorDate), [cursorDate]);
@@ -389,8 +395,9 @@ export function KalenderView({
     prefillTime?: string,
     forcedMode?: CalendarFormMode
   ) => {
-    const modeToOpen: CalendarFormMode = forcedMode || (isAdmin ? 'assign' : 'personal');
-    if (modeToOpen === 'assign' && !isAdmin) return;
+    const modeToOpen: CalendarFormMode =
+      forcedMode || (canManageAssigns ? 'assign' : 'personal');
+    if (modeToOpen === 'assign' && !canManageAssigns) return;
 
     const targetDate = prefillDate || cursorDate || today;
     setDayPopup(null);
@@ -409,14 +416,16 @@ export function KalenderView({
       if (adminPicFilter.startsWith('DIV|')) {
         const divRole = adminPicFilter.slice(4) as OperationalRoleId;
         setFormAssignScope('division');
-        setFormAssignedDivisions([divRole]);
+        setFormAssignedDivisions(
+          assignableRoles.includes(divRole) ? [divRole] : [assignableRoles[0] || 'stock_accounting']
+        );
         setFormAssignedPicKeys(
           assignablePics[0] ? [`${assignablePics[0].roleId}|${assignablePics[0].picUpper}`] : []
         );
         setFormAssignedOutlet('');
       } else {
         setFormAssignScope('pic');
-        setFormAssignedDivisions(['stock_accounting']);
+        setFormAssignedDivisions([assignableRoles[0] || 'stock_accounting']);
         const preselected =
           adminPicFilter !== 'ALL'
             ? assignablePics.find((p) => `${p.roleId}|${p.picUpper}` === adminPicFilter)
@@ -435,7 +444,7 @@ export function KalenderView({
   };
 
   const openEditAssignModal = (evt: CalendarEvent) => {
-    if (!isAdmin) return;
+    if (!canAccountManageAssignEvent(account, evt)) return;
     setSelectedItem(null);
     setFormMode('assign');
     setEditingId(evt.id);
@@ -555,19 +564,20 @@ export function KalenderView({
   };
 
   const handleToggleAssignedDivision = (roleId: OperationalRoleId) => {
+    if (!assignableRoles.includes(roleId)) return;
     setFormAssignedDivisions((prev) => {
       if (prev.includes(roleId)) {
         if (prev.length === 1) return prev;
         return prev.filter((r) => r !== roleId);
       }
-      return ALL_DEPARTMENTS.filter((r) => prev.includes(r) || r === roleId);
+      return assignableRoles.filter((r) => prev.includes(r) || r === roleId);
     });
   };
 
   const handleToggleAllAssignedDivisions = () => {
     setFormAssignedDivisions((prev) => {
-      const isAll = ALL_DEPARTMENTS.every((r) => prev.includes(r));
-      return isAll ? ['stock_accounting'] : [...ALL_DEPARTMENTS];
+      const isAll = assignableRoles.every((r) => prev.includes(r));
+      return isAll ? [assignableRoles[0] || 'stock_accounting'] : [...assignableRoles];
     });
   };
 
@@ -964,9 +974,14 @@ export function KalenderView({
         ? formatWeekTitle(weekMonday)
         : fmtDateWeekdayLong(cursorDate);
 
+  const canManageSelectedAssign =
+    liveSelectedItem?.kind === 'assign'
+      ? canAccountManageAssignEvent(account, liveSelectedItem.event)
+      : isAdmin;
+
   const canRespondToSelectedAssign =
     liveSelectedItem?.kind === 'assign'
-      ? isAdmin || canUserViewCalendarEvent(liveSelectedItem.event, account)
+      ? canManageSelectedAssign || canUserViewCalendarEvent(liveSelectedItem.event, account)
       : false;
 
   return (
@@ -1049,7 +1064,7 @@ export function KalenderView({
               </label>
             </div>
 
-            {isAdmin && (
+            {canManageAssigns && (
               <select
                 aria-label="Filter PIC atau Divisi kalender"
                 value={adminPicFilter}
@@ -1058,13 +1073,13 @@ export function KalenderView({
               >
                 <option value="ALL">Semua PIC & Divisi ({assignablePics.length})</option>
                 <optgroup label="Assign Divisi">
-                  {(['stock_accounting', 'gl', 'accounting'] as OperationalRoleId[]).map((rId) => (
+                  {assignableRoles.map((rId) => (
                     <option key={`DIV|${rId}`} value={`DIV|${rId}`}>
                       Divisi: {ROLE_LABELS[rId]}
                     </option>
                   ))}
                 </optgroup>
-                {(['stock_accounting', 'gl', 'accounting'] as OperationalRoleId[]).map((rId) => {
+                {assignableRoles.map((rId) => {
                   const group = assignablePics.filter((p) => p.roleId === rId);
                   if (group.length === 0) return null;
                   return (
@@ -1104,7 +1119,7 @@ export function KalenderView({
               })}
             </div>
 
-            {isAdmin && (
+            {canManageAssigns && (
               <>
                 <button
                   type="button"
@@ -1164,7 +1179,7 @@ export function KalenderView({
         viewMode={viewMode}
         today={today}
         cursorDate={cursorDate}
-        isAdmin={isAdmin}
+        isAdmin={canManageAssigns}
         viewerPicUpper={viewerPicUpper}
         monthGridDays={monthGridDays}
         weekDays={weekDays}
@@ -1190,7 +1205,7 @@ export function KalenderView({
         <KalenderDayPopup
           dayPopup={dayPopup}
           today={today}
-          isAdmin={isAdmin}
+          isAdmin={canManageAssigns}
           viewerPicUpper={viewerPicUpper}
           popupItems={itemsByDate.get(dayPopup.date) || []}
           onClose={() => setDayPopup(null)}
@@ -1209,7 +1224,7 @@ export function KalenderView({
 
       <KalenderDetailModal
         selectedItem={liveSelectedItem}
-        isAdmin={isAdmin}
+        isAdmin={canManageSelectedAssign}
         viewerPicUpper={viewerPicUpper}
         canRespondToAssign={canRespondToSelectedAssign}
         confirmDeleteOpen={confirmDeleteOpen}
@@ -1226,7 +1241,8 @@ export function KalenderView({
 
       <KalenderFormModal
         open={formOpen}
-        isAdmin={isAdmin}
+        isAdmin={canManageAssigns}
+        assignableRoles={assignableRoles}
         mode={formMode}
         editingId={editingId}
         busy={busy}
@@ -1311,7 +1327,7 @@ export function KalenderView({
         onRestoreExcludedDates={() => setFormExcludedDates([])}
       />
 
-      {isAdmin && (
+      {canManageAssigns && (
         <KalenderAssignUploadModal
           open={uploadModalOpen}
           assignablePics={assignablePics}

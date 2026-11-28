@@ -218,13 +218,13 @@ export function buildPhotoOutletBlocks(params: {
 
   const workingMonth = targetDay.slice(0, 7);
   const workingYear = targetDay.slice(0, 4);
-  const activeDayTasks = getActiveTasksForDay(config.tasks, targetDay);
-  const { memoTask, bmTask, jualTask, otherTasks } = detectStockDiscrepancyTasks(
-    activeDayTasks
-  );
-  const hasDiscLayout = Boolean(memoTask || (bmTask && jualTask));
 
   return outlets.map((outlet) => {
+    const activeDayTasks = getActiveTasksForDay(config.tasks, targetDay, store, outlet);
+    const { memoTask, bmTask, jualTask, otherTasks } = detectStockDiscrepancyTasks(
+      activeDayTasks
+    );
+    const hasDiscLayout = Boolean(memoTask || (bmTask && jualTask));
     const lines: PhotoOutletLine[] = [];
     let autoDiscPending = '-';
 

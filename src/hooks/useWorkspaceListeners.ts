@@ -141,36 +141,56 @@ export function useWorkspaceListeners({
       currentAccount.role === 'admin' ? effectiveRoleId : currentAccount.role;
     const prevMonth = shiftMonthKey(activeMonth, -1);
 
+    const parseAndStoreRoleConfig = (rId: OperationalRoleId, d: Record<string, unknown>) => {
+      const unlockedPastMonths = parseUnlockedPastMonths(d.unlockedPastMonths);
+      const parsedOutletsByPic = parseOutletsByPic(d.outletsByPic);
+      const parsedDayAdjustments = parseDayAdjustments(d.dayAdjustments);
+      const parsed: RoleConfig = {
+        roleId: rId,
+        label: String(d.label || DEFAULT_ROLE_CONFIGS[rId].label),
+        start: String(d.start || DEFAULT_START),
+        ndays: Number(d.ndays || 25),
+        ...(typeof d.openUntilMonth === 'string' && /^\d{4}-\d{2}$/.test(d.openUntilMonth)
+          ? { openUntilMonth: d.openUntilMonth }
+          : {}),
+        ...(unlockedPastMonths.length > 0 ? { unlockedPastMonths } : {}),
+        tasks: sanitizeTaskDefinitions(d.tasks),
+        outlets: Array.isArray(d.outlets) ? d.outlets : [],
+        ...(parsedOutletsByPic ? { outletsByPic: parsedOutletsByPic } : {}),
+        ...(parsedDayAdjustments.length > 0 ? { dayAdjustments: parsedDayAdjustments } : {}),
+      };
+      setRoleConfigs((prev) => ({ ...prev, [rId]: parsed }));
+    };
+
     const cfgPath = `roleConfigs/${targetRole}`;
     const unsubCfg = onSnapshot(
       doc(db, 'roleConfigs', targetRole),
       (snap) => {
         if (snap.exists()) {
-          const d = snap.data();
-          const unlockedPastMonths = parseUnlockedPastMonths(d.unlockedPastMonths);
-          const parsedOutletsByPic = parseOutletsByPic(d.outletsByPic);
-          const parsedDayAdjustments = parseDayAdjustments(d.dayAdjustments);
-          const parsed: RoleConfig = {
-            roleId: targetRole,
-            label: String(d.label || DEFAULT_ROLE_CONFIGS[targetRole].label),
-            start: String(d.start || DEFAULT_START),
-            ndays: Number(d.ndays || 25),
-            ...(typeof d.openUntilMonth === 'string' && /^\d{4}-\d{2}$/.test(d.openUntilMonth)
-              ? { openUntilMonth: d.openUntilMonth }
-              : {}),
-            ...(unlockedPastMonths.length > 0 ? { unlockedPastMonths } : {}),
-            tasks: sanitizeTaskDefinitions(d.tasks),
-            outlets: Array.isArray(d.outlets) ? d.outlets : [],
-            ...(parsedOutletsByPic ? { outletsByPic: parsedOutletsByPic } : {}),
-            ...(parsedDayAdjustments.length > 0 ? { dayAdjustments: parsedDayAdjustments } : {}),
-          };
-          setRoleConfigs((prev) => ({ ...prev, [targetRole]: parsed }));
+          parseAndStoreRoleConfig(targetRole, snap.data() as Record<string, unknown>);
         } else {
           setRoleConfigs((prev) => ({ ...prev, [targetRole]: DEFAULT_ROLE_CONFIGS[targetRole] }));
         }
       },
       (error) => handleFirestoreError(error, OperationType.GET, cfgPath)
     );
+
+    const extraConfigRoles: OperationalRoleId[] =
+      currentAccount.role === 'accounting' ? ['stock_accounting', 'gl'] : [];
+    const unsubExtraCfgs = extraConfigRoles.map((extraRole) => {
+      const extraPath = `roleConfigs/${extraRole}`;
+      return onSnapshot(
+        doc(db, 'roleConfigs', extraRole),
+        (snap) => {
+          if (snap.exists()) {
+            parseAndStoreRoleConfig(extraRole, snap.data() as Record<string, unknown>);
+          } else {
+            setRoleConfigs((prev) => ({ ...prev, [extraRole]: DEFAULT_ROLE_CONFIGS[extraRole] }));
+          }
+        },
+        (error) => handleFirestoreError(error, OperationType.GET, extraPath)
+      );
+    });
 
     const legacyPath = `roleWorkspaces/${targetRole}`;
     const unsubLegacy = onSnapshot(
@@ -210,6 +230,7 @@ export function useWorkspaceListeners({
 
     return () => {
       unsubCfg();
+      unsubExtraCfgs.forEach((u) => u());
       unsubLegacy();
       unsubMonths.forEach((u) => u());
     };
@@ -223,7 +244,8 @@ export function useWorkspaceListeners({
 
     const canAccessAllRecords =
       currentAccount.role === 'admin' || currentAccount.role === 'accounting';
-    const isAdminViewer = currentAccount.role === 'admin';
+    const isAdminViewer =
+      currentAccount.role === 'admin' || currentAccount.role === 'accounting';
     const myPicUpper = getAccountPicUpper(currentAccount);
     const myEmail = (currentAccount.email || auth.currentUser?.email || '').trim().toLowerCase();
 

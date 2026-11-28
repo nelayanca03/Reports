@@ -630,7 +630,7 @@ service cloud.firestore {
     }
 
     match /roleConfigs/{roleId} {
-      allow get: if isVerifiedUser() && isValidId(roleId) && isOperationalRole(roleId) && hasRoleAccess(roleId);
+      allow get: if isVerifiedUser() && isValidId(roleId) && isOperationalRole(roleId) && (hasRoleAccess(roleId) || isAccountingOrAdmin());
       allow list: if false;
       allow create: if isVerifiedUser()
         && isValidId(roleId)
@@ -855,10 +855,25 @@ service cloud.firestore {
         && data.createdByName is string && data.createdByName.size() >= 1 && data.createdByName.size() <= 80;
     }
 
+    function isAccountingManagedAssignData(data) {
+      let isAssign = 'eventType' in data && data.eventType == 'assign';
+      let isDiv = 'assignScope' in data && data.assignScope == 'division';
+      return isAssign && (
+        isDiv
+          ? (
+            'assignedDivision' in data && data.assignedDivision in ['stock_accounting', 'gl']
+            && 'assignedRole' in data && data.assignedRole in ['stock_accounting', 'gl']
+          )
+          : (
+            'assignedRole' in data && data.assignedRole in ['stock_accounting', 'gl']
+          )
+      );
+    }
+
     function canAccountViewCalendarEvent(acc, data) {
       let picUpper = accountPicFromData(acc);
       return acc.active == true && (
-        acc.role == 'admin'
+        acc.role in ['admin', 'accounting']
         || (
           picUpper != ''
           && 'assignedPicUpper' in data
@@ -896,7 +911,7 @@ service cloud.firestore {
     function canAccountListCalendarEvent(acc, data) {
       let picUpper = accountPicFromData(acc);
       return acc.active == true && (
-        acc.role == 'admin'
+        acc.role in ['admin', 'accounting']
         || (picUpper != '' && data.assignedPicUpper == picUpper)
         || data.assignedEmail == request.auth.token.email.lower()
         || (isOperationalRole(acc.role) && data.assignedDivision == acc.role)
@@ -990,9 +1005,16 @@ service cloud.firestore {
       let myPic = accountPicFromData(acc);
       let changedKeys = nextData.diff(prevData).affectedKeys();
       return acc.active == true && (
-        // Tier 1 (Admin): full management of calendar assignments
+        // Tier 1 (Admin or Accounting managing stock_accounting / gl assigns): full management of calendar assignments
         (
-          acc.role == 'admin'
+          (
+            acc.role == 'admin'
+            || (
+              acc.role == 'accounting'
+              && isAccountingManagedAssignData(prevData)
+              && isAccountingManagedAssignData(nextData)
+            )
+          )
           && canAdminUpdateCalendarEvent(prevData, nextData, changedKeys)
         )
         // Tier 2a (PIC Assign User): explicitly dismiss persistent notification
@@ -1064,13 +1086,35 @@ service cloud.firestore {
       );
     }
 
+    function canCreateCalendarEvent(data) {
+      let path = accountDocPath();
+      return isAdmin() || (
+        isVerifiedUser()
+        && exists(path)
+        && get(path).data.active == true
+        && get(path).data.role == 'accounting'
+        && isAccountingManagedAssignData(data)
+      );
+    }
+
+    function canDeleteCalendarEvent(data) {
+      let path = accountDocPath();
+      return isAdmin() || (
+        isVerifiedUser()
+        && exists(path)
+        && get(path).data.active == true
+        && get(path).data.role == 'accounting'
+        && isAccountingManagedAssignData(data)
+      );
+    }
+
     match /calendarEvents/{eventId} {
       allow get: if isVerifiedUser() && isValidId(eventId) && canViewCalendarEvent(existing());
       allow list: if isVerifiedUser() && canListCalendarEvent(resource.data);
       allow create: if isVerifiedUser()
         && isValidId(eventId)
         && isValidCalendarEvent(incoming())
-        && isAdmin()
+        && canCreateCalendarEvent(incoming())
         && incoming().createdBy == request.auth.uid
         && incoming().updatedBy == request.auth.uid
         && incoming().createdByEmail == request.auth.token.email.lower()
@@ -1081,7 +1125,7 @@ service cloud.firestore {
         && incoming().updatedBy == request.auth.uid
         && incoming().updatedAt == request.time
         && canUpdateCalendarEvent(existing(), incoming());
-      allow delete: if isVerifiedUser() && isValidId(eventId) && isAdmin();
+      allow delete: if isVerifiedUser() && isValidId(eventId) && canDeleteCalendarEvent(existing());
     }
 
     function isValidPersonalReminder(data) {

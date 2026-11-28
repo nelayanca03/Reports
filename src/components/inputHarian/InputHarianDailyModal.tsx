@@ -337,7 +337,7 @@ export function InputHarianDailyModal({
             <div className="mt-4 flex flex-wrap items-center justify-between gap-2.5 border-t border-slate-100 pt-4 dark:border-slate-800">
               <div className="flex flex-wrap items-center gap-1.5">
                 {outletsForPerson.map((o) => {
-                  const activeDayTasks = getActiveTasksForDay(config.tasks, selectedDay);
+                  const activeDayTasks = getActiveTasksForDay(config.tasks, selectedDay, store, o);
                   const oPend = activeDayTasks.filter(
                     (t) => calcTask(store, days, config.tasks, o, selectedDay, t.key, today).pend
                   ).length;
@@ -477,23 +477,31 @@ export function InputHarianDailyModal({
                       </td>
                     </tr>
                   ) : (
-                    calculatedTasks.map(({ def, calc, displayD, displayN, isDirty }) => (
-                      <InputHarianTaskRow
-                        key={def.key}
-                        def={def}
-                        calc={calc}
-                        displayD={displayD}
-                        displayN={displayN}
-                        isDirty={isDirty}
-                        canEditDay={canEditDay}
-                        isAdmin={isAdmin}
-                        days={days}
-                        selectedDay={selectedDay}
-                        today={today}
-                        onSetDraft={onSetTaskDraft}
-                        onClearDraft={onClearTaskDraft}
-                      />
-                    ))
+                    calculatedTasks.map(({ def, calc, displayD, displayN, isDirty }) => {
+                      const refTaskItem =
+                        def.formulaType === 'ref_task' && def.refTaskKey
+                          ? calculatedTasks.find((item) => item.def.key === def.refTaskKey)
+                          : undefined;
+                      const refDate = refTaskItem?.displayD || calc.rumus || selectedDay;
+                      return (
+                        <InputHarianTaskRow
+                          key={def.key}
+                          def={def}
+                          calc={calc}
+                          displayD={displayD}
+                          displayN={displayN}
+                          isDirty={isDirty}
+                          canEditDay={canEditDay}
+                          isAdmin={isAdmin}
+                          days={days}
+                          selectedDay={selectedDay}
+                          today={today}
+                          refDate={refDate}
+                          onSetDraft={onSetTaskDraft}
+                          onClearDraft={onClearTaskDraft}
+                        />
+                      );
+                    })
                   )}
                 </tbody>
               </table>

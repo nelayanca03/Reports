@@ -23,9 +23,12 @@ import {
 import { ParsedAssignImportRow } from '../utils/assignImportExport';
 import {
   canAccountEditPic,
+  canAccountManageAssignEvent,
+  canAccountManageCalendarAssigns,
   formatReferenceCode,
   formatYymmFromIsoDate,
   getAccountPicUpper,
+  getAssignableRolesForAccount,
   getPeopleMap,
   isValidCalendarReturnTime,
   isValidCalendarStartTime,
@@ -75,8 +78,8 @@ export function useCalendarAndRecordsActions({
       if (!uid || !email || !currentAccount) {
         throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
       }
-      if (currentAccount.role !== 'admin') {
-        throw new Error('Hanya Admin yang dapat membuat assign pada kalender.');
+      if (!canAccountManageCalendarAssigns(currentAccount)) {
+        throw new Error('Hanya Admin atau Accounting yang dapat membuat assign pada kalender.');
       }
       const cleanTitle = input.title.trim().slice(0, 120);
       if (!cleanTitle) {
@@ -99,6 +102,13 @@ export function useCalendarAndRecordsActions({
           : input.assignedRole === 'gl' || input.assignedRole === 'accounting'
             ? input.assignedRole
             : 'stock_accounting';
+
+      const allowedRoles = getAssignableRolesForAccount(currentAccount);
+      if (!allowedRoles.includes(assignedRole)) {
+        throw new Error(
+          'Akun Accounting hanya dapat mengatur assign untuk divisi Stock Accounting atau GL.'
+        );
+      }
 
       const cleanPic =
         assignScope === 'division'
@@ -208,8 +218,14 @@ export function useCalendarAndRecordsActions({
       if (!uid || !currentAccount) {
         throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
       }
-      if (currentAccount.role !== 'admin') {
-        throw new Error('Hanya Admin yang dapat mengubah assign kalender.');
+      if (!canAccountManageCalendarAssigns(currentAccount)) {
+        throw new Error('Hanya Admin atau Accounting yang dapat mengubah assign kalender.');
+      }
+      const existingEvt = calendarEvents.find((e) => e.id === eventId);
+      if (existingEvt && !canAccountManageAssignEvent(currentAccount, existingEvt)) {
+        throw new Error(
+          'Akun Accounting hanya dapat mengubah assign untuk divisi Stock Accounting atau GL.'
+        );
       }
       const cleanTitle = input.title.trim().slice(0, 120);
       if (!cleanTitle) {
@@ -232,6 +248,13 @@ export function useCalendarAndRecordsActions({
           : input.assignedRole === 'gl' || input.assignedRole === 'accounting'
             ? input.assignedRole
             : 'stock_accounting';
+
+      const allowedRoles = getAssignableRolesForAccount(currentAccount);
+      if (!allowedRoles.includes(assignedRole)) {
+        throw new Error(
+          'Akun Accounting hanya dapat mengatur assign untuk divisi Stock Accounting atau GL.'
+        );
+      }
 
       const cleanPic =
         assignScope === 'division'
@@ -315,7 +338,7 @@ export function useCalendarAndRecordsActions({
         handleFirestoreError(error, OperationType.UPDATE, evtPath);
       }
     },
-    [currentAccount]
+    [currentAccount, calendarEvents]
   );
 
   const deleteCalendarEvent = useCallback(
@@ -324,8 +347,14 @@ export function useCalendarAndRecordsActions({
       if (!uid || !currentAccount) {
         throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
       }
-      if (currentAccount.role !== 'admin') {
-        throw new Error('Hanya Admin yang dapat menghapus assign kalender.');
+      if (!canAccountManageCalendarAssigns(currentAccount)) {
+        throw new Error('Hanya Admin atau Accounting yang dapat menghapus assign kalender.');
+      }
+      const existingEvt = calendarEvents.find((e) => e.id === eventId);
+      if (existingEvt && !canAccountManageAssignEvent(currentAccount, existingEvt)) {
+        throw new Error(
+          'Akun Accounting hanya dapat menghapus assign untuk divisi Stock Accounting atau GL.'
+        );
       }
       const evtPath = `calendarEvents/${eventId}`;
       try {
@@ -334,7 +363,7 @@ export function useCalendarAndRecordsActions({
         handleFirestoreError(error, OperationType.DELETE, evtPath);
       }
     },
-    [currentAccount]
+    [currentAccount, calendarEvents]
   );
 
   const bulkCreateAssignEvents = useCallback(
@@ -344,10 +373,16 @@ export function useCalendarAndRecordsActions({
       if (!uid || !email || !currentAccount) {
         throw new Error('Sesi login tidak aktif. Silakan masuk ulang.');
       }
-      if (currentAccount.role !== 'admin') {
-        throw new Error('Hanya Admin yang dapat mengunggah data assign.');
+      if (!canAccountManageCalendarAssigns(currentAccount)) {
+        throw new Error('Hanya Admin atau Accounting yang dapat mengunggah data assign.');
       }
       if (!rows.length) return 0;
+      const allowedRoles = getAssignableRolesForAccount(currentAccount);
+      if (rows.some((r) => !allowedRoles.includes(r.assignedRole))) {
+        throw new Error(
+          'Akun Accounting hanya dapat mengunggah assign untuk divisi Stock Accounting atau GL.'
+        );
+      }
 
       const createdByName =
         ((currentAccount.name || '').trim() || email).slice(0, 80).trim() || email.slice(0, 80);
@@ -437,7 +472,10 @@ export function useCalendarAndRecordsActions({
 
       const evt = calendarEvents.find((e) => e.id === cleanId);
       const isDivisionAssign = evt?.assignScope === 'division';
-      if (evt && currentAccount.role !== 'admin') {
+      const canManageThisAssign = evt
+        ? canAccountManageAssignEvent(currentAccount, evt)
+        : currentAccount.role === 'admin';
+      if (evt && !canManageThisAssign) {
         const myPic = (input.targetPic || getAccountPicUpper(currentAccount)).trim().toUpperCase();
         const prevStatus = isDivisionAssign
           ? (myPic ? evt.picResponses?.[myPic]?.status : undefined) || evt.assignStatus
@@ -453,7 +491,7 @@ export function useCalendarAndRecordsActions({
           assignDate: evt.date,
           startTime: evt.startTime,
           returnTime: cleanReturnTime,
-          isAdmin: currentAccount.role === 'admin',
+          isAdmin: canManageThisAssign,
         });
         if (timingErr) {
           throw new Error(timingErr);
@@ -469,7 +507,7 @@ export function useCalendarAndRecordsActions({
       try {
         if (isDivisionAssign) {
           const isAdminGlobal =
-            currentAccount.role === 'admin' && (input.forceGlobal || !input.targetPic);
+            canManageThisAssign && (input.forceGlobal || !input.targetPic);
           if (isAdminGlobal) {
             const globalPayload: Record<string, unknown> = {
               assignStatus: input.assignStatus,

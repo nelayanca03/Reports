@@ -24,6 +24,7 @@ import {
 interface KalenderFormModalProps {
   open: boolean;
   isAdmin: boolean;
+  assignableRoles?: OperationalRoleId[];
   mode: CalendarFormMode;
   editingId: string | null;
   busy: boolean;
@@ -73,6 +74,7 @@ interface KalenderFormModalProps {
 export function KalenderFormModal({
   open,
   isAdmin,
+  assignableRoles,
   mode,
   editingId,
   busy,
@@ -130,7 +132,8 @@ export function KalenderFormModal({
     : Array.from(new Set(selectedPicOptions.flatMap((p) => p.outlets)));
   const otherOutlets = allMasterOutlets.filter((o) => !picOutlets.includes(o));
 
-  const rolesOrder: OperationalRoleId[] = ALL_DEPARTMENTS;
+  const rolesOrder: OperationalRoleId[] =
+    assignableRoles && assignableRoles.length > 0 ? assignableRoles : ALL_DEPARTMENTS;
   const isAllDivisionsSelected = rolesOrder.every((r) => formAssignedDivisions.includes(r));
 
   return (

@@ -10,10 +10,8 @@ import {
   fmtWeekShort,
   formatTaskScheduleLabel,
   getTaskInputType,
+  getTaskQuickSetTargetDate,
   isCustomScheduledTask,
-  prevMonthFirstDay,
-  prevWeekMonday,
-  prevWorkingDay,
   weekStartIso,
 } from '../../utils/outletLogic';
 
@@ -28,6 +26,7 @@ interface InputHarianTaskRowProps {
   days: string[];
   selectedDay: string;
   today: string;
+  refDate?: string;
   onSetDraft: (
     taskKey: string,
     baseD: string,
@@ -48,18 +47,14 @@ export function InputHarianTaskRow({
   days,
   selectedDay,
   today,
+  refDate,
   onSetDraft,
   onClearDraft,
 }: InputHarianTaskRowProps) {
   const inputType = getTaskInputType(def);
   const isMonthly = inputType === 'month';
   const isWeekly = inputType === 'week';
-  const quickTargetDate =
-    isMonthly || def.formulaType === 'memo_month'
-      ? prevMonthFirstDay(selectedDay)
-      : isWeekly || def.formulaType === 'weekly_plus_1'
-        ? prevWeekMonday(selectedDay)
-        : prevWorkingDay(selectedDay);
+  const quickTargetDate = getTaskQuickSetTargetDate(def, selectedDay, today, refDate);
 
   const currentComparable = isMonthly
     ? displayD

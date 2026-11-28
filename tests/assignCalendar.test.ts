@@ -15,7 +15,10 @@ import {
   CALENDAR_TIME_SLOTS,
   DEFAULT_ROLE_CONFIGS,
   calcVisitLeaderboard,
+  canAccountManageAssignEvent,
+  canAccountManageCalendarAssigns,
   canUserViewCalendarEvent,
+  getAssignableRolesForAccount,
   getPendingAssignNotifications,
   mergeAssignsIntoVisitMap,
   resolveAllAssignablePics,
@@ -439,4 +442,83 @@ describe('PIC-specific calendar assigns & Kunjungan synchronization', () => {
       null
     );
   });
+
+  it('allows accounting users to view and manage calendar assigns for stock_accounting and gl like admin', () => {
+    const accountingAcc: AccountProfile = {
+      id: 'acc_user',
+      email: 'accounting@company.com',
+      name: 'Sari Accounting',
+      role: 'accounting',
+      picName: 'Sari',
+      active: true,
+    };
+
+    assert.equal(canAccountManageCalendarAssigns(adminAcc), true);
+    assert.equal(canAccountManageCalendarAssigns(accountingAcc), true);
+    assert.equal(canAccountManageCalendarAssigns(peterAcc), false);
+
+    assert.deepEqual(getAssignableRolesForAccount(adminAcc), [
+      'stock_accounting',
+      'gl',
+      'accounting',
+    ]);
+    assert.deepEqual(getAssignableRolesForAccount(accountingAcc), [
+      'stock_accounting',
+      'gl',
+    ]);
+    assert.deepEqual(getAssignableRolesForAccount(peterAcc), []);
+
+    const saPicAssign = makeAssign({
+      id: 'sa_pic',
+      assignScope: 'pic',
+      assignedRole: 'stock_accounting',
+      assignedPic: 'PETER',
+      assignedPicUpper: 'PETER',
+    });
+    const glDivAssign = makeAssign({
+      id: 'gl_div',
+      assignScope: 'division',
+      assignedDivision: 'gl',
+      assignedRole: 'gl',
+      assignedPic: '',
+      assignedPicUpper: '',
+    });
+    const accDivAssign = makeAssign({
+      id: 'acc_div',
+      assignScope: 'division',
+      assignedDivision: 'accounting',
+      assignedRole: 'accounting',
+      assignedPic: '',
+      assignedPicUpper: '',
+    });
+
+    assert.equal(canAccountManageAssignEvent(accountingAcc, saPicAssign), true);
+    assert.equal(canAccountManageAssignEvent(accountingAcc, glDivAssign), true);
+    assert.equal(canAccountManageAssignEvent(accountingAcc, accDivAssign), false);
+
+    assert.equal(canUserViewCalendarEvent(saPicAssign, accountingAcc), true);
+    assert.equal(canUserViewCalendarEvent(glDivAssign, accountingAcc), true);
+    assert.equal(canUserViewCalendarEvent(accDivAssign, accountingAcc), true);
+
+    const roleConfigsWithAll = {
+      ...DEFAULT_ROLE_CONFIGS,
+      gl: {
+        ...DEFAULT_ROLE_CONFIGS.gl,
+        outlets: [{ person: 'RINA', code: 'DLS' }],
+      },
+      accounting: {
+        ...DEFAULT_ROLE_CONFIGS.accounting,
+        outlets: [{ person: 'SARI', code: 'DLS' }],
+      },
+    };
+    const assignableForAccounting = resolveAllAssignablePics(
+      roleConfigsWithAll,
+      [],
+      getAssignableRolesForAccount(accountingAcc)
+    );
+    assert.ok(assignableForAccounting.some((p) => p.roleId === 'stock_accounting'));
+    assert.ok(assignableForAccounting.some((p) => p.roleId === 'gl'));
+    assert.ok(!assignableForAccounting.some((p) => p.roleId === 'accounting'));
+  });
 });
+
