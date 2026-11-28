@@ -551,9 +551,8 @@ export function toWibTimeString(isoTimestamp?: string): string {
   return `${hh}:${mm}:${ss}`;
 }
 
-export function todayIso(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+export function todayIso(nowMs: number = Date.now()): string {
+  return new Date(nowMs + 7 * 3600 * 1000).toISOString().slice(0, 10);
 }
 
 export function yesterdayIso(): string {

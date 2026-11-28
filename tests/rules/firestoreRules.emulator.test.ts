@@ -340,12 +340,13 @@ describe('Firestore Security Rules Emulator Suite (security_spec.md + Operationa
       );
     });
 
-    it('5. Cross-Role Read -> PERMISSION_DENIED gl reading stock_accounting workspace', async () => {
+    it('5. Cross-Role Read -> PERMISSION_DENIED gl reading stock_accounting config or workspace', async () => {
       const { currentMonth } = await seedBaselineData();
       const glCtx = testEnv.authenticatedContext(GL_UID, {
         email: GL_EMAIL,
         email_verified: true,
       });
+      await assertFails(getDoc(doc(asFirestore(glCtx), 'roleConfigs', 'stock_accounting')));
       await assertFails(getDoc(doc(asFirestore(glCtx), 'roleWorkspaces', 'stock_accounting')));
       await assertFails(
         getDoc(
@@ -473,7 +474,7 @@ describe('Firestore Security Rules Emulator Suite (security_spec.md + Operationa
       await assertSucceeds(getDoc(doc(db, 'roleConfigs', 'stock_accounting')));
       await assertSucceeds(
         updateDoc(doc(db, 'roleMonthlyWorkspaces', `stock_accounting_${currentMonth}`), {
-          [`ent.NKPM`]: { [today]: { d: { ham: today }, n: {}, ts: Date.now() } },
+          [`ent.NKPM`]: { [`${today}|ham`]: { d: today, n: '', ts: new Date().toISOString() } },
           [`visit.PETER|${today}`]: {
             ok: true,
             outlet: 'NKPM',
@@ -493,6 +494,63 @@ describe('Firestore Security Rules Emulator Suite (security_spec.md + Operationa
             f: '09:00',
             t: '10:30',
             n: 'Meeting',
+          },
+          updatedAt: serverTimestamp(),
+          updatedBy: STOCK_UID,
+        })
+      );
+    });
+
+    it('enforces server-side past-day lock: allows first fill of past day & re-edit of today, denies overwriting filled past day', async () => {
+      const { today, yesterday, currentMonth } = await seedBaselineData();
+      const stockCtx = testEnv.authenticatedContext(STOCK_UID, {
+        email: STOCK_EMAIL,
+        email_verified: true,
+      });
+      const db = asFirestore(stockCtx);
+      const wsDoc = doc(db, 'roleMonthlyWorkspaces', `stock_accounting_${currentMonth}`);
+
+      // 1. First fill of yesterday (unfilled past day) -> allowed
+      await assertSucceeds(
+        updateDoc(wsDoc, {
+          [`ent.NKPM`]: {
+            [`${yesterday}|ham`]: { d: yesterday, n: 'Initial fill', ts: new Date().toISOString() },
+            [`${today}|ham`]: { d: today, n: 'Today v1', ts: new Date().toISOString() },
+          },
+          updatedAt: serverTimestamp(),
+          updatedBy: STOCK_UID,
+        })
+      );
+
+      // 2. Re-editing today's entry while keeping yesterday's entry intact -> allowed
+      await assertSucceeds(
+        updateDoc(wsDoc, {
+          [`ent.NKPM`]: {
+            [`${yesterday}|ham`]: { d: yesterday, n: 'Initial fill', ts: new Date().toISOString() },
+            [`${today}|ham`]: { d: today, n: 'Today v2 edited', ts: new Date().toISOString() },
+          },
+          updatedAt: serverTimestamp(),
+          updatedBy: STOCK_UID,
+        })
+      );
+
+      // 3. Attempting to overwrite already-filled yesterday entry -> PERMISSION_DENIED
+      await assertFails(
+        updateDoc(wsDoc, {
+          [`ent.NKPM`]: {
+            [`${yesterday}|ham`]: { d: today, n: 'Tampered past day', ts: new Date().toISOString() },
+            [`${today}|ham`]: { d: today, n: 'Today v2 edited', ts: new Date().toISOString() },
+          },
+          updatedAt: serverTimestamp(),
+          updatedBy: STOCK_UID,
+        })
+      );
+
+      // 4. Attempting to delete already-filled yesterday entry -> PERMISSION_DENIED
+      await assertFails(
+        updateDoc(wsDoc, {
+          [`ent.NKPM`]: {
+            [`${today}|ham`]: { d: today, n: 'Today v2 edited', ts: new Date().toISOString() },
           },
           updatedAt: serverTimestamp(),
           updatedBy: STOCK_UID,

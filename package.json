@@ -16,7 +16,7 @@
     "sync:config": "node scripts/sync-rules-config.mjs",
     "test": "tsx --test tests/*.test.ts",
     "test:rules": "firebase emulators:exec --only firestore \"tsx --test tests/rules/*.test.ts\"",
-    "check": "npm run lint && npm test"
+    "check": "npm run sync:config && npm run lint && npm run lint:rules && npm test"
   },
   "dependencies": {
     "firebase": "^13.3.0",

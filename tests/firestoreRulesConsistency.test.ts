@@ -61,15 +61,21 @@ describe('firestore.rules structural invariants & blueprint sync', () => {
     );
   });
 
-  it('uses consolidated single-read account guards and valid WIB hour offsets', () => {
+  it('uses consolidated single-read account guards, server-side day-lock, and valid WIB hour offsets', () => {
     assert.match(rulesText, /function canAccountWriteWorkspace\(/);
+    assert.match(rulesText, /function canAccountWriteWorkspaceUpdate\(/);
+    assert.match(rulesText, /function arePicOutletsDayLocked\(/);
     assert.match(rulesText, /function canAccountViewSavedRecord\(/);
     assert.match(rulesText, /function canAccountViewCalendarEvent\(/);
     assert.match(rulesText, /duration\.value\(17, 'h'\)/);
     assert.match(rulesText, /duration\.value\(31, 'h'\)/);
+    assert.match(
+      rulesText,
+      /match \/roleConfigs\/\{roleId\}[\s\S]*?allow get: if isVerifiedUser\(\) && isValidId\(roleId\) && isOperationalRole\(roleId\) && hasRoleAccess\(roleId\);/
+    );
   });
 
-  it('keeps app.config.json synchronized with APP_CONFIG, firestore.rules, and security_spec.md', () => {
+  it('keeps app.config.json and firebase.json synchronized with APP_CONFIG, firestore.rules, and security_spec.md', () => {
     const expectedOwner = appConfigJson.ownerEmail.trim().toLowerCase();
     assert.equal(APP_CONFIG.ownerEmail, expectedOwner);
     assert.equal(APP_CONFIG.defaultStartDate, appConfigJson.defaultStartDate);
@@ -80,6 +86,18 @@ describe('firestore.rules structural invariants & blueprint sync', () => {
       new RegExp(`request\\.auth\\.token\\.email\\.lower\\(\\) == '${expectedOwner.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}'`)
     );
     assert.ok(specText.includes(expectedOwner), 'security_spec.md should reference ownerEmail from app.config.json');
+
+    const appletCfg = JSON.parse(
+      fs.readFileSync(path.join(ROOT_DIR, 'firebase-applet-config.json'), 'utf8')
+    ) as { firestoreDatabaseId?: string };
+    const firebaseJson = JSON.parse(
+      fs.readFileSync(path.join(ROOT_DIR, 'firebase.json'), 'utf8')
+    ) as { firestore: Array<{ database?: string; rules: string }> };
+    assert.ok(Array.isArray(firebaseJson.firestore), 'firebase.json firestore should be a multi-database array');
+    assert.ok(
+      firebaseJson.firestore.some((entry) => entry.database === appletCfg.firestoreDatabaseId),
+      `firebase.json must target named database ${appletCfg.firestoreDatabaseId}`
+    );
   });
 
   it('keeps client emailToAccountId identical to firestore.rules emailDocId', () => {

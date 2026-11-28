@@ -215,47 +215,11 @@ export function useWorkspaceListeners({
     };
   }, [authStatus, currentAccount, effectiveRoleId, activeMonth, setRoleConfigs]);
 
-  // Listen to all roleConfigs (for centralized Outlet master list), calendarEvents, and savedRecords
+  // Listen to calendarEvents, personalReminders, savedRecords, and calendarMedia
   useEffect(() => {
     if (authStatus !== 'ready' || !currentAccount) return;
 
     const unsubs: Array<() => void> = [];
-    const roleIds: OperationalRoleId[] = ['stock_accounting', 'gl', 'accounting'];
-
-    for (const rId of roleIds) {
-      const cfgPath = `roleConfigs/${rId}`;
-      unsubs.push(
-        onSnapshot(
-          doc(db, 'roleConfigs', rId),
-          (snap) => {
-            if (snap.exists()) {
-              const d = snap.data();
-              const unlockedPastMonths = parseUnlockedPastMonths(d.unlockedPastMonths);
-              const parsedOutletsByPic = parseOutletsByPic(d.outletsByPic);
-              const parsedDayAdjustments = parseDayAdjustments(d.dayAdjustments);
-              setRoleConfigs((prev) => ({
-                ...prev,
-                [rId]: {
-                  roleId: rId,
-                  label: String(d.label || DEFAULT_ROLE_CONFIGS[rId].label),
-                  start: String(d.start || DEFAULT_START),
-                  ndays: Number(d.ndays || 25),
-                  ...(typeof d.openUntilMonth === 'string' && /^\d{4}-\d{2}$/.test(d.openUntilMonth)
-                    ? { openUntilMonth: d.openUntilMonth }
-                    : {}),
-                  ...(unlockedPastMonths.length > 0 ? { unlockedPastMonths } : {}),
-                  tasks: sanitizeTaskDefinitions(d.tasks),
-                  outlets: Array.isArray(d.outlets) ? d.outlets : [],
-                  ...(parsedOutletsByPic ? { outletsByPic: parsedOutletsByPic } : {}),
-                  ...(parsedDayAdjustments.length > 0 ? { dayAdjustments: parsedDayAdjustments } : {}),
-                },
-              }));
-            }
-          },
-          (error) => handleFirestoreError(error, OperationType.GET, cfgPath)
-        )
-      );
-    }
 
     const canAccessAllRecords =
       currentAccount.role === 'admin' || currentAccount.role === 'accounting';

@@ -4,15 +4,12 @@ import {
   doc,
   runTransaction,
   serverTimestamp,
-  setDoc,
-  writeBatch,
 } from 'firebase/firestore';
 import { useCallback } from 'react';
 import { OperationType, auth, db, handleFirestoreError } from '../firebase';
 import {
   AccountProfile,
   EntryItem,
-  InputLogActionType,
   InputLogItemAction,
   OperationalRoleId,
   OutletStoreState,
@@ -53,117 +50,6 @@ export function useWorkspaceEntryActions({
   days,
   canAccessMonthForWrite,
 }: UseWorkspaceEntryActionsParams) {
-  const recordInputLog = useCallback(
-    async (params: {
-      actionType: InputLogActionType;
-      pic: string;
-      outlet: string;
-      day: string;
-      details: string;
-      itemCount: number;
-      clientTs: string;
-      taskKey?: string;
-      prevDate?: string;
-      newDate?: string;
-      prevNote?: string;
-      newNote?: string;
-      action?: InputLogItemAction;
-    }) => {
-      const uid = auth.currentUser?.uid;
-      const email = (currentAccount?.email || auth.currentUser?.email || '').trim().toLowerCase();
-      if (!uid || !email || !currentAccount) return;
-      const logId = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-      const logPath = `inputLogs/${logId}`;
-      try {
-        await setDoc(doc(db, 'inputLogs', logId), {
-          uid,
-          userEmail: email.slice(0, 120),
-          userName: (currentAccount.name || email).slice(0, 80),
-          userRole: currentAccount.role,
-          roleId: effectiveRoleId,
-          roleLabel: (activeConfig.label || effectiveRoleId).slice(0, 60),
-          actionType: params.actionType,
-          pic: params.pic.slice(0, 60),
-          outlet: params.outlet.slice(0, 120),
-          day: params.day.slice(0, 10),
-          details: params.details.slice(0, 600),
-          itemCount: Math.max(1, Math.min(50, Math.round(params.itemCount))),
-          clientTs: params.clientTs.slice(0, 40),
-          ...(params.taskKey !== undefined ? { taskKey: params.taskKey.slice(0, 40) } : {}),
-          ...(params.prevDate !== undefined ? { prevDate: params.prevDate.slice(0, 20) } : {}),
-          ...(params.newDate !== undefined ? { newDate: params.newDate.slice(0, 20) } : {}),
-          ...(params.prevNote !== undefined ? { prevNote: params.prevNote.slice(0, 100) } : {}),
-          ...(params.newNote !== undefined ? { newNote: params.newNote.slice(0, 100) } : {}),
-          ...(params.action !== undefined ? { action: params.action } : {}),
-          createdAt: serverTimestamp(),
-        });
-      } catch (error) {
-        handleFirestoreError(error, OperationType.CREATE, logPath);
-      }
-    },
-    [activeConfig.label, currentAccount, effectiveRoleId]
-  );
-
-  const recordInputLogsBatch = useCallback(
-    async (
-      items: Array<{
-        actionType: InputLogActionType;
-        pic: string;
-        outlet: string;
-        day: string;
-        details: string;
-        itemCount: number;
-        clientTs: string;
-        taskKey?: string;
-        prevDate?: string;
-        newDate?: string;
-        prevNote?: string;
-        newNote?: string;
-        action?: InputLogItemAction;
-      }>
-    ) => {
-      if (items.length === 0) return;
-      const uid = auth.currentUser?.uid;
-      const email = (currentAccount?.email || auth.currentUser?.email || '').trim().toLowerCase();
-      if (!uid || !email || !currentAccount) return;
-
-      const batch = writeBatch(db);
-      const baseTs = Date.now();
-      items.forEach((params, idx) => {
-        const logId = `${baseTs}_${idx}_${Math.random().toString(36).slice(2, 8)}`;
-        batch.set(doc(db, 'inputLogs', logId), {
-          uid,
-          userEmail: email.slice(0, 120),
-          userName: (currentAccount.name || email).slice(0, 80),
-          userRole: currentAccount.role,
-          roleId: effectiveRoleId,
-          roleLabel: (activeConfig.label || effectiveRoleId).slice(0, 60),
-          actionType: params.actionType,
-          pic: params.pic.slice(0, 60),
-          outlet: params.outlet.slice(0, 120),
-          day: params.day.slice(0, 10),
-          details: params.details.slice(0, 600),
-          itemCount: Math.max(1, Math.min(50, Math.round(params.itemCount))),
-          clientTs: params.clientTs.slice(0, 40),
-          ...(params.taskKey !== undefined ? { taskKey: params.taskKey.slice(0, 40) } : {}),
-          ...(params.prevDate !== undefined ? { prevDate: params.prevDate.slice(0, 20) } : {}),
-          ...(params.newDate !== undefined ? { newDate: params.newDate.slice(0, 20) } : {}),
-          ...(params.prevNote !== undefined ? { prevNote: params.prevNote.slice(0, 100) } : {}),
-          ...(params.newNote !== undefined ? { newNote: params.newNote.slice(0, 100) } : {}),
-          ...(params.action !== undefined ? { action: params.action } : {}),
-          createdAt: serverTimestamp(),
-        });
-      });
-
-      try {
-        await batch.commit();
-      } catch (error) {
-        handleFirestoreError(error, OperationType.CREATE, 'inputLogs');
-      }
-    },
-    [activeConfig.label, currentAccount, effectiveRoleId]
-  );
-
   const updateEntry = useCallback(
     async (outlet: string, day: string, taskKey: string, field: 'd' | 'n', value: string) => {
       const uid = auth.currentUser?.uid;
@@ -219,6 +105,7 @@ export function useWorkspaceEntryActions({
       const docId = `${effectiveRoleId}_${monthKey}`;
       const path = `roleMonthlyWorkspaces/${docId}`;
       const wsRef = doc(db, 'roleMonthlyWorkspaces', docId);
+      const email = (currentAccount?.email || auth.currentUser?.email || '').trim().toLowerCase();
       try {
         const existing = workspaceData.ent[outlet]?.[`${day}|${taskKey}`];
         const fallbackDate = getEntry(
@@ -229,13 +116,17 @@ export function useWorkspaceEntryActions({
           day,
           taskKey
         ).d;
+        const nowIso = new Date().toISOString();
         const nextEntry: EntryItem = {
           d: existing?.d || fallbackDate,
           n: (existing?.n || '').slice(0, 100),
-          ts: new Date().toISOString(),
+          ts: nowIso,
           ...(isAdminAccount ? { byAdmin: true } : {}),
           [field]: safeValue,
         };
+        const label = taskDef?.shortLabel || taskDef?.label || taskKey;
+        const action: InputLogItemAction =
+          existing && (existing.d || existing.n) ? 'edit' : 'set';
         await runTransaction(db, async (tx) => {
           const snap = await tx.get(wsRef);
           if (!snap.exists()) {
@@ -262,6 +153,35 @@ export function useWorkspaceEntryActions({
               uid
             );
           }
+
+          if (email && currentAccount) {
+            const logId = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+            tx.set(doc(db, 'inputLogs', logId), {
+              uid,
+              userEmail: email.slice(0, 120),
+              userName: (currentAccount.name || email).slice(0, 80),
+              userRole: currentAccount.role,
+              roleId: effectiveRoleId,
+              roleLabel: (activeConfig.label || effectiveRoleId).slice(0, 60),
+              actionType: 'input_harian',
+              pic: outletOwner.slice(0, 60),
+              outlet: outlet.slice(0, 120),
+              day: day.slice(0, 10),
+              details: `${label}: ${nextEntry.d || '-'}${nextEntry.n ? ` (${nextEntry.n})` : ''}`.slice(
+                0,
+                600
+              ),
+              itemCount: 1,
+              clientTs: nowIso.slice(0, 40),
+              taskKey: taskKey.slice(0, 40),
+              prevDate: (existing?.d || '').slice(0, 20),
+              newDate: (nextEntry.d || '').slice(0, 20),
+              prevNote: (existing?.n || '').slice(0, 100),
+              newNote: (nextEntry.n || '').slice(0, 100),
+              action,
+              createdAt: serverTimestamp(),
+            });
+          }
         });
       } catch (error) {
         handleFirestoreError(error, OperationType.UPDATE, path);
@@ -273,6 +193,7 @@ export function useWorkspaceEntryActions({
       isAdminAccount,
       workspaceData,
       days,
+      activeConfig.label,
       activeConfig.tasks,
       activeConfig.outlets,
       canAccessMonthForWrite,
@@ -346,64 +267,9 @@ export function useWorkspaceEntryActions({
         }
       }
 
-      const docId = `${effectiveRoleId}_${monthKey}`;
-      const path = `roleMonthlyWorkspaces/${docId}`;
-      const wsRef = doc(db, 'roleMonthlyWorkspaces', docId);
-      const nowIso = new Date().toISOString();
-      try {
-        await runTransaction(db, async (tx) => {
-          const snap = await tx.get(wsRef);
-          if (!snap.exists()) {
-            const initialOutletEnt: Record<string, EntryItem> = {};
-            for (const [taskKey, item] of entries) {
-              const cleanDate = (item.d || '').trim();
-              const cleanNote = (item.n || '').slice(0, 100);
-              if (!item.cleared && (cleanDate || cleanNote)) {
-                initialOutletEnt[`${day}|${taskKey}`] = {
-                  d: cleanDate,
-                  n: cleanNote,
-                  ts: nowIso,
-                  ...(isAdminAccount ? { byAdmin: true } : {}),
-                };
-              }
-            }
-            tx.set(wsRef, {
-              roleId: effectiveRoleId,
-              monthKey,
-              ent: Object.keys(initialOutletEnt).length > 0 ? { [outlet]: initialOutletEnt } : {},
-              visit: {},
-              updatedAt: serverTimestamp(),
-              updatedBy: uid,
-            });
-          } else {
-            const updateArgs: unknown[] = [];
-            for (const [taskKey, item] of entries) {
-              const cleanDate = (item.d || '').trim();
-              const cleanNote = (item.n || '').slice(0, 100);
-              if (item.cleared || (!cleanDate && !cleanNote)) {
-                updateArgs.push(new FieldPath('ent', outlet, `${day}|${taskKey}`), deleteField());
-              } else {
-                updateArgs.push(new FieldPath('ent', outlet, `${day}|${taskKey}`), {
-                  d: cleanDate,
-                  n: cleanNote,
-                  ts: nowIso,
-                  ...(isAdminAccount ? { byAdmin: true } : {}),
-                });
-              }
-            }
-            updateArgs.push('updatedAt', serverTimestamp(), 'updatedBy', uid);
-            tx.update(
-              wsRef,
-              ...(updateArgs as [FieldPath | string, unknown, ...unknown[]])
-            );
-          }
-        });
-      } catch (error) {
-        handleFirestoreError(error, OperationType.UPDATE, path);
-      }
-
       const assignedPic =
         activeConfig.outlets.find((o) => o.code === outlet)?.person || '';
+      const nowIso = new Date().toISOString();
       const perItemLogs = entries.map(([taskKey, item]) => {
         const taskDef = activeConfig.tasks.find((t) => t.key === taskKey);
         const label = taskDef?.shortLabel || taskDef?.label || taskKey;
@@ -451,10 +317,89 @@ export function useWorkspaceEntryActions({
         };
       });
 
+      const docId = `${effectiveRoleId}_${monthKey}`;
+      const path = `roleMonthlyWorkspaces/${docId}`;
+      const wsRef = doc(db, 'roleMonthlyWorkspaces', docId);
+      const email = (currentAccount?.email || auth.currentUser?.email || '').trim().toLowerCase();
       try {
-        await recordInputLogsBatch(perItemLogs);
-      } catch (logError) {
-        console.error('Gagal mencatat log input harian (data utama tetap tersimpan):', logError);
+        await runTransaction(db, async (tx) => {
+          const snap = await tx.get(wsRef);
+          if (!snap.exists()) {
+            const initialOutletEnt: Record<string, EntryItem> = {};
+            for (const [taskKey, item] of entries) {
+              const cleanDate = (item.d || '').trim();
+              const cleanNote = (item.n || '').slice(0, 100);
+              if (!item.cleared && (cleanDate || cleanNote)) {
+                initialOutletEnt[`${day}|${taskKey}`] = {
+                  d: cleanDate,
+                  n: cleanNote,
+                  ts: nowIso,
+                  ...(isAdminAccount ? { byAdmin: true } : {}),
+                };
+              }
+            }
+            tx.set(wsRef, {
+              roleId: effectiveRoleId,
+              monthKey,
+              ent: Object.keys(initialOutletEnt).length > 0 ? { [outlet]: initialOutletEnt } : {},
+              visit: {},
+              updatedAt: serverTimestamp(),
+              updatedBy: uid,
+            });
+          } else {
+            const updateArgs: unknown[] = [];
+            for (const [taskKey, item] of entries) {
+              const cleanDate = (item.d || '').trim();
+              const cleanNote = (item.n || '').slice(0, 100);
+              if (item.cleared || (!cleanDate && !cleanNote)) {
+                updateArgs.push(new FieldPath('ent', outlet, `${day}|${taskKey}`), deleteField());
+              } else {
+                updateArgs.push(new FieldPath('ent', outlet, `${day}|${taskKey}`), {
+                  d: cleanDate,
+                  n: cleanNote,
+                  ts: nowIso,
+                  ...(isAdminAccount ? { byAdmin: true } : {}),
+                });
+              }
+            }
+            updateArgs.push('updatedAt', serverTimestamp(), 'updatedBy', uid);
+            tx.update(
+              wsRef,
+              ...(updateArgs as [FieldPath | string, unknown, ...unknown[]])
+            );
+          }
+
+          if (email && currentAccount) {
+            const baseTs = Date.now();
+            perItemLogs.forEach((params, idx) => {
+              const logId = `${baseTs}_${idx}_${Math.random().toString(36).slice(2, 8)}`;
+              tx.set(doc(db, 'inputLogs', logId), {
+                uid,
+                userEmail: email.slice(0, 120),
+                userName: (currentAccount.name || email).slice(0, 80),
+                userRole: currentAccount.role,
+                roleId: effectiveRoleId,
+                roleLabel: (activeConfig.label || effectiveRoleId).slice(0, 60),
+                actionType: params.actionType,
+                pic: params.pic.slice(0, 60),
+                outlet: params.outlet.slice(0, 120),
+                day: params.day.slice(0, 10),
+                details: params.details.slice(0, 600),
+                itemCount: Math.max(1, Math.min(50, Math.round(params.itemCount))),
+                clientTs: params.clientTs.slice(0, 40),
+                ...(params.taskKey !== undefined ? { taskKey: params.taskKey.slice(0, 40) } : {}),
+                ...(params.prevDate !== undefined ? { prevDate: params.prevDate.slice(0, 20) } : {}),
+                ...(params.newDate !== undefined ? { newDate: params.newDate.slice(0, 20) } : {}),
+                ...(params.prevNote !== undefined ? { prevNote: params.prevNote.slice(0, 100) } : {}),
+                ...(params.newNote !== undefined ? { newNote: params.newNote.slice(0, 100) } : {}),
+                ...(params.action !== undefined ? { action: params.action } : {}),
+                createdAt: serverTimestamp(),
+              });
+            });
+          }
+        });
+      } catch (error) {
+        handleFirestoreError(error, OperationType.UPDATE, path);
       }
     },
     [
@@ -462,10 +407,10 @@ export function useWorkspaceEntryActions({
       effectiveRoleId,
       isAdminAccount,
       workspaceData,
+      activeConfig.label,
       activeConfig.tasks,
       activeConfig.outlets,
       days,
-      recordInputLogsBatch,
       canAccessMonthForWrite,
     ]
   );
@@ -573,11 +518,25 @@ export function useWorkspaceEntryActions({
         entries: nextVisitInput.ok ? normalizedEntries : [],
       };
 
+      const uniqueOutlets = Array.from(
+        new Set((normalizedVisit.entries || []).map((e) => e.outlet).filter(Boolean))
+      );
+      const visitSummary = normalizedVisit.ok
+        ? (normalizedVisit.entries || [])
+            .map((e, idx) => {
+              const timeStr = e.f || e.t ? ` (${e.f || '?'}–${e.t || '?'})` : '';
+              const noteStr = e.n ? `: ${e.n}` : '';
+              return `#${idx + 1} ${e.outlet || 'Outlet'}${timeStr}${noteStr}`;
+            })
+            .join(' · ') || 'Sudah dikunjungi'
+        : 'Status kunjungan dibatalkan / tidak dikunjungi';
+
       const docId = `${effectiveRoleId}_${monthKey}`;
       const path = `roleMonthlyWorkspaces/${docId}`;
       const wsRef = doc(db, 'roleMonthlyWorkspaces', docId);
       const nowIso = new Date().toISOString();
       const key = `${person}|${day}`;
+      const email = (currentAccount?.email || auth.currentUser?.email || '').trim().toLowerCase();
 
       try {
         await runTransaction(db, async (tx) => {
@@ -602,39 +561,34 @@ export function useWorkspaceEntryActions({
               uid
             );
           }
+
+          if (email && currentAccount) {
+            const logId = `${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+            tx.set(doc(db, 'inputLogs', logId), {
+              uid,
+              userEmail: email.slice(0, 120),
+              userName: (currentAccount.name || email).slice(0, 80),
+              userRole: currentAccount.role,
+              roleId: effectiveRoleId,
+              roleLabel: (activeConfig.label || effectiveRoleId).slice(0, 60),
+              actionType: 'kunjungan',
+              pic: person.slice(0, 60),
+              outlet: (uniqueOutlets.join(', ') || '-').slice(0, 120),
+              day: day.slice(0, 10),
+              details: visitSummary.slice(0, 600),
+              itemCount: normalizedVisit.ok
+                ? Math.max(1, Math.min(50, (normalizedVisit.entries || []).length))
+                : 1,
+              clientTs: nowIso.slice(0, 40),
+              createdAt: serverTimestamp(),
+            });
+          }
         });
       } catch (error) {
         handleFirestoreError(error, OperationType.UPDATE, path);
       }
-
-      const uniqueOutlets = Array.from(
-        new Set((normalizedVisit.entries || []).map((e) => e.outlet).filter(Boolean))
-      );
-      const visitSummary = normalizedVisit.ok
-        ? (normalizedVisit.entries || [])
-            .map((e, idx) => {
-              const timeStr = e.f || e.t ? ` (${e.f || '?'}–${e.t || '?'})` : '';
-              const noteStr = e.n ? `: ${e.n}` : '';
-              return `#${idx + 1} ${e.outlet || 'Outlet'}${timeStr}${noteStr}`;
-            })
-            .join(' · ') || 'Sudah dikunjungi'
-        : 'Status kunjungan dibatalkan / tidak dikunjungi';
-
-      try {
-        await recordInputLog({
-          actionType: 'kunjungan',
-          pic: person,
-          outlet: uniqueOutlets.join(', ') || '-',
-          day,
-          details: visitSummary,
-          itemCount: normalizedVisit.ok ? Math.max(1, (normalizedVisit.entries || []).length) : 1,
-          clientTs: nowIso,
-        });
-      } catch (logError) {
-        console.error('Gagal mencatat log kunjungan (data kunjungan tetap tersimpan):', logError);
-      }
     },
-    [currentAccount, activeConfig.outlets, effectiveRoleId, canAccessMonthForWrite, recordInputLog]
+    [currentAccount, activeConfig.label, activeConfig.outlets, effectiveRoleId, canAccessMonthForWrite]
   );
 
   const updateVisit = useCallback(

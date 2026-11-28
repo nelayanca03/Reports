@@ -3,17 +3,58 @@ import path from 'node:path';
 
 const rootDir = path.resolve(import.meta.dirname, '..');
 const configPath = path.join(rootDir, 'app.config.json');
+const appletConfigPath = path.join(rootDir, 'firebase-applet-config.json');
+const firebaseJsonPath = path.join(rootDir, 'firebase.json');
 const rulesPath = path.join(rootDir, 'firestore.rules');
 const specPath = path.join(rootDir, 'security_spec.md');
 
 const appConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-const ownerEmail = String(appConfig.ownerEmail || '')
+const envOwnerEmail = String(process.env.VITE_OWNER_EMAIL || '')
+  .trim()
+  .toLowerCase();
+const ownerEmail = (envOwnerEmail || String(appConfig.ownerEmail || ''))
   .trim()
   .toLowerCase();
 
 if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(ownerEmail)) {
-  console.error(`Invalid ownerEmail in app.config.json: "${ownerEmail}"`);
+  console.error(`Invalid ownerEmail: "${ownerEmail}"`);
   process.exit(1);
+}
+
+if (appConfig.ownerEmail !== ownerEmail) {
+  appConfig.ownerEmail = ownerEmail;
+  fs.writeFileSync(configPath, `${JSON.stringify(appConfig, null, 2)}\n`, 'utf8');
+  console.log(`Updated app.config.json ownerEmail -> ${ownerEmail}`);
+}
+
+if (fs.existsSync(appletConfigPath)) {
+  const appletConfig = JSON.parse(fs.readFileSync(appletConfigPath, 'utf8'));
+  const dbId = String(appletConfig.firestoreDatabaseId || '').trim();
+  if (dbId && dbId !== '(default)') {
+    const desiredFirebaseJson = `${JSON.stringify(
+      {
+        firestore: [
+          {
+            database: '(default)',
+            rules: 'firestore.rules',
+          },
+          {
+            database: dbId,
+            rules: 'firestore.rules',
+          },
+        ],
+      },
+      null,
+      2
+    )}\n`;
+    const currentFirebaseJson = fs.existsSync(firebaseJsonPath)
+      ? fs.readFileSync(firebaseJsonPath, 'utf8')
+      : '';
+    if (currentFirebaseJson !== desiredFirebaseJson) {
+      fs.writeFileSync(firebaseJsonPath, desiredFirebaseJson, 'utf8');
+      console.log(`Updated firebase.json database target -> ${dbId}`);
+    }
+  }
 }
 
 const rulesOriginal = fs.readFileSync(rulesPath, 'utf8');

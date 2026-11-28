@@ -1,5 +1,12 @@
 {
-  "firestore": {
-    "rules": "firestore.rules"
-  }
+  "firestore": [
+    {
+      "database": "(default)",
+      "rules": "firestore.rules"
+    },
+    {
+      "database": "ai-studio-updateharianoutl-2368a445-9e15-4529-9ae6-aeafefeb14d6",
+      "rules": "firestore.rules"
+    }
+  ]
 }
